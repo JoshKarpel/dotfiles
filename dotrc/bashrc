@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 
-# don't keep duplicates in history
-export HISTCONTROL=erasedups
-# store 10k history entries
+# history file
+export HISTCONTROL=ignoreboth
 export HISTSIZE=10000
-# append to history instead of overwriting
+export HISTFILESIZE=100000
 shopt -s histappend
 
 # set LINES and COLUMNS after every command

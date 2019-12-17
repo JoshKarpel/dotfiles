@@ -1,0 +1,15 @@
+$include /etc/inputrc
+
+set colored-stats on
+set completion-ignore-case on
+set show-all-if-ambiguous on
+
+set bell-style visible
+
+# incremental history search with up/down arrow keys
+"\e[A": history-search-backward
+"\e[B": history-search-forward
+
+# left/right arrow keys move cursor left and right
+"\e[C": forward-char
+"\e[D": backward-char
