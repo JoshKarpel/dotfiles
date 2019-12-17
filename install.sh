@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-set -eu
-set -o pipefail
+set -e
 
 function exists_and_not_symlink() {
   [[ (-f $1) && (! -L $1) ]]
