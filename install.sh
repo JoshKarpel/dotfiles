@@ -34,12 +34,12 @@ done
 
 source ~/.bashrc
 
+MINICONDA_INSTALLER_PATH=~/miniconda-installer.sh
 # install miniconda
 function install_miniconda() {
   bar
-  curl https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -sSf -o ~/miniconda-installer.sh
+  curl https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -sSf -o $MINICONDA_INSTALLER_PATH
   bash ~/miniconda-installer.sh -b -p ~/.python
-  rm ~/miniconda-installer.sh
   bar
 }
 
@@ -49,6 +49,9 @@ else
   echo "  installing miniconda"
   install_miniconda
 fi
+
+# cleanup from miniconda install
+[[ -f $MINICONDA_INSTALLER_PATH ]] && rm $MINICONDA_INSTALLER_PATH
 
 # install rust
 function install_rust() {
