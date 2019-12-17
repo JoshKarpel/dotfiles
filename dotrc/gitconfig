@@ -1,0 +1,5 @@
+[diff]
+[color]
+    ui = auto
+[alias]
+    amend = commit --amend
