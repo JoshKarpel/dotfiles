@@ -81,7 +81,7 @@ source ~/.bashrc
 function update_ruby() {
   bar
   version="$(rbenv install -l | grep -v - | tail -1)"
-  rbenv install "$version"
+  rbenv install -s "$version"
   rbenv global "$version"
   bar
 }

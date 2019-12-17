@@ -10,6 +10,11 @@ shopt -s histappend
 # set LINES and COLUMNS after every command
 shopt -s checkwinsize
 
+# utf-8 everywhere
+export LC_ALL=en_US.UTF-8
+export LANG=en_US.UTF-8
+export LANGUAGE=en_US.UTF-8
+
 DOTFILES=$(realpath ~/dotfiles)
 for file in $DOTFILES/{sources,functions}/*; do
     [[ -f $file ]] && source $file
