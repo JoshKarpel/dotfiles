@@ -23,7 +23,6 @@ if [[ -f $BASHRC_LOCAL ]]; then
 fi
 
 path_prefix ~/.cargo/bin
-path_prefix ~/.python/bin
 
 # >>> conda initialize >>>
 # !! Contents within this block are managed by 'conda init' !!
