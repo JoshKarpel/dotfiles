@@ -36,7 +36,7 @@ MINICONDA_INSTALLER_PATH=~/miniconda-installer.sh
 # install miniconda
 function install_miniconda() {
   bar
-  curl https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -sSf -o $MINICONDA_INSTALLER_PATH
+  curl https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -fsSL -o $MINICONDA_INSTALLER_PATH
   bash ~/miniconda-installer.sh -b -p ~/.python
   bar
 }
@@ -53,20 +53,46 @@ fi
 
 source ~/.bashrc
 
-function update_base_conda() {
+function update_conda() {
   bar
-  conda update --all -y
+  conda update -n base --all -y
   conda clean --all -y
   bar
 }
 
-echo "  updating base conda and cleaning"
-update_base_conda
+echo "    updating base conda and cleaning"
+update_conda
+
+function install_rbenv() {
+  bar
+  curl https://github.com/rbenv/rbenv-installer/raw/master/bin/rbenv-installer -fsSL | bash
+  bar
+}
+
+if exists rbenv; then
+  echo "  rbenv already installed"
+else
+  echo "  installing rbenv"
+  install_rbenv
+fi
+
+source ~/.bashrc
+
+function update_ruby() {
+  bar
+  version="$(rbenv install -l | grep -v - | tail -1)"
+  rbenv install "$version"
+  rbenv global "$version"
+  bar
+}
+
+echo "    updating default ruby version"
+update_ruby
 
 # install rust
 function install_rust() {
   bar
-  curl https://sh.rustup.rs -sSf | bash -s -- -y --no-modify-path
+  curl https://sh.rustup.rs -fsSL | bash -s -- -y --no-modify-path
   bar
 }
 
@@ -83,7 +109,7 @@ echo "  installing cargo packages"
 function install_cargo_packages() {
   bar
   cargo install $(cat "$BASEDIR/cargo_install_targets.txt" | xargs)
-  cargo install-update
+  cargo install-update --all
   bar
 }
 

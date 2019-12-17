@@ -22,8 +22,6 @@ if [[ -f $BASHRC_LOCAL ]]; then
     source $BASHRC_LOCAL
 fi
 
-path_prefix ~/.cargo/bin
-
 # >>> conda initialize >>>
 # !! Contents within this block are managed by 'conda init' !!
 __conda_setup="$('~/.python/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"
@@ -33,8 +31,14 @@ else
     if [ -f "~/.python/etc/profile.d/conda.sh" ]; then
         . "~/.python/etc/profile.d/conda.sh"
     else
-        export PATH="~/.python/bin:$PATH"
+        path_prefix ~/.python/bin
     fi
 fi
 unset __conda_setup
 # <<< conda initialize <<<
+
+path_prefix ~/.rbenv/bin
+eval "$(rbenv init -)"
+
+path_prefix ~/.cargo/bin
+
