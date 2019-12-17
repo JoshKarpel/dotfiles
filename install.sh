@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-set -e
-
 function exists_and_not_symlink() {
   [[ (-f $1) && (! -L $1) ]]
 }
@@ -53,6 +51,18 @@ fi
 # cleanup from miniconda install
 [[ -f $MINICONDA_INSTALLER_PATH ]] && rm $MINICONDA_INSTALLER_PATH
 
+source ~/.bashrc
+
+function update_base_conda() {
+  bar
+  conda update --all -y
+  conda clean --all -y
+  bar
+}
+
+echo "  updating base conda and cleaning"
+update_base_conda
+
 # install rust
 function install_rust() {
   bar
@@ -66,5 +76,17 @@ else
   echo "  installing rust"
   install_rust
 fi
+
+source ~/.bashrc
+
+echo "  installing cargo packages"
+function install_cargo_packages() {
+  bar
+  cargo install $(cat "$BASEDIR/cargo_install_targets.txt" | xargs)
+  cargo install-update
+  bar
+}
+
+install_cargo_packages
 
 source ~/.bashrc

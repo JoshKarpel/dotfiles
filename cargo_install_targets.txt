@@ -1,0 +1,6 @@
+cargo-update
+tokei
+ripgrep
+bat
+fd
+hyperfine
