@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+# don't keep duplicates in history
+export HISTCONTROL=erasedups
+# store 10k history entries
+export HISTSIZE=10000
+# append to history instead of overwriting
+shopt -s histappend
+
+# set LINES and COLUMNS after every command
+shopt -s checkwinsize
+
+DOTFILES=$(realpath ~/dotfiles)
+for file in $DOTFILES/{sources,functions}/*; do
+    [[ -f $file ]] && source $file
+done
+
+path_prefix $DOTFILES/bin
+
+BASHRC_LOCAL=~/.bashrc_local
+if [[ -f $BASHRC_LOCAL ]]; then
+    source $BASHRC_LOCAL
+fi
+
+path_prefix ~/.cargo/bin
+path_prefix ~/.python/bin

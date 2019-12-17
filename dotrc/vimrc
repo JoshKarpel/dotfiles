@@ -1,0 +1,43 @@
+colorscheme default
+
+" history
+set history=10000
+
+" tabs
+set tabstop=4
+set shiftwidth=4
+set expandtab
+set softtabstop=4
+
+set number
+set nocursorline
+
+syntax on
+
+set laststatus=2
+set showtabline=2
+set showmode
+set showcmd
+
+set autoindent
+filetype plugin indent on
+
+set showmatch
+set incsearch
+set hlsearch
+set ignorecase smartcase
+
+set shell=bash
+
+set encoding=utf-8
+
+set t_Co=256
+
+" e.g., can backspace up a line
+set backspace=indent,eol,start
+
+" no folding
+set foldmethod=manual
+set nofoldenable
+
+set completeopt=menu,preview
