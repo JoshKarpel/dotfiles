@@ -8,8 +8,7 @@ BASEDIR="$(dirname "$(realpath -s "$0")")"
 
 echo dotfile directory is $BASEDIR
 
-BACKUPS=~/dotfiles-backup
-mkdir -p $BACKUPS
+BACKUPS=~/.dotfiles-backups
 
 # make symlinks in the home dir for each files in dotrc
 echo "  creating symlinks in home dir for files in dotrc"
@@ -21,6 +20,7 @@ for file in $DOTRC/*; do
   target=~/."$(basename "$file")"
 
   if exists_and_not_symlink $target; then
+    mkdir -p $BACKUPS
     backup=$BACKUPS/"$(basename "$target")"
     echo "    moving existing file $target to $backup"
     mv $target $backup
