@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 function update() {
-  git -C="$(realpath ~/dotfiles/.git)" pull
+  (cd ~/dotfiles/ || exit 1; git pull)
   bash ~/dotfiles/install.sh
   source ~/.bashrc
 }
