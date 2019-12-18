@@ -42,7 +42,7 @@ unset __conda_setup
 # <<< conda initialize <<<
 
 path_prefix ~/.rbenv/bin
-if exists ruby; then
+if exists rbenv; then
     eval "$(rbenv init -)"
 fi
 
