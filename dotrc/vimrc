@@ -1,4 +1,4 @@
-colorscheme default
+colorscheme elflord
 
 " history
 set history=10000
