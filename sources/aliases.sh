@@ -10,6 +10,7 @@ alias la="ls -lFha"
 
 # conda
 alias ca="conda activate"
-alias cu="conda update --all -y"
+alias cu="conda update -y --all"
 alias ci="conda install -y"
 alias cn="conda create -y -n"
+alias cla="conda clean -y --all"

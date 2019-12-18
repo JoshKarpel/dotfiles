@@ -13,8 +13,9 @@ function install_conda() {
 
 function update_conda() {
   bar
-  conda update -n base --all -y
-  conda clean --all -y
+  conda install -y -n base $(cat "$BASEDIR/conda_install_targets.txt" | xargs)
+  conda update -y --all -n base
+  conda clean -y --all
   bar
 }
 
