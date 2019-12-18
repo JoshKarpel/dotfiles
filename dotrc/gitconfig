@@ -12,4 +12,4 @@
     unstage = reset head --
     last = log -1 HEAD
 
-    l = "!bash -c 'source ~/dotfiles/functions/git.sh && pretty_git_log'"
+    l = !bash -c \"source ~/dotfiles/functions/git.sh && pretty_git_log $*\"
