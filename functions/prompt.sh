@@ -6,9 +6,9 @@ function __get_prompt_colors() {
   done
 }
 
-prompt_colors=($(__get_prompt_colors))
-
 function prompt() {
+  prompt_colors=($(__get_prompt_colors))
+
   local j=""
   if [[ -n "$(jobs)" ]]; then
     local j=" ${prompt_colors[3]}(\j)${RESET}"

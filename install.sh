@@ -61,7 +61,6 @@ BACKUPS=~/.dotfiles-backups
 
 echo "  creating symlinks in home dir for files in dotrc"
 DOTRC=$BASEDIR/dotrc
-echo "    dotrc directory is $DOTRC"
 for file in $DOTRC/*; do
   [[ -f $file ]] || continue
 
@@ -74,7 +73,7 @@ for file in $DOTRC/*; do
     mv $target $backup
   fi
 
-  echo "    making symlink: $target -> $file"
+  echo "    $target -> $file"
   ln -sf $file "$target"
 done
 
