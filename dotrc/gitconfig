@@ -1,5 +1,15 @@
+[core]
+    editor = vim
 [diff]
 [color]
     ui = auto
 [alias]
+    st = status
+    br = branch
+    co = checkout
+    cm = commit --message
     amend = commit --amend
+    unstage = reset head --
+    last = log -1 HEAD
+
+    l = "!bash -c 'source ~/dotfiles/functions/git.sh && pretty_git_log'"
