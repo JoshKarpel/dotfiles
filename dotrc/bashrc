@@ -19,6 +19,8 @@ for file in $DOTFILES/{sources,functions}/*; do
     [[ -f $file ]] && source $file
 done
 
+export PROMPT_COMMAND='export PS1=$(prompt)'
+
 path_prefix $DOTFILES/bin
 
 BASHRC_LOCAL=~/.bashrc_local
