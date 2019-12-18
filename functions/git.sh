@@ -12,9 +12,11 @@ function git_repo_is_clean() {
   git diff-index --quiet HEAD
 }
 
-HASH="%C(yellow)%h%C(reset)"
-RELATIVE_TIME="%C(green)%<(15,trunc)%ar%C(reset)"
-AUTHOR="%C(bold blue)%<(15,trunc)%an%C(reset)"
+# } delimits columns
+# { is the marker for the sed below that cleans up relative times
+HASH="%C(cyan)%h%C(reset)"
+RELATIVE_TIME="%C(bold green)%ar{%C(reset)"
+AUTHOR="%C(bold cyan)%an%C(reset)"
 REFS="%C(bold red)%d%C(reset)"
 SUBJECT="%s"
 
@@ -22,8 +24,19 @@ FORMAT="}$HASH}$RELATIVE_TIME}$AUTHOR}$REFS $SUBJECT"
 
 function pretty_git_log() {
   git --no-pager log --color=always --pretty=tformat:"$FORMAT" --graph $* |
+    clean_relative_times |
     column -t -s '}' |
     git_page_maybe
+}
+
+# replace 2 years ago} with 2 years{
+REMOVE_AGO='s/(^[^<]*) ago\{/\1{/'
+# replace 2 years, 5 months{ with 2 years{
+REMOVE_MONTHS='s/(^[^<]*), [[:digit:]]+ .*months?\{/\1{/'
+# strip the } from the final output
+REMOVE_PARENS='s/\{//g'
+function clean_relative_times() {
+  sed -E -e "$REMOVE_AGO" -e "$REMOVE_MONTHS" -e "$REMOVE_PARENS"
 }
 
 function git_page_maybe() {
