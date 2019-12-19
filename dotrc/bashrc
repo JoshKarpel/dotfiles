@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 
-# history file
+# start with anything provided by the system admin
+if [ -f /etc/bashrc ]; then
+  source /etc/bashrc
+fi
+
+# if not running interactively, don't do anything
+case $- in
+*i*) ;;
+*) return ;;
+esac
+
+# history file config
 export HISTCONTROL=ignoreboth
 export HISTSIZE=10000
 export HISTFILESIZE=100000
@@ -9,48 +20,71 @@ shopt -s histappend
 # set LINES and COLUMNS after every command
 shopt -s checkwinsize
 
+# enable bash completion
+if [ -f /usr/share/bash-completion/bash_completion ]; then
+  . /usr/share/bash-completion/bash_completion
+elif [ -f /etc/bash_completion ]; then
+  . /etc/bash_completion
+fi
+
 # utf-8 everywhere
 export LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
 export LANGUAGE=en_US.UTF-8
 
+# set default editor
 export EDITOR=$(which vim)
 
+# pretty display for the ninja build system
 export NINJA_STATUS="%es [%u -> %r -> %f/%t] "
 
+# make less more friendly for non-text input files, see lesspipe(1)
+[ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
+
+# source everything in dotfiles/sources and dotfiles/functions
 DOTFILES=$(realpath ~/dotfiles)
 for file in $DOTFILES/{sources,functions}/*; do
-    [[ -f $file ]] && source $file
+  [[ -f $file ]] && source $file
 done
 
-export PROMPT_COMMAND='export PS1=$(prompt)'
-
+# add dotfiles/bin to path so we can use the functions there
 path_prefix $DOTFILES/bin
 
-BASHRC_LOCAL=~/.bashrc_local
-if [[ -f $BASHRC_LOCAL ]]; then
-    source $BASHRC_LOCAL
+# evaluate the prompt function from dotfiles/sources/prompt.sh to build the prompt
+export PROMPT_COMMAND='export PS1=$(prompt)'
+
+# if we have bat, prefer that to cat
+if exists bat; then
+  alias cat='bat'
 fi
 
 # >>> conda initialize >>>
 # !! Contents within this block are managed by 'conda init' !!
-__conda_setup="$('~/.python/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"
+# ... but modified by me
+__conda_setup="$('$HOME/.python/bin/conda' 'shell.bash' 'hook' 2>/dev/null)"
 if [ $? -eq 0 ]; then
-    eval "$__conda_setup"
+  eval "$__conda_setup"
 else
-    if [ -f "~/.python/etc/profile.d/conda.sh" ]; then
-        . "~/.python/etc/profile.d/conda.sh"
-    else
-        path_prefix ~/.python/bin
-    fi
+  if [ -f "$HOME/.python/etc/profile.d/conda.sh" ]; then
+    source "$HOME/.python/etc/profile.d/conda.sh"
+  else
+    path_prefix ~/.python/bin
+  fi
 fi
 unset __conda_setup
 # <<< conda initialize <<<
 
+# ruby environment
 path_prefix ~/.rbenv/bin
 if exists rbenv; then
-    eval "$(rbenv init -)"
+  eval "$(rbenv init -)"
 fi
 
+# rust environment
 path_prefix ~/.cargo/bin
 
+# add any local config, letting it overwrite if necessary
+BASHRC_LOCAL=~/.bashrc_local
+if [[ -f $BASHRC_LOCAL ]]; then
+  source $BASHRC_LOCAL
+fi

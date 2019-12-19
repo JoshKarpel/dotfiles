@@ -6,5 +6,5 @@ function mk() {
     return 1
   }
 
-  mkdir -p "$1" && cd "$1" || return 1
+  mkdir -v -p "$1" && cd "$1" || return 1
 }

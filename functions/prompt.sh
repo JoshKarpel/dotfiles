@@ -7,11 +7,18 @@ function __get_prompt_colors() {
 }
 
 function prompt() {
+  local last_command=$? # must come first!
+
   prompt_colors=($(__get_prompt_colors))
 
-  local j=""
-  local g=""
   local dir="\w"
+  local g=""
+  local j=""
+  local e=""
+
+  if [[ $last_command != 0 ]]; then
+  local e=" ${prompt_colors[5]}${BOLD}[${last_command}]${RESET}"
+    fi
 
   if [[ -n "$(jobs)" ]]; then
     local j=" ${prompt_colors[3]}(\j)${RESET}"
@@ -30,5 +37,6 @@ function prompt() {
     local dir="$(echo "$(git_repo_name)/$dir" | sed s'/\/$//')"
   fi
 
-  echo "${prompt_colors[0]}\h${RESET}:${prompt_colors[1]}$dir${RESET}$g$j \$ ${RESET}"
+
+  echo "${prompt_colors[0]}\h${RESET}:${prompt_colors[1]}$dir${RESET}$g$j$e \$ ${RESET}"
 }

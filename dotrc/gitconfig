@@ -12,7 +12,7 @@
     co = checkout
     cm = commit --message
     amend = commit --amend
-    unstage = reset head --
+    undo = reset --soft HEAD^
     last = log -1 HEAD
 
     l = !bash -c \"source ~/dotfiles/functions/git.sh && pretty_git_log $*\"
