@@ -21,7 +21,7 @@ alias mkdir="mkdir -v -p"
 # cd
 alias ~="cd ~"
 alias ..="cd .."
-alias cd..="cd .."  # typos...
+alias cd..="cd .." # typos...
 
 # ls
 alias ll="ls -lFh"
@@ -33,6 +33,9 @@ alias untar="tar -xvf"
 
 # tree defaults to 5 levels deep
 alias tree="tree -L 5"
+
+# screen
+alias s="screen"
 
 # conda
 alias ca="conda activate"

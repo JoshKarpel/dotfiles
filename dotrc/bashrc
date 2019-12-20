@@ -5,12 +5,6 @@ if [ -f /etc/bashrc ]; then
   source /etc/bashrc
 fi
 
-# if not running interactively, don't do anything
-case $- in
-*i*) ;;
-*) return ;;
-esac
-
 # history file config
 export HISTCONTROL=ignoreboth
 export HISTSIZE=10000
