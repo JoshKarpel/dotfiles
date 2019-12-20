@@ -20,6 +20,9 @@ shopt -s histappend
 # set LINES and COLUMNS after every command
 shopt -s checkwinsize
 
+# save multi-line commands as one command
+shopt -s cmdhist
+
 # enable bash completion
 if [ -f /usr/share/bash-completion/bash_completion ]; then
   . /usr/share/bash-completion/bash_completion
@@ -53,11 +56,6 @@ path_prefix $DOTFILES/bin
 # evaluate the prompt function from dotfiles/sources/prompt.sh to build the prompt
 export PROMPT_COMMAND='export PS1=$(prompt)'
 
-# if we have bat, prefer that to cat
-if exists bat; then
-  alias cat='bat'
-fi
-
 # >>> conda initialize >>>
 # !! Contents within this block are managed by 'conda init' !!
 # ... but modified by me
@@ -82,6 +80,16 @@ fi
 
 # rust environment
 path_prefix ~/.cargo/bin
+
+# prefer bat to cat
+if exists bat; then
+  alias cat='bat'
+fi
+
+# prefer ripgrep to grep
+if exists rg; then
+  alias grep='rg'
+fi
 
 # add any local config, letting it overwrite if necessary
 BASHRC_LOCAL=~/.bashrc_local

@@ -1,2 +1,31 @@
+# editors
 .idea
 .vscode
+
+# compiled files
+*.dll
+*.exe
+*.o
+*.so
+
+# zips
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.war
+*.ear
+*.rar
+*.tar
+*.zip
+
+# python
+*.pyc
+__pycache__
+
+# node
+node_modules
+
+# vim
+*.swp

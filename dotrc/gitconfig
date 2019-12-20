@@ -6,6 +6,9 @@
 [diff]
 [color]
     ui = auto
+    diff = auto
+    status = auto
+    branch = auto
 [alias]
     st = status
     br = branch

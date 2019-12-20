@@ -29,8 +29,7 @@ BG_NULL=00
 export ESC="\033"
 export NORMAL="$ESC[m"
 export RESET="$ESC[${DULL};${FG_WHITE};${BG_NULL}m"
-export BOLD="$ESC[1m"
-export UNDERLINE="$ESC[4m"
+export UNDERLINED="$ESC[4m"
 export REVERSED="$ESC[7m"
 
 export BLACK="$ESC[${DULL};${FG_BLACK}m"

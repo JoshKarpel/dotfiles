@@ -17,7 +17,7 @@ function prompt() {
   local e=""
 
   if [[ $last_command != 0 ]]; then
-  local e=" ${prompt_colors[5]}${BOLD}[${last_command}]${RESET}"
+  local e=" ${prompt_colors[5]}${UNDERLINED}${last_command}${RESET}"
     fi
 
   if [[ -n "$(jobs)" ]]; then
