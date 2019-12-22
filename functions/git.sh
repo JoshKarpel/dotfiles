@@ -22,7 +22,7 @@ SUBJECT="%s"
 
 FORMAT="}$HASH}$RELATIVE_TIME}$AUTHOR}$REFS $SUBJECT"
 
-function pretty_git_log() {
+function git_pretty_log() {
   git --no-pager log --color=never --pretty=tformat:"$FORMAT" --graph $* |
     clean_relative_times |
     column -t -s '}' |

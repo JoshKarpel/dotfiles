@@ -53,12 +53,12 @@ export PROMPT_COMMAND='export PS1=$(prompt)'
 # >>> conda initialize >>>
 # !! Contents within this block are managed by 'conda init' !!
 # ... but modified by me
-__conda_setup="$('~/.python/bin/conda' 'shell.bash' 'hook' 2>/dev/null)"
+__conda_setup="$($HOME/.python/bin/conda 'shell.bash' 'hook' 2>/dev/null)"
 if [ $? -eq 0 ]; then
   eval "$__conda_setup"
 else
-  if [ -f "~/.python/etc/profile.d/conda.sh" ]; then
-    source "~/.python/etc/profile.d/conda.sh"
+  if [ -f "$HOME/.python/etc/profile.d/conda.sh" ]; then
+    source "$HOME/.python/etc/profile.d/conda.sh"
   else
     path_prefix ~/.python/bin
   fi

@@ -6,7 +6,6 @@ function __get_prompt_colors() {
   done
 }
 
-
 function prompt() {
   local last_command=$? # must come first!
 
@@ -16,10 +15,11 @@ function prompt() {
   local g=""
   local j=""
   local e=""
+  local c=""
 
   if [[ $last_command != 0 ]]; then
-  local e=" ${prompt_colors[5]}${UNDERLINED}${last_command}${RESET}"
-    fi
+    local e=" ${prompt_colors[2]}${UNDERLINED}${last_command}${RESET}"
+  fi
 
   if [[ -n "$(jobs)" ]]; then
     local j=" ${prompt_colors[3]}(\j)${RESET}"
@@ -38,6 +38,9 @@ function prompt() {
     local dir="$(echo "$(git_repo_name)/$dir" | sed s'/\/$//')"
   fi
 
+  if [[ $CONDA_DEFAULT_ENV != "base" ]]; then
+    local c=" ${prompt_colors[5]}[$CONDA_DEFAULT_ENV]${RESET}"
+  fi
 
-  echo "${prompt_colors[0]}\h${RESET}:${prompt_colors[1]}$dir${RESET}$g$j$e \$ ${RESET}"
+  echo "${prompt_colors[0]}\h${RESET}:${prompt_colors[1]}$dir${RESET}$g$j$c$e \$ ${RESET}"
 }

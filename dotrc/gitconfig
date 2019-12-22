@@ -13,10 +13,11 @@
     st = status
     br = branch
     co = checkout
+    p = pull
     cm = commit --message
     amend = commit --amend
     undo = reset --soft HEAD^
     last = log -1 HEAD
 
-    l = !bash -c \"source ~/dotfiles/functions/git.sh && pretty_git_log $*\"
+    l = !bash -c \"source ~/dotfiles/functions/git.sh && git_pretty_log $*\"
     r = "!git l -30"

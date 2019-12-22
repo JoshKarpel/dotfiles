@@ -6,7 +6,7 @@ function path_prefix() {
     return 1
   }
 
-  export PATH=$1:$PATH
+  export PATH="$(realpath "$1")":$PATH
 }
 
 function path_postfix() {
@@ -15,7 +15,7 @@ function path_postfix() {
     return 1
   }
 
-  export PATH=$PATH:$1
+  export PATH=$PATH:"$(realpath "$1")"
 }
 
 function path_display() {
