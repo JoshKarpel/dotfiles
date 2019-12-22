@@ -4,12 +4,18 @@ import socket
 import hashlib
 import random
 
-hn = socket.gethostname()
-digest = hashlib.md5(hn.encode("utf-8")).hexdigest()
-seed = int(digest, 16)
-random.seed(seed)
 
-numbers = list(range(6))
-random.shuffle(numbers)
+def main():
+    hn = socket.gethostname()
+    digest = hashlib.md5(hn.encode("utf-8")).hexdigest()
+    seed = int(digest, 16)
+    random.seed(seed)
 
-print(" ".join(str(n) for n in numbers))
+    numbers = list(range(6))
+    random.shuffle(numbers)
+
+    print(" ".join(str(n) for n in numbers))
+
+
+if __name__ == '__main__':
+    main()
