@@ -33,7 +33,7 @@ def main():
         if path.is_file():
             files.append(path)
         elif path.is_dir():
-            files.extend(walk(path))
+            files.extend(collect_files(path))
 
     words = sum(
         (collections.Counter(parse(file)) for file in files), collections.Counter()
@@ -44,10 +44,12 @@ def main():
         print(f"{v:{most}} {k}")
 
 
-def walk(dir):
-    for root, dirs, files in os.walk(dir, topdown=False):
-        for name in files:
-            yield (Path(root) / name).absolute()
+def collect_files(path):
+    for entry in path.iterdir():
+        if entry.is_file():
+            yield entry
+        elif entry.is_dir() and not entry.stem.startswith("."):
+            yield from collect_files(entry)
 
 
 RE_WORDS = re.compile(r"\w+")
