@@ -3,6 +3,7 @@
     email = josh.karpel@gmail.com
 [core]
     editor = vim
+	excludesfile = ~/.gitignore
 [diff]
 [color]
     ui = auto
