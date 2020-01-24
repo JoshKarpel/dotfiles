@@ -36,11 +36,3 @@ alias tree="tree -L 5"
 
 # screen
 alias s="screen"
-
-# conda
-alias ca="conda activate"
-alias cu="conda update -y --all"
-alias ci="conda install -y"
-alias ce="conda env list"
-alias cr="conda env remove -n"
-alias cla="conda clean -y --all"

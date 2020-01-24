@@ -2,4 +2,5 @@ create_default_packages:
   - python
   - pip
   - ipython
+  - black
 changeps1: False
