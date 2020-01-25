@@ -30,7 +30,7 @@ export LANG=en_US.UTF-8
 export LANGUAGE=en_US.UTF-8
 
 # set default editor
-export EDITOR=$(which vim)
+export EDITOR=$(command -v vim)
 
 # pretty display for the ninja build system
 export NINJA_STATUS="%es [%u -> %r -> %f/%t] "
@@ -38,10 +38,16 @@ export NINJA_STATUS="%es [%u -> %r -> %f/%t] "
 # make less more friendly for non-text input files, see lesspipe(1)
 [ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
 
+# default options for less
+export LESS="--quit-if-one-screen --no-init"
+
+d="$HOME/.dircolors"
+[ -r "$d" ]  && eval "$(dircolors $d)"
+
 # source everything in dotfiles/sources and dotfiles/functions
 DOTFILES=$(realpath ~/dotfiles)
 for file in $DOTFILES/{sources,functions}/*; do
-  [[ -f $file ]] && source $file
+  [[ -f $file ]] && source "$file"
 done
 
 # add dotfiles/bin to path so we can use the functions there

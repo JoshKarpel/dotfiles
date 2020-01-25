@@ -41,3 +41,6 @@ set foldmethod=manual
 set nofoldenable
 
 set completeopt=menu,preview
+
+" don't clear screen after exit
+set t_ti= t_te=

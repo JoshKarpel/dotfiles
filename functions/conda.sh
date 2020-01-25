@@ -11,5 +11,5 @@ alias cla="conda clean -y --all"
 function cn() {
   # we actually want to split elements here, so that you can pass the name as
   # well as packages to install immediately
-  conda create --yes --name $@ && conda activate $1
+  conda create --yes --name $@ && conda activate "$1"
 }

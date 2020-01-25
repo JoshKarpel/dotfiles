@@ -9,6 +9,7 @@ function git_repo_name() {
 }
 
 function git_repo_is_clean() {
+  git update-index --refresh -q
   git diff-index --quiet HEAD
 }
 

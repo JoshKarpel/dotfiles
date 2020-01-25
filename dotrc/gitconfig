@@ -17,8 +17,10 @@
     p = pull
     cm = commit --message
     amend = commit --amend
+    oops = commit --amend
     undo = reset --soft HEAD^
     last = log -1 HEAD
+    g = grep
 
     l = !bash -c \"source ~/dotfiles/functions/git.sh && git_pretty_log $*\"
     r = "!git l -30"

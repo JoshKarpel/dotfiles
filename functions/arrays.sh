@@ -2,5 +2,5 @@
 
 function random_element() {
   arr=("${!1}")
-  echo ${arr["$((RANDOM % ${#arr[@]}))"]}
+  echo "${arr["$((RANDOM % ${#arr[@]}))"]}"
 }

@@ -26,9 +26,9 @@ function prompt() {
   fi
 
   if is_inside_git_repo; then
-    if ! git_repo_is_clean; then
-      local dirty="!"
-    fi
+    #    if ! git_repo_is_clean; then
+    #      local dirty="!"
+    #    fi
     local g="@${prompt_colors[4]}$(git rev-parse --abbrev-ref HEAD)$dirty${RESET}"
 
     local dir="$(realpath --relative-to="$(git rev-parse --show-toplevel)" "$PWD")"
