@@ -3,4 +3,6 @@ create_default_packages:
   - pip
   - ipython
   - black
+  - line_profiler
+  - memory_profiler
 changeps1: False

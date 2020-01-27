@@ -42,11 +42,11 @@ export NINJA_STATUS="%es [%u -> %r -> %f/%t] "
 export LESS="--quit-if-one-screen --no-init"
 
 d="$HOME/.dircolors"
-[ -r "$d" ]  && eval "$(dircolors $d)"
+[ -r "$d" ]  && eval "$(dircolors "$d")"
 
 # source everything in dotfiles/sources and dotfiles/functions
 DOTFILES=$(realpath ~/dotfiles)
-for file in $DOTFILES/{sources,functions}/*; do
+for file in "$DOTFILES"/{sources,functions}/*; do
   [[ -f $file ]] && source "$file"
 done
 
