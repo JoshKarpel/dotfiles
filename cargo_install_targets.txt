@@ -4,3 +4,4 @@ ripgrep
 bat
 fd-find
 hyperfine
+sd
