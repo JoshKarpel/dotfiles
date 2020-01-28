@@ -42,7 +42,7 @@ export NINJA_STATUS="%es [%u -> %r -> %f/%t] "
 export LESS="--quit-if-one-screen --no-init"
 
 d="$HOME/.dircolors"
-[ -r "$d" ]  && eval "$(dircolors "$d")"
+[[ -r "$d" ]] && eval "$(dircolors "$d")"
 
 # source everything in dotfiles/sources and dotfiles/functions
 DOTFILES=$(realpath ~/dotfiles)
@@ -89,6 +89,11 @@ fi
 # prefer ripgrep to grep
 if exists rg; then
   alias grep='rg'
+fi
+
+# turn on thefuck
+if [[ ! $(exists fuck) ]]; then
+  eval $(thefuck --alias)
 fi
 
 # add any local config, letting it overwrite if necessary

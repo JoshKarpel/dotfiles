@@ -13,9 +13,10 @@ function install_conda() {
 
 function update_conda() {
   bar
-  conda install -y -n base $(cat "$BASEDIR/conda_install_targets.txt" | xargs)
+  conda install -y -n base $(cat "$BASEDIR/targets/conda.txt" | xargs)
   conda update -y --all -n base
   conda clean -y --all
+  conda run -n base python -m pip install --no-cache-dir --upgrade $(cat "$BASEDIR/targets/pip.txt" | xargs)
   bar
 }
 
@@ -49,7 +50,7 @@ function update_rust() {
 
 function install_cargo_packages() {
   bar
-  cargo install $(cat "$BASEDIR/cargo_install_targets.txt" | xargs)
+  cargo install $(cat "$BASEDIR/targets/cargo.txt" | xargs)
   cargo install-update --all
   bar
 }
