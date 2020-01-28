@@ -1,11 +1,22 @@
 #!/usr/bin/env bash
 
+function git_root() {
+  git rev-parse --show-toplevel
+}
+
+function git_cd_root() {
+  local root=$(git_root)
+  [[ -d "$root" ]] && cd "$root" || return 1
+}
+
+alias gr='git_cd_root'
+
 function is_inside_git_repo() {
-  git rev-parse --show-toplevel >/dev/null 2>&1
+  git_root >/dev/null 2>&1
 }
 
 function git_repo_name() {
-  basename "$(git rev-parse --show-toplevel)"
+  basename "$(git_root)"
 }
 
 function git_repo_is_clean() {
