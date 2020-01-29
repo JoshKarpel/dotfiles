@@ -103,7 +103,8 @@ echo "updating base conda and cleaning" | indent 4
 update_conda
 
 if exists rbenv; then
-  echo "rbenv already installed" | indent 2
+  echo "updating rbenv" | indent 2
+  install_rbenv
 else
   echo "installing rbenv" | indent 2
   install_rbenv
