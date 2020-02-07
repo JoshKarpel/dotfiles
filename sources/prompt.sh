@@ -6,7 +6,7 @@ function __get_prompt_colors() {
   done
 }
 
-function prompt() {
+function fancy_prompt() {
   local last_command=$? # must come first!
 
   prompt_colors=($(__get_prompt_colors))
@@ -47,5 +47,32 @@ function prompt() {
   local user="${prompt_colors[3]}\u${RESET}"
   local host="${prompt_colors[0]}\h${RESET}"
 
-  echo "$user@$host:$dir$g$j$c$e \$ ${RESET}"
+  echo "$user@$host:$dir$g$j$c$e \\\$ ${RESET}"
 }
+
+function use_fancy_prompt() {
+  export PROMPT_COMMAND='export PS1=$(fancy_prompt)'
+}
+
+function presentation_prompt() {
+  prompt_colors=($(__get_prompt_colors))
+
+  local dir="\w"
+
+  if is_inside_git_repo; then
+    local dir="$(realpath --relative-to="$(git rev-parse --show-toplevel)" "$PWD")"
+    if [[ $dir == "." ]]; then
+      local dir=""
+    fi
+    local dir="$(echo "$(git_repo_name)/$dir" | sed s'/\/$//')"
+    local dir="${prompt_colors[1]}$dir${RESET}"
+  fi
+
+  echo "$dir \\\$ ${RESET}"
+}
+
+function use_presentation_prompt() {
+  export PROMPT_COMMAND='export PS1=$(presentation_prompt)'
+}
+
+use_fancy_prompt

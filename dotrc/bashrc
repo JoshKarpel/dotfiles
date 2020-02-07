@@ -46,15 +46,12 @@ d="$HOME/.dircolors"
 
 # source everything in dotfiles/sources and dotfiles/functions
 DOTFILES=$(realpath ~/dotfiles)
-for file in "$DOTFILES"/{sources,functions}/*; do
+for file in "$DOTFILES/sources/"*; do
   [[ -f $file ]] && source "$file"
 done
 
 # add dotfiles/bin to path so we can use the functions there
 path_prefix $DOTFILES/bin
-
-# evaluate the prompt function from dotfiles/sources/prompt.sh to build the prompt
-export PROMPT_COMMAND='export PS1=$(prompt)'
 
 # >>> conda initialize >>>
 # !! Contents within this block are managed by 'conda init' !!
