@@ -94,7 +94,6 @@ if [[ ! $(exists fuck) ]]; then
 fi
 
 # add any local config, letting it overwrite if necessary
-BASHRC_LOCAL=~/.bashrc_local
-if [[ -f $BASHRC_LOCAL ]]; then
-  source $BASHRC_LOCAL
-fi
+for file in ~/.bashrc{.,_}local; do
+  [[ -f $file ]] && source "$file"
+done
