@@ -22,5 +22,5 @@
     last = log -1 HEAD
     g = grep
 
-    l = !bash -c \"source ~/dotfiles/functions/git.sh && git_pretty_log $*\"
+    l = !bash -c \"source ~/dotfiles/sources/git.sh && git_pretty_log $*\"
     r = "!git l -30"

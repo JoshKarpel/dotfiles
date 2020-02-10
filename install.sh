@@ -61,11 +61,9 @@ BASEDIR="$(dirname "$(realpath -s "$0")")"
 
 echo "dotfile directory is $BASEDIR"
 
-source $BASEDIR/functions/indent.sh
-
 BACKUPS=~/.dotfiles-backups
 
-echo "creating symlinks in home dir for files in dotrc" | indent 2
+echo "creating symlinks in home dir for files in dotrc"
 DOTRC=$BASEDIR/dotrc
 for file in $DOTRC/*; do
   [[ -f $file ]] || continue
@@ -75,11 +73,11 @@ for file in $DOTRC/*; do
   if exists_and_not_symlink $target; then
     mkdir -p $BACKUPS
     backup=$BACKUPS/"$(basename "$target")"
-    echo "moving existing file $target to $backup" | indent 4
+    echo "moving existing file $target to $backup"
     mv $target $backup
   fi
 
-  echo "$target -> $file" | indent 4
+  echo "$target -> $file"
   ln -sf $file "$target"
 done
 
@@ -88,9 +86,9 @@ source ~/.bashrc
 MINICONDA_INSTALLER_PATH=~/miniconda-installer.sh
 
 if exists conda; then
-  echo "conda already installed" | indent 2
+  echo "conda already installed"
 else
-  echo "installing miniconda" | indent 2
+  echo "installing miniconda"
   install_conda
 fi
 
@@ -99,35 +97,35 @@ fi
 
 source ~/.bashrc
 
-echo "updating base conda and cleaning" | indent 4
+echo "updating base conda and cleaning"
 update_conda
 
 if exists rbenv; then
-  echo "updating rbenv" | indent 2
+  echo "updating rbenv"
   install_rbenv
 else
-  echo "installing rbenv" | indent 2
+  echo "installing rbenv"
   install_rbenv
 fi
 
 source ~/.bashrc
 
-echo "updating default ruby version" | indent 2
+echo "updating default ruby version"
 update_ruby
 
 if exists rustup; then
-  echo "rust already installed" | indent 2
+  echo "rust already installed"
 else
-  echo "installing rust" | indent 2
+  echo "installing rust"
   install_rust
 fi
 
-echo "updating rust" | indent 2
+echo "updating rust"
 update_rust
 
 source ~/.bashrc
 
-echo "installing cargo packages" | indent 2
+echo "installing cargo packages"
 
 install_cargo_packages
 
