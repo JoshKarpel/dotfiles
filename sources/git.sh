@@ -11,6 +11,10 @@ function git_cd_root() {
 
 alias gr='git_cd_root'
 
+function git_branch_name() {
+  git rev-parse --abbrev-ref HEAD
+}
+
 function is_inside_git_repo() {
   git_root >/dev/null 2>&1
 }

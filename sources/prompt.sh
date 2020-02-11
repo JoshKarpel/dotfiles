@@ -30,9 +30,9 @@ function fancy_prompt() {
     #      local dirty="!"
     #    fi
     local dirty=""
-    local g="@${prompt_colors[4]}$(git rev-parse --abbrev-ref HEAD)$dirty${RESET}"
+    local g="@${prompt_colors[4]}$(git_branch_name)$dirty${RESET}"
 
-    local dir="$(realpath --relative-to="$(git rev-parse --show-toplevel)" "$PWD")"
+    local dir="$(realpath --relative-to="$(git_root)" "$PWD")"
     if [[ $dir == "." ]]; then
       local dir=""
     fi
