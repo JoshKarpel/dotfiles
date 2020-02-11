@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+
 # start with anything provided by the system admin
 if [ -f /etc/bashrc ]; then
   source /etc/bashrc
@@ -16,13 +17,6 @@ shopt -s checkwinsize
 
 # save multi-line commands as one command
 shopt -s cmdhist
-
-# enable bash completion
-if [ -f /usr/share/bash-completion/bash_completion ]; then
-  . /usr/share/bash-completion/bash_completion
-elif [ -f /etc/bash_completion ]; then
-  . /etc/bash_completion
-fi
 
 # utf-8 everywhere
 export LC_ALL=en_US.UTF-8
@@ -97,3 +91,5 @@ fi
 for file in ~/.bashrc{.,_}local; do
   [[ -f $file ]] && source "$file"
 done
+
+return 0
