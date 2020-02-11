@@ -26,7 +26,7 @@ function _batlab_submit_workspace() {
 
   git archive "$sha" | \
     tqdm --bytes | \
-    ssh "$batlab" "cd workspace_builds && mkdir $buildid && cd $buildid && tar xf -"
+    ssh "$batlab" cd workspace_builds '&&' mkdir "${buildid}" '&&' cd "${buildid}" '&&' tar xf - '&&' ../submit_workspace_build "${tag}"
 
   set +e
 }
