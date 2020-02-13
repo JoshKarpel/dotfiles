@@ -18,7 +18,7 @@ function _batlab_submit_workspace() {
 
   local sha=$2
   if [[ -z $sha ]]; then
-    sha="HEAD"
+    sha="$(git write-tree)"
   fi
 
   local buildid="${timestamp}_${tag}_${sha}"
