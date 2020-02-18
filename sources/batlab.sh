@@ -7,7 +7,6 @@ function batlab_submit_workspace() {
 function _batlab_submit_workspace() {
   set -e
 
-  local branch=$(git_branch_name)
   local timestamp=$(date +'%F_%H-%M-%S')
 
   local tag=$1
@@ -21,7 +20,7 @@ function _batlab_submit_workspace() {
     sha="$(git write-tree)"
   fi
 
-  local buildid="${timestamp}_${tag}_${sha}"
+  local buildid="${tag}__${timestamp}__${sha}"
   echo "$buildid"
 
   git archive "$sha" | \
