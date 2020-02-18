@@ -15,4 +15,4 @@ export subtest="karpel@submittest0000.chtc.wisc.edu"
 
 # MIR servers
 
-export submir="karpel@mir-submit.discovery.wisc.edu"
+export submir="jkarpel@mir-submit.discovery.wisc.edu"
