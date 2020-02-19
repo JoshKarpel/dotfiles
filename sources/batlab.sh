@@ -23,9 +23,7 @@ function _batlab_submit_workspace() {
   local buildid="${tag}__${timestamp}__${sha}"
   echo "$buildid"
 
-  git archive "$sha" | \
-    tqdm --bytes | \
-    ssh "$batlab" cd workspace_builds '&&' mkdir "${buildid}" '&&' cd "${buildid}" '&&' tar xf - '&&' ../submit_workspace_build "${tag}"
+  git archive "$sha" | ssh "$batlab" cd workspace_builds '&&' mkdir "${buildid}" '&&' cd "${buildid}" '&&' tar xf - '&&' ../submit_workspace_build "${tag}"
 
   set +e
 }
