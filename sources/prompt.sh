@@ -47,7 +47,7 @@ function fancy_prompt() {
   local user="${prompt_colors[3]}\u${RESET}"
   local host="${prompt_colors[0]}\h${RESET}"
 
-  echo "$user@$host:$dir$g$j$c$e \\\$ ${RESET}"
+  echo "$user@$host:$dir$g$j$c$e${RESET}\n\$ "
 }
 
 function use_fancy_prompt() {
@@ -65,10 +65,10 @@ function presentation_prompt() {
       local dir=""
     fi
     local dir="$(echo "$(git_repo_name)/$dir" | sed s'/\/$//')"
-    local dir="${prompt_colors[1]}$dir${RESET}"
+    local dir="${prompt_colors[1]}$dir${RESET} "
   fi
 
-  echo "$dir \\\$ ${RESET}"
+  echo "$dir${RESET}\n\$"
 }
 
 function use_presentation_prompt() {
