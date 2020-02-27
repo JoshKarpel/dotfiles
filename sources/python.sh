@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
-alias p="python"
+alias py="python"
+alias ipy="ipython"
 
 function clean_python_cache() {
   find . -type f -name "*.py[co]" -print -delete
