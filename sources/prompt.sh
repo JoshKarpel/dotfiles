@@ -68,7 +68,7 @@ function presentation_prompt() {
     local dir="${prompt_colors[1]}$dir${RESET} "
   fi
 
-  echo "$dir${RESET}\n\$"
+  echo "$dir${RESET}\n\$ "
 }
 
 function use_presentation_prompt() {
