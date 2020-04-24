@@ -55,6 +55,13 @@ function install_cargo_packages() {
   bar
 }
 
+function install_mc() {
+  bar
+  curl https://dl.min.io/client/mc/release/linux-amd64/mc --output $BASEDIR/bin/mc
+  chmod +x $BASEDIR/bin/mc
+  bar
+}
+
 echo "executing install script"
 
 BASEDIR="$(dirname "$(realpath -s "$0")")"
@@ -130,3 +137,7 @@ echo "installing cargo packages"
 install_cargo_packages
 
 source ~/.bashrc
+
+echo "installing mc"
+
+install_mc
