@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 
 function repeat() {
-  local delay="$1"
+  local number="$1"
   shift
 
-  while true; do
+  for _ in $(seq "$number"); do
     $@
-    sleep "$delay"
   done
 }
