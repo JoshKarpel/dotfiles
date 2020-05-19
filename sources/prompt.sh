@@ -37,7 +37,7 @@ function fancy_prompt() {
       local dir=""
     fi
     local dir="$(echo "$(git_repo_name)/$dir" | sed s'/\/$//')"
-    local dir="${prompt_colors[1]}$dir${RESET}"
+    local pdir="${prompt_colors[1]}$dir${RESET}"
   fi
 
   if [[ $CONDA_DEFAULT_ENV != "base" ]]; then
@@ -47,7 +47,11 @@ function fancy_prompt() {
   local user="${prompt_colors[3]}\u${RESET}"
   local host="${prompt_colors[0]}\h${RESET}"
 
-  echo "$user@$host:$dir$g$j$c$e${RESET}\n\$ "
+  if [[ ! $TITLE_SET_MANUALLY ]]; then
+    _set_title "$(whoami)@$(hostname):$dir"
+  fi
+
+  echo "$user@$host:$pdir$g$j$c$e${RESET}\n\$ "
 }
 
 function use_fancy_prompt() {
