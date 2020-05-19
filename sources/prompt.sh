@@ -47,7 +47,7 @@ function fancy_prompt() {
   local user="${prompt_colors[3]}\u${RESET}"
   local host="${prompt_colors[0]}\h${RESET}"
 
-  if [[ ! $TITLE_SET_MANUALLY ]]; then
+  if [[ $TITLE_SET_MANUALLY != true ]]; then
     _set_title "$(whoami)@$(hostname):$dir \$$(fc -ln -0)"
   fi
 

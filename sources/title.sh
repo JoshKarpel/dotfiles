@@ -5,6 +5,10 @@ function title() {
   _set_title "$@"
 }
 
+function unset_title() {
+  export TITLE_SET_MANUALLY=false
+}
+
 function _set_title() {
   printf "\033]0;$*\007"
 }

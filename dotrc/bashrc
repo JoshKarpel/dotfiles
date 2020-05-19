@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-
 # start with anything provided by the system admin
 if [ -f /etc/bashrc ]; then
   source /etc/bashrc
@@ -95,5 +94,7 @@ done
 if exists mc; then
   complete -C $HOME/dotfiles/bin/mc mc
 fi
+
+unset_title
 
 return 0
