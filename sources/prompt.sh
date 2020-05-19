@@ -7,7 +7,7 @@ function __get_prompt_colors() {
 }
 
 function fancy_prompt() {
-  local last_command=$? # must come first!
+  local last_exit=$? # must come first!
 
   prompt_colors=($(__get_prompt_colors))
 
@@ -17,8 +17,8 @@ function fancy_prompt() {
   local e=""
   local c=""
 
-  if [[ $last_command != 0 ]]; then
-    local e=" ${prompt_colors[2]}${UNDERLINED}${last_command}${RESET}"
+  if [[ $last_exit != 0 ]]; then
+    local e=" ${prompt_colors[2]}${UNDERLINED}${last_exit}${RESET}"
   fi
 
   if [[ -n "$(jobs)" ]]; then
@@ -48,7 +48,7 @@ function fancy_prompt() {
   local host="${prompt_colors[0]}\h${RESET}"
 
   if [[ ! $TITLE_SET_MANUALLY ]]; then
-    _set_title "$(whoami)@$(hostname):$dir"
+    _set_title "$(whoami)@$(hostname):$dir \$$(fc -ln -0)"
   fi
 
   echo "$user@$host:$pdir$g$j$c$e${RESET}\n\$ "
