@@ -37,8 +37,8 @@ function fancy_prompt() {
       local dir=""
     fi
     local dir="$(echo "$(git_repo_name)/$dir" | sed s'/\/$//')"
-    local pdir="${prompt_colors[1]}$dir${RESET}"
   fi
+  local pdir="${prompt_colors[1]}$dir${RESET}"
 
   if [[ $CONDA_DEFAULT_ENV != "base" ]]; then
     local c=" ${prompt_colors[5]}[$CONDA_DEFAULT_ENV]${RESET}"
