@@ -1,19 +1,11 @@
 #!/bin/bash -l
 
-# https://askubuntu.com/questions/140305/cron-not-able-to-succesfully-change-background
+# https://stackoverflow.com/questions/10374520/gsettings-with-cron
 
-user=$(whoami)
-
-fl=$(find /proc -maxdepth 2 -user "$user" -name environ -print -quit)
-while [ -z $(grep -z DBUS_SESSION_BUS_ADDRESS "$fl" | cut -d= -f2- | tr -d '\000' ) ]
-do
-  fl=$(find /proc -maxdepth 2 -user "$user" -name environ -newer "$fl" -print -quit)
-done
-
-export DBUS_SESSION_BUS_ADDRESS=$(grep -z DBUS_SESSION_BUS_ADDRESS "$fl" | cut -d= -f2-)
+PID=$(pgrep gnome-session | tail -n1)
+export DBUS_SESSION_BUS_ADDRESS=$(grep -z DBUS_SESSION_BUS_ADDRESS /proc/"$PID"/environ | cut -d= -f2-)
 
 img=$(random_file "$WALLPAPERS")
 
 background_set_ubuntu "$img"
 
-echo "$img"
