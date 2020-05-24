@@ -37,9 +37,5 @@ alias tree="tree -L 5"
 # screen
 alias s="screen"
 
-# docker
-alias dip="docker image prune -f"
-alias dcp="docker container prune -f"
-
 # wsl clock drift
 alias fix_clock_drift="sudo ntpdate -sb time.nist.gov"
