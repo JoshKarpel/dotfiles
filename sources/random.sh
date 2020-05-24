@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-function random {
+function random() {
   python -c "import random; print(random.randrange($1, $(($2 + 1))))"
 }
 
@@ -30,4 +30,14 @@ function d12() {
 
 function d20() {
   random 1 20
+}
+
+function random_file() {
+  if [[ -z "$1" ]]; then
+    local dir=$(pwd)
+  else
+    local dir=$1
+  fi
+
+  realpath "$(find "$dir" -type f | shuf -n 1)"
 }
