@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 function exists_and_not_symlink() {
-  [[ (-f $1) && (! -L $1) ]]
+  [[ (-e $1) && (! -L $1) ]]
 }
 
 function install_conda() {
@@ -72,7 +72,7 @@ BACKUPS=~/.dotfiles-backups
 
 echo "creating symlinks in home dir for files in dotrc"
 DOTRC=$BASEDIR/dotrc
-for file in $DOTRC/*; do
+for file in "$DOTRC"/*; do
   [[ -f $file ]] || continue
 
   target=~/."$(basename "$file")"
@@ -85,7 +85,15 @@ for file in $DOTRC/*; do
   fi
 
   echo "$target -> $file"
-  ln -sf $file "$target"
+  ln -sf "$file" "$target"
+done
+
+CONFIG=$BASEDIR/config
+mkdir --parents "$CONFIG"
+for dir in "$CONFIG"/*; do
+  target=~/.config/"$(basename "$dir")"
+  echo "$target -> $dir"
+  ln -nsf "$dir" "$target"
 done
 
 source ~/.bashrc

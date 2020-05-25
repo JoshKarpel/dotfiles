@@ -6,3 +6,5 @@ fd-find
 hyperfine
 sd
 exa
+procs
+bottom

@@ -32,6 +32,9 @@ alias el="exa -l"
 alias et="exa -lT"
 alias ea="exa -la"
 
+# procs
+alias pt="procs -t"
+
 # tar
 alias mktar="tar -cvf"
 alias untar="tar -xvf"
