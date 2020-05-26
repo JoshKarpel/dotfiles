@@ -12,3 +12,7 @@ function hadolint() {
     -e XDG_CONFIG_HOME=/bin \
     hadolint/hadolint
 }
+
+function docker_build_context() {
+  ncdu -X "$(git_root)"/.dockerignore
+}
