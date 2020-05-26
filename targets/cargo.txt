@@ -8,3 +8,5 @@ sd
 exa
 procs
 bottom
+du-dust
+termimage
