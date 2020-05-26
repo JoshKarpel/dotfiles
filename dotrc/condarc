@@ -6,4 +6,8 @@ create_default_packages:
   - black
   - line_profiler
   - memory_profiler
+  - twine
+  - pytest
+  - pytest-watch
+  - pytest-xdist
 changeps1: False

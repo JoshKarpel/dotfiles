@@ -1,5 +1,3 @@
 ipython
 black
-line_profiler
-memory_profiler
 twine
