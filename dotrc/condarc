@@ -8,6 +8,5 @@ create_default_packages:
   - memory_profiler
   - twine
   - pytest
-  - pytest-watch
   - pytest-xdist
 changeps1: False
