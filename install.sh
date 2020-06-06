@@ -57,8 +57,15 @@ function install_cargo_packages() {
 
 function install_mc() {
   bar
-  curl https://dl.min.io/client/mc/release/linux-amd64/mc --output $BASEDIR/bin/mc
+  curl -L https://dl.min.io/client/mc/release/linux-amd64/mc --output $BASEDIR/bin/mc
   chmod +x $BASEDIR/bin/mc
+  bar
+}
+
+function install_ammonite() {
+  bar
+  curl -L https://github.com/lihaoyi/Ammonite/releases/download/2.1.4/2.13-2.1.4 --output $BASEDIR/bin/amm
+  chmod +x $BASEDIR/bin/amm
   bar
 }
 
@@ -141,11 +148,12 @@ update_rust
 source ~/.bashrc
 
 echo "installing cargo packages"
-
 install_cargo_packages
 
 source ~/.bashrc
 
 echo "installing mc"
-
 install_mc
+
+echo "installing ammonite"
+install_ammonite
