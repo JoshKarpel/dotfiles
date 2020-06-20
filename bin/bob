@@ -16,6 +16,8 @@ MISSION_ADJECTIVES = [
     "Shattered",
     "Western",
     "Eastern",
+    "Northern",
+    "Southern",
 ]
 
 MISSION_NOUNS = [
@@ -32,6 +34,7 @@ MISSION_NOUNS = [
     "Wing",
     "Wolf",
     "Echo",
+    "Sword",
 ]
 
 COLORS = ["\x1b[31m", "\x1b[32m", "\x1b[33m", "\x1b[34m", "\x1b[35m", "\x1b[36m"]
