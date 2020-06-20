@@ -1,4 +1,5 @@
 cargo-update
+cargo-outdated
 tokei
 ripgrep
 bat
@@ -10,3 +11,4 @@ procs
 bottom
 du-dust
 termimage
+flamegraph
