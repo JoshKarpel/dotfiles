@@ -1,0 +1,69 @@
+#!/usr/bin/env python
+
+from random import choice
+
+NOUNS = [
+    "Glaive",
+    "Nano",
+    "Jack",
+]
+
+ADJECTIVES = [
+    "Charming",
+    "Clever",
+    "Graceful",
+    "Intelligent",
+    "Learned",
+    "Mystical/Mechanical",
+    "Rugged",
+    "Stealthy",
+    "Strong",
+    "Strong-Willed",
+    "Swift",
+    "Tough",
+]
+
+VERBS = [
+    "Bears a Halo of Fire",
+    "Carries a Quiver",
+    "Commands Mental Powers",
+    "Controls Beasts",
+    "Controls Gravity",
+    "Crafts Illusions",
+    "Crafts Unique Objects",
+    "Employs Magnetism",
+    "Entertains",
+    "Exists Partially Out of Phase",
+    "Explores Dark Places",
+    "Fights With Panache",
+    "Focuses Mind Over Matter",
+    "Fuses Flesh and Steel",
+    "Howls at the Moon",
+    "Hunts with Great Skill",
+    "Leads",
+    "Lives in the Wilderness",
+    "Masters Defense",
+    "Masters Weaponry",
+    "Murders",
+    "Rages",
+    "Rides the Lightning",
+    "Talks to Machines",
+    "Wears a Sheen of Ice",
+    "Wields Power with Precision",
+    "Wields Two Weapons at Once",
+    "Works Miracles",
+    "Works the Back Alleys",
+]
+
+COLORS = ["\x1b[31m", "\x1b[32m", "\x1b[33m", "\x1b[34m", "\x1b[35m", "\x1b[36m"]
+BOLD = "\x1b[1m"
+RESET = "\x1b[0m"
+
+
+def random_color(string):
+    return choice(COLORS) + BOLD + string + RESET
+
+
+print(
+    f"I am a {random_color(choice(ADJECTIVES))} {random_color(choice(NOUNS))} who {random_color(choice(VERBS))}"
+)
