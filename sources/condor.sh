@@ -10,5 +10,5 @@ function check_htmap_usage() {
 }
 
 function condor_where() {
-  condor_q $@ -af JobBatchName ClusterId ProcId JobStatus LastRemoteHost
+  condor_q $@ -af JobBatchName ClusterId ProcId JobStatus RemoteHost LastRemoteHost
 }
