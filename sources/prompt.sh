@@ -58,6 +58,12 @@ function use_fancy_prompt() {
   export PROMPT_COMMAND='export PS1=$(fancy_prompt)'
 }
 
+function use_time_prompt() {
+  date=$(date +"%F %r %Z")
+  msg_length=${#date}
+  export PS0='\033[90m\033[2A\r\033[$(($COLUMNS-'$msg_length'))C$(date +"%F %r %Z")\033[2B\r'${RESET}
+}
+
 function presentation_prompt() {
   prompt_colors=($(__get_prompt_colors))
 
@@ -78,5 +84,3 @@ function presentation_prompt() {
 function use_presentation_prompt() {
   export PROMPT_COMMAND='export PS1=$(presentation_prompt)'
 }
-
-use_fancy_prompt

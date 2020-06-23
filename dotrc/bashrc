@@ -100,6 +100,8 @@ for file in ~/.bashrc{.,_}local; do
   [[ -f $file ]] && source "$file"
 done
 
+use_fancy_prompt
+use_time_prompt
 unset_title
 
 return 0
