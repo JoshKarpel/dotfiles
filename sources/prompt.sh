@@ -1,5 +1,44 @@
 #!/usr/bin/env bash
 
+function __pre_command() {
+  if [ -z "$AT_PROMPT" ]; then
+    return
+  fi
+  unset AT_PROMPT
+
+  if [[ $DISPLAY_TIMING ]]; then
+    date=$(date +"%F %r %Z")
+    msg_length=${#date}
+    echo -en "\e[90m\e[2A\r\e[$((COLUMNS - msg_length))C${date}\e[2B\r${RESET}"
+  fi
+
+  export LAST_COMMAND_AT=$(now)
+}
+trap "__pre_command" DEBUG
+
+function __post_command() {
+  AT_PROMPT=1
+
+  #  printf "%%%$((COLUMNS - 1))s\r"
+
+  if [[ -n "$DISPLAY_TIMING" ]]; then
+    if [[ -n "$LAST_COMMAND_AT" ]]; then
+      NOW=$(now)
+      time_since_last_command=$((NOW - LAST_COMMAND_AT))
+      msg=$(date +"%F %r %Z")
+      if [[ $time_since_last_command -gt 1 ]]; then
+        timing=$(python -c "import humanize, datetime; print(humanize.naturaldelta(datetime.timedelta(seconds=${time_since_last_command})))")
+        msg="[$timing] $msg"
+      fi
+      msg_length=${#msg}
+      echo -e "\e[90m\r\e[$((COLUMNS - msg_length))C$msg${RESET}"
+    fi
+  fi
+
+  export PS1=$($PROMPT_FUNCTION)
+}
+PROMPT_COMMAND="__post_command"
+
 function __get_prompt_colors() {
   for x in $(hostcolors); do
     echo "${BRIGHT_COLORS[$x]}"
@@ -54,16 +93,6 @@ function fancy_prompt() {
   echo "$user@$host:$pdir$g$j$c$e${RESET}\n\$ "
 }
 
-function use_fancy_prompt() {
-  export PROMPT_COMMAND='export PS1=$(fancy_prompt)'
-}
-
-function use_time_prompt() {
-  date=$(date +"%F %r %Z")
-  msg_length=${#date}
-  export PS0='\033[90m\033[2A\r\033[$(($COLUMNS-'$msg_length'))C$(date +"%F %r %Z")\033[2B\r'${RESET}
-}
-
 function presentation_prompt() {
   prompt_colors=($(__get_prompt_colors))
 
@@ -81,6 +110,18 @@ function presentation_prompt() {
   echo "$dir${RESET}\n\$ "
 }
 
+function use_timing_display() {
+  export DISPLAY_TIMING=true
+}
+
+function use_timing_display_no() {
+  unset DISPLAY_TIMING
+}
+
+function use_fancy_prompt() {
+  export PROMPT_FUNCTION='fancy_prompt'
+}
+
 function use_presentation_prompt() {
-  export PROMPT_COMMAND='export PS1=$(presentation_prompt)'
+  export PROMPT_FUNCTION='presentation_prompt'
 }

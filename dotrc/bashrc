@@ -101,7 +101,7 @@ for file in ~/.bashrc{.,_}local; do
 done
 
 use_fancy_prompt
-use_time_prompt
+use_timing_display
 unset_title
 
 return 0
