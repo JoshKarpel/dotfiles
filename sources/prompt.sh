@@ -110,11 +110,11 @@ function presentation_prompt() {
   echo "$dir${RESET}\n\$ "
 }
 
-function use_timing_display() {
+function enable_timing_display() {
   export DISPLAY_TIMING=true
 }
 
-function use_timing_display_no() {
+function disable_timing_display() {
   unset DISPLAY_TIMING
 }
 
