@@ -97,6 +97,7 @@ done
 
 CONFIG=$BASEDIR/config
 mkdir --parents "$CONFIG"
+mkdir --parents ~/.config
 for dir in "$CONFIG"/*; do
   target=~/.config/"$(basename "$dir")"
   echo "$target -> $dir"
