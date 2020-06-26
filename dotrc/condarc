@@ -9,4 +9,5 @@ create_default_packages:
   - twine
   - pytest
   - pytest-xdist
+  - humanize
 changeps1: False

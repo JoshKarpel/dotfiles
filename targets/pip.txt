@@ -2,4 +2,3 @@ pre-commit
 thefuck
 httpie
 git-fame
-humanize
