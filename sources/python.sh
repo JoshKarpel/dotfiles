@@ -13,7 +13,7 @@ function clean_python_cache() {
 
 function install_dask_labextension() {
   conda install --yes jupyterlab nodejs
-  conda install -c conda-forge dask-labextension
+  conda install --yes -c conda-forge dask-labextension
   jupyter labextension install dask-labextension
   jupyter serverextension enable dask_labextension
 }
