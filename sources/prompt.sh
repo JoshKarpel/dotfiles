@@ -27,7 +27,7 @@ function __post_command() {
       time_since_last_command=$((NOW - LAST_COMMAND_AT))
       msg=$(date +"%F %r %Z")
       if [[ $time_since_last_command -gt 1 ]]; then
-        timing=$(python -c "import humanize, datetime; print(humanize.naturaldelta(datetime.timedelta(seconds=${time_since_last_command})))")
+        timing=$(humanize "$time_since_last_command")
         msg="[$timing] $msg"
       fi
       msg_length=${#msg}
