@@ -10,3 +10,10 @@ function clean_python_cache() {
   find . -type f -name "*.py[co]" -print -delete
   find . -type d -name "__pycache__" -print -delete
 }
+
+function install_dask_labextension() {
+  conda install --yes jupyterlab nodejs
+  conda install -c conda-forge dask-labextension
+  jupyter labextension install dask-labextension
+  jupyter serverextension enable dask_labextension
+}
