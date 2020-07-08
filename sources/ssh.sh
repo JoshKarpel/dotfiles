@@ -21,5 +21,7 @@ export jup1="karpel@jupyter0001.chtc.wisc.edu"
 export htpheno_cm="karpel@htpheno-cm.chtc.wisc.edu"
 export htpheno_sub="karpel@htpheno-submit.chtc.wisc.edu"
 
+export learn="karpel@learn.chtc.wisc.edu"
+
 # MIR
 export submir="jkarpel@mir-submit.discovery.wisc.edu"
