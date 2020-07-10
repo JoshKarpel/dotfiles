@@ -35,8 +35,8 @@ function __post_command() {
     fi
   fi
 
-  # update history file, and read any new entries
-  history -a; history -n
+  # update history file
+  history -a
 
   export PS1=$($PROMPT_FUNCTION)
 }
