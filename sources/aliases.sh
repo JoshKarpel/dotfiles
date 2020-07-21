@@ -47,3 +47,6 @@ alias s="screen"
 
 # wsl clock drift
 alias fix_clock_drift="sudo ntpdate -sb time.nist.gov"
+
+# pre-commit
+alias pca="pre-commit run -a"
