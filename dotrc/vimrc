@@ -15,6 +15,7 @@ autocmd FileType yaml setlocal shiftwidth=2 softtabstop=2 expandtab
 
 set number
 set nocursorline
+set showmode
 
 syntax on
 
@@ -45,3 +46,6 @@ set foldmethod=manual
 set nofoldenable
 
 set completeopt=menu,preview
+
+" toggle insert mode
+set pastetoggle=<F2>
