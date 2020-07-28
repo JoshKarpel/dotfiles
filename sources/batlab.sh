@@ -20,10 +20,10 @@ function _batlab_submit_workspace() {
     sha="$(git write-tree)"
   fi
 
-  local buildid="${tag}__${timestamp}__${sha}"
+  local buildid="build__${tag}__${timestamp}__${sha}"
   echo "$buildid"
 
-  (gr && git archive "$sha" | ssh "$batlab" cd workspace_builds '&&' mkdir "${buildid}" '&&' cd "${buildid}" '&&' tar xf - '&&' ../submit_workspace_build "${tag}")
+  (git_cd_root && git archive "$sha" | ssh -4 "$batlab" cd workspace_builds '&&' mkdir "${buildid}" '&&' cd "${buildid}" '&&' tar xf - '&&' ../submit_workspace_build "${tag}")
 
   set +e
 }
