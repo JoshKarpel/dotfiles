@@ -51,7 +51,6 @@ function update_rust() {
 function install_cargo_packages() {
   bar
   cargo install $(cat "$BASEDIR/targets/cargo.txt" | xargs)
-  cargo install-update --all
   bar
 }
 
