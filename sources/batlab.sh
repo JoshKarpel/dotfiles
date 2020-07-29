@@ -15,6 +15,8 @@ function _batlab_submit_workspace() {
     return 1
   fi
 
+  git add -u
+
   local sha=$2
   if [[ -z $sha ]]; then
     sha="$(git write-tree)"
