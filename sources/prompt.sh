@@ -12,6 +12,10 @@ function __pre_command() {
     echo -en "\e[90m\e[2A\r\e[$((COLUMNS - msg_length))C${date}\e[2B\r${RESET}"
   fi
 
+  if [[ $TITLE_SET_MANUALLY != true ]]; then
+    _set_title "$(whoami)@$(hostname):$dir \$$(fc -ln -0)"
+  fi
+
   export LAST_COMMAND_AT=$(now)
 }
 trap "__pre_command" DEBUG
@@ -88,10 +92,6 @@ function fancy_prompt() {
 
   local user="${prompt_colors[3]}\u${RESET}"
   local host="${prompt_colors[0]}\h${RESET}"
-
-  if [[ $TITLE_SET_MANUALLY != true ]]; then
-    _set_title "$(whoami)@$(hostname):$dir \$$(fc -ln -0)"
-  fi
 
   echo "$user@$host:$pdir$g$j$c$e${RESET}\n\$ "
 }
