@@ -24,6 +24,7 @@
     undo = reset --soft HEAD^
     last = log -1 HEAD
     g = grep
+    au = add --update
 
     l = !bash -c \"source ~/dotfiles/sources/git.sh && git_pretty_log $*\"
     r = "!git l -30"
