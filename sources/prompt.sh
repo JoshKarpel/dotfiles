@@ -62,6 +62,7 @@ function fancy_prompt() {
   local j=""
   local e=""
   local c=""
+  local k=""
 
   if [[ $last_exit != 0 ]]; then
     local e=" ${prompt_colors[2]}${UNDERLINED}${last_exit}${RESET}"
@@ -90,10 +91,14 @@ function fancy_prompt() {
     local c=" ${prompt_colors[5]}[$CONDA_DEFAULT_ENV]${RESET}"
   fi
 
+  if exists "kubectl"; then
+    local k=" ${prompt_colors[4]}[$(kubectl config current-context)]${RESET}"
+  fi
+
   local user="${prompt_colors[3]}\u${RESET}"
   local host="${prompt_colors[0]}\h${RESET}"
 
-  echo "$user@$host:$pdir$g$j$c$e${RESET}\n\$ "
+  echo "$user@$host:$pdir$g$j$c$k$e${RESET}\n\$ "
 }
 
 function presentation_prompt() {
