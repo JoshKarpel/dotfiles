@@ -68,6 +68,14 @@ function install_ammonite() {
   bar
 }
 
+function install_kubeseal() {
+  bar
+  local KUBESEAL_VERSION=v0.12.5
+  curl -L https://github.com/bitnami-labs/sealed-secrets/releases/download/${KUBESEAL_VERSION}/kubeseal-linux-amd64 --output $BASEDIR/bin/kubeseal
+  chmod +x $BASEDIR/bin/kubeseal
+  bar
+}
+
 echo "executing install script"
 
 BASEDIR="$(dirname "$(realpath -s "$0")")"
@@ -157,3 +165,6 @@ install_mc
 
 echo "installing ammonite"
 install_ammonite
+
+echo "installing kubeseal"
+install_kubeseal
