@@ -92,7 +92,9 @@ function fancy_prompt() {
   fi
 
   if exists "kubectl"; then
-    local k=" ${prompt_colors[4]}[$(kubectl config current-context)]${RESET}"
+    if kcontext=$(kubectl config current-context 2>/dev/null); then
+      local k=" ${prompt_colors[4]}[$kcontext]${RESET}"
+    fi
   fi
 
   local user="${prompt_colors[3]}\u${RESET}"
