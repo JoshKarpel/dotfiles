@@ -46,7 +46,7 @@ alias tree="tree -L 5"
 alias s="screen"
 
 # wsl clock drift
-alias fix_clock_drift="sudo ntpdate -sb time.nist.gov"
+alias fix-clock-drift="sudo ntpdate -sb time.nist.gov"
 
 # pre-commit
 alias pci="pre-commit install"
