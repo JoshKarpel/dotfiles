@@ -3,7 +3,15 @@
 alias k="kubectl"
 
 if exists kubectl; then
-  source <(kubectl completion bash)
+  case $(shell) in
+  "bash")
+    source <(kubectl completion bash)
+    ;;
+  "zsh")
+    source <(kubectl completion zsh)
+    ;;
+  esac
+
   complete -F __start_kubectl k
 fi
 
