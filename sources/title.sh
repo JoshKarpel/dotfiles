@@ -10,5 +10,5 @@ function unset_title() {
 }
 
 function _set_title() {
-  printf "\033]0;$*\007"
+  printf "\033]0;%s\007" "$1"
 }

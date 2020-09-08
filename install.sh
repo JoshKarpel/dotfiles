@@ -76,6 +76,12 @@ function install_kubeseal() {
   bar
 }
 
+function install_zsh() {
+  bar
+  sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+  bar
+}
+
 echo "executing install script"
 
 BASEDIR="$(dirname "$(realpath -s "$0")")"
@@ -111,7 +117,7 @@ for dir in "$CONFIG"/*; do
   ln -nsf "$dir" "$target"
 done
 
-source ~/.bashrc
+source ~/.commonrc
 
 MINICONDA_INSTALLER_PATH=~/miniconda-installer.sh
 
@@ -125,7 +131,7 @@ fi
 # cleanup from miniconda install
 [[ -f $MINICONDA_INSTALLER_PATH ]] && rm $MINICONDA_INSTALLER_PATH
 
-source ~/.bashrc
+source ~/.commonrc
 
 echo "updating base conda and cleaning"
 update_conda
@@ -138,7 +144,7 @@ else
   install_rbenv
 fi
 
-source ~/.bashrc
+source ~/.commonrc
 
 echo "updating default ruby version"
 update_ruby
@@ -153,12 +159,12 @@ fi
 echo "updating rust"
 update_rust
 
-source ~/.bashrc
+source ~/.commonrc
 
 echo "installing cargo packages"
 install_cargo_packages
 
-source ~/.bashrc
+source ~/.commonrc
 
 echo "installing mc"
 install_mc
@@ -168,3 +174,8 @@ install_ammonite
 
 echo "installing kubeseal"
 install_kubeseal
+
+if [[ $(shell) == "zsh" && ! -d "$ZSH" ]]; then
+  echo "installing Oh My Zsh"
+  install_zsh
+fi

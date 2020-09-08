@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+
+# utf-8 everywhere
+export LC_ALL=en_US.UTF-8
+export LANG=en_US.UTF-8
+export LANGUAGE=en_US.UTF-8
+
+# set default editor
+export EDITOR=$(command -v vim)
+
+# default options for less
+export LESS="--quit-if-one-screen --no-init -R"
+
+d="$HOME/.dircolors"
+[[ -r "$d" ]] && eval "$(dircolors "$d")"
+
+DOTFILES=$(realpath ~/dotfiles)
+
+source "$DOTFILES/sources/shell.sh"
+
+# source everything in dotfiles/sources
+for file in "$DOTFILES/sources/"*; do
+  [[ -f $file ]] && . "$file"
+done
+
+# add dotfiles/bin to path so we can use the functions there
+path_prefix $DOTFILES/bin
+
+# >>> conda initialize >>>
+# !! Contents within this block are managed by 'conda init' !!
+# ... but modified by me
+__conda_setup="$($HOME/.python/bin/conda 'shell.bash' 'hook' 2>/dev/null)"
+if [ $? -eq 0 ]; then
+  eval "$__conda_setup"
+else
+  if [ -f "$HOME/.python/etc/profile.d/conda.sh" ]; then
+    source "$HOME/.python/etc/profile.d/conda.sh"
+  else
+    path_prefix ~/.python/bin
+  fi
+fi
+unset __conda_setup
+# <<< conda initialize <<<
+
+# ruby environment
+path_prefix ~/.rbenv/bin
+if exists rbenv; then
+  eval "$(rbenv init -)"
+fi
+
+# rust environment
+path_prefix ~/.cargo/bin
+
+# prefer bat to cat
+if exists bat; then
+  alias cat='bat'
+fi
+
+# prefer ripgrep to grep
+if exists rg; then
+  alias grep='rg'
+fi
+
+if exists mc; then
+  complete -C $HOME/dotfiles/bin/mc mc
+fi

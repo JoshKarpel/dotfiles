@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+[[ $(shell) != "bash" ]] && return 0
+
 function __pre_command() {
   if [ -z "$AT_PROMPT" ]; then
     return
@@ -13,7 +15,7 @@ function __pre_command() {
   fi
 
   if [[ $TITLE_SET_MANUALLY != true ]]; then
-    _set_title "$(whoami)@$(hostname):$dir \$$(fc -ln -0)"
+    _set_title "$(whoami)@$(hostname) \$$(fc -ln -0)"
   fi
 
   export LAST_COMMAND_AT=$(now)

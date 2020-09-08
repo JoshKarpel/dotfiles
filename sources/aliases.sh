@@ -54,6 +54,3 @@ alias fix-clock-drift="sudo ntpdate -sb time.nist.gov"
 alias pci="pre-commit install"
 alias pca="pre-commit run -a"
 alias pcaa="pre-commit autoupdate"
-
-# shell detection
-alias shell='ps -p $$ -o comm -h'
