@@ -24,8 +24,6 @@ alias ..="cd .."
 alias cd..="cd .." # typos...
 
 # ls
-#alias ll="ls -lFh"
-#alias la="ls -lFha"
 alias ll="el"
 alias la="ea"
 
