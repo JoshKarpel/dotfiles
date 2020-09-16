@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+# non-bash shells usually come with their own prompt frameworks
 [[ $(shell) != "bash" ]] && return 0
 
 function __pre_command() {
