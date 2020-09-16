@@ -1,5 +1,5 @@
 [user]
-    name = Josh Karpel
+    name = JoshKarpel
     email = josh.karpel@gmail.com
 [core]
     editor = vim
@@ -28,3 +28,5 @@
 
     l = !bash -c \"source ~/dotfiles/sources/git.sh && git_pretty_log $*\"
     r = "!git l -30"
+
+    track-upstream = !bash -c \"source ~/dotfiles/sources/git.sh && git_track_upstream $*\"
