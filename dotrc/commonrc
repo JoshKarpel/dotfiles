@@ -42,7 +42,10 @@ fi
 unset __conda_setup
 # <<< conda initialize <<<
 
-if which pyenv-virtualenv-init > /dev/null; then eval "$(pyenv virtualenv-init -)"; fi
+if exists pyenv; then
+  eval "$(pyenv init -)"
+  eval "$(pyenv virtualenv-init -)"
+fi
 
 # ruby environment
 path_prefix ~/.rbenv/bin
