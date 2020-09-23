@@ -27,9 +27,4 @@ use_fancy_prompt
 enable_timing_display
 unset_title
 
-# add any local config, letting it overwrite if necessary
-for file in ~/.bashrc{.,_}local; do
-  [[ -f $file ]] && source "$file"
-done
-
 return 0

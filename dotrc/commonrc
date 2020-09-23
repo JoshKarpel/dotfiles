@@ -69,3 +69,8 @@ fi
 if exists mc; then
   complete -C $HOME/dotfiles/bin/mc mc
 fi
+
+# add any local config, letting it overwrite if necessary
+for file in ~/.bashrc{.,_}local; do
+  [[ -f $file ]] && source "$file"
+done
