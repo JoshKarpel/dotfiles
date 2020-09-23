@@ -30,3 +30,8 @@
     r = "!git l -30"
 
     track-upstream = !bash -c \"source ~/dotfiles/sources/git.sh && git_track_upstream $*\"
+[filter "lfs"]
+	required = true
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process

@@ -6,7 +6,7 @@ function exists_and_not_symlink() {
 
 function install_conda() {
   bar
-  curl https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -fsSL -o $MINICONDA_INSTALLER_PATH
+  curl https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -fsSL -o $MINICONDA_INSTALLER_PATH
   bash ~/miniconda-installer.sh -b -p ~/.python
   bar
 }
@@ -109,8 +109,8 @@ for file in "$DOTRC"/*; do
 done
 
 CONFIG=$BASEDIR/config
-mkdir --parents "$CONFIG"
-mkdir --parents ~/.config
+mkdir -p "$CONFIG"
+mkdir -p ~/.config
 for dir in "$CONFIG"/*; do
   target=~/.config/"$(basename "$dir")"
   echo "$target -> $dir"
@@ -166,14 +166,14 @@ install_cargo_packages
 
 source ~/.commonrc
 
-echo "installing mc"
-install_mc
-
-echo "installing ammonite"
-install_ammonite
-
-echo "installing kubeseal"
-install_kubeseal
+#echo "installing mc"
+#install_mc
+#
+#echo "installing ammonite"
+#install_ammonite
+#
+#echo "installing kubeseal"
+#install_kubeseal
 
 if [[ $(shell) == "zsh" && ! -d "$ZSH" ]]; then
   echo "installing Oh My Zsh"

@@ -12,7 +12,7 @@ export EDITOR=$(command -v vim)
 export LESS="--quit-if-one-screen --no-init -R"
 
 d="$HOME/.dircolors"
-[[ -r "$d" ]] && eval "$(dircolors "$d")"
+[[ $(uname) -ne "Darwin" && -r "$d" ]] && eval "$(dircolors "$d")"
 
 DOTFILES=$(realpath ~/dotfiles)
 
@@ -41,6 +41,8 @@ else
 fi
 unset __conda_setup
 # <<< conda initialize <<<
+
+if which pyenv-virtualenv-init > /dev/null; then eval "$(pyenv virtualenv-init -)"; fi
 
 # ruby environment
 path_prefix ~/.rbenv/bin
