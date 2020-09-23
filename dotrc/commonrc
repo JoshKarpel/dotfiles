@@ -47,6 +47,10 @@ if exists pyenv; then
   eval "$(pyenv virtualenv-init -)"
 fi
 
+if exists jenv; then
+  eval "$(jenv init -)"
+fi
+
 # ruby environment
 path_prefix ~/.rbenv/bin
 if exists rbenv; then
