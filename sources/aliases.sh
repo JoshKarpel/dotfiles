@@ -49,6 +49,7 @@ alias s="screen"
 alias fix-clock-drift="sudo ntpdate -sb time.nist.gov"
 
 # pre-commit
+alias pcr="pre-commit run"
 alias pci="pre-commit install"
 alias pca="pre-commit run -a"
 alias pcaa="pre-commit autoupdate"
