@@ -1,5 +1,6 @@
 .idea/
 .vscode/
 
-bin/mc
-bin/amm
+/bin/mc
+/bin/amm
+/bin/kubeseal
