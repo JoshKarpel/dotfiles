@@ -1,18 +1,23 @@
 [user]
-    name = JoshKarpel
+    name = Josh Karpel
     email = josh.karpel@gmail.com
+
 [core]
     editor = vim
 	excludesfile = ~/.gitignore
 	autocrlf = input
+
 [push]
 	default = simple
+
 [diff]
+
 [color]
     ui = auto
     diff = auto
     status = auto
     branch = auto
+
 [alias]
     st = status
     br = branch
@@ -30,8 +35,13 @@
     r = "!git l -30"
 
     track-upstream = !bash -c \"source ~/dotfiles/sources/git.sh && git_track_upstream $*\"
+
 [filter "lfs"]
 	required = true
 	clean = git-lfs clean -- %f
 	smudge = git-lfs smudge -- %f
 	process = git-lfs filter-process
+
+; overrides for work
+[includeIf "gitdir:~/work/"]
+    path = ~/.gitconfig-work
