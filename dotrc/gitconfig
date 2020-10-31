@@ -30,18 +30,18 @@
     last = log -1 HEAD
     g = grep
     au = add --update
+    fom = fetch origin master:master
 
     l = !bash -c \"source ~/dotfiles/sources/git.sh && git_pretty_log $*\"
     r = "!git l -30"
 
     track-upstream = !bash -c \"source ~/dotfiles/sources/git.sh && git_track_upstream $*\"
 
+[includeIf "gitdir:~/work/"]
+    path = ~/.gitconfig-work
+
 [filter "lfs"]
 	required = true
 	clean = git-lfs clean -- %f
 	smudge = git-lfs smudge -- %f
 	process = git-lfs filter-process
-
-; overrides for work
-[includeIf "gitdir:~/work/"]
-    path = ~/.gitconfig-work
