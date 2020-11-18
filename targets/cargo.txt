@@ -12,3 +12,4 @@ bottom
 du-dust
 termimage
 flamegraph
+silicon
