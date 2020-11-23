@@ -63,14 +63,14 @@ function install_mc() {
 
 function install_ammonite() {
   bar
-  curl -L https://github.com/lihaoyi/Ammonite/releases/download/2.1.4/2.13-2.1.4 --output $BASEDIR/bin/amm
+  curl -L https://github.com/lihaoyi/Ammonite/releases/download/2.2.0/2.12-2.2.0 --output $BASEDIR/bin/amm
   chmod +x $BASEDIR/bin/amm
   bar
 }
 
 function install_kubeseal() {
   bar
-  local KUBESEAL_VERSION=v0.12.5
+  local KUBESEAL_VERSION=v0.13.1
   curl -L https://github.com/bitnami-labs/sealed-secrets/releases/download/${KUBESEAL_VERSION}/kubeseal-linux-amd64 --output $BASEDIR/bin/kubeseal
   chmod +x $BASEDIR/bin/kubeseal
   bar
