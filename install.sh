@@ -76,6 +76,17 @@ function install_kubeseal() {
   bar
 }
 
+function install_k9s() {
+  bar
+  local tmpdir=$(mktemp -d)
+  curl -L https://github.com/derailed/k9s/releases/download/v0.24.0/k9s_Linux_x86_64.tar.gz --output $tmpdir/k9s.tar.gz
+  tar -xz -f $tmpdir/k9s.tar.gz -C $tmpdir
+  mv $tmpdir/k9s $BASEDIR/bin/k9s
+  chmod +x $BASEDIR/bin/k9s
+  rm -r $tmpdir
+  bar
+}
+
 function install_zsh() {
   bar
   sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
@@ -166,14 +177,17 @@ install_cargo_packages
 
 source ~/.commonrc
 
-#echo "installing mc"
-#install_mc
-#
-#echo "installing ammonite"
-#install_ammonite
-#
-#echo "installing kubeseal"
-#install_kubeseal
+echo "installing mc"
+install_mc
+
+echo "installing ammonite"
+install_ammonite
+
+echo "installing kubeseal"
+install_kubeseal
+
+echo "installing k9s"
+install_k9s
 
 if [[ $(shell) == "zsh" && ! -d "$ZSH" ]]; then
   echo "installing Oh My Zsh"
