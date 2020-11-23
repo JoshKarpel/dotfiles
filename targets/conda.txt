@@ -1,4 +1,4 @@
-ipython
 black
-twine
 humanize
+ipython
+twine

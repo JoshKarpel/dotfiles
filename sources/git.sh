@@ -40,9 +40,9 @@ FORMAT="}$HASH}$RELATIVE_TIME}$AUTHOR}$REFS $SUBJECT"
 
 function git_pretty_log() {
   git --no-pager log --color=always --pretty=tformat:"$FORMAT" --graph $* |
-    clean_relative_times |
-    column -t -s '}' |
-    git_page_maybe
+  clean_relative_times |
+  column -t -s '}' |
+  git_page_maybe
 }
 
 # replace 2 years ago} with 2 years{

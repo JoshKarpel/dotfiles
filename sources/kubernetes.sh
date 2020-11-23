@@ -4,12 +4,12 @@ alias k="kubectl"
 
 if exists kubectl; then
   case $(shell) in
-  "bash")
-    source <(kubectl completion bash)
-    ;;
-  "zsh")
-    source <(kubectl completion zsh)
-    ;;
+    "bash")
+      source <(kubectl completion bash)
+      ;;
+    "zsh")
+      source <(kubectl completion zsh)
+      ;;
   esac
 
   complete -F __start_kubectl k

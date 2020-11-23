@@ -8,4 +8,3 @@ export DBUS_SESSION_BUS_ADDRESS=$(grep -z DBUS_SESSION_BUS_ADDRESS /proc/"$PID"/
 img=$(random_file "$WALLPAPERS")
 
 background_set_ubuntu "$img"
-
