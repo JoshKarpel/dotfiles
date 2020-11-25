@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+GO_VERSION=1.15.5
+KUBESEAL_VERSION=0.13.1
+
 function exists_and_not_symlink() {
   [[ (-e $1) && (! -L $1) ]]
 }
@@ -68,10 +71,19 @@ function install_ammonite() {
   bar
 }
 
+function install_go() {
+  bar
+  local tmpdir=$(mktemp -d)
+  curl -L "https://golang.org/dl/go${GO_VERSION}.linux-amd64.tar.gz" --output $tmpdir/go.tar.gz
+  tar -xz -f $tmpdir/go.tar.gz -C $tmpdir
+  mv $tmpdir/go ~/.go
+  rm -r $tmpdir
+  bar
+}
+
 function install_kubeseal() {
   bar
-  local KUBESEAL_VERSION=v0.13.1
-  curl -L https://github.com/bitnami-labs/sealed-secrets/releases/download/${KUBESEAL_VERSION}/kubeseal-linux-amd64 --output $BASEDIR/bin/kubeseal
+  curl -L "https://github.com/bitnami-labs/sealed-secrets/releases/download/v${KUBESEAL_VERSION}/kubeseal-linux-amd64" --output $BASEDIR/bin/kubeseal
   chmod +x $BASEDIR/bin/kubeseal
   bar
 }
@@ -176,6 +188,9 @@ echo "installing cargo packages"
 install_cargo_packages
 
 source ~/.commonrc
+
+echo "installing go"
+install_go
 
 echo "installing mc"
 install_mc
