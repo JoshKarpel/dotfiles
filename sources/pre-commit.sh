@@ -14,3 +14,8 @@ function pca() {
   pre-commit run -a $@
   git add --update
 }
+
+function pcinit() {
+  pre-commit sample-config > .pre-commit-config.yaml
+  pre-commit autoupdate
+}
