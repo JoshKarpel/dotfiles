@@ -58,6 +58,10 @@ if exists rbenv; then
   eval "$(rbenv init -)"
 fi
 
+if exists yarn; then
+  path_prefix "$(yarn global bin)"
+fi
+
 # rust environment
 path_prefix ~/.cargo/bin
 
