@@ -28,9 +28,9 @@ alias ll="el"
 alias la="ea"
 
 # exa
-alias el="exa -l"
-alias et="exa -lT"
-alias ea="exa -la"
+alias el="exa -l --ignore-glob='__pycache__'"
+alias et="exa -lT --git --ignore-glob='__pycache__'"
+alias ea="exa -la --git"
 
 # procs
 alias pt="procs -t"
