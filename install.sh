@@ -76,7 +76,7 @@ function install_go() {
   local tmpdir=$(mktemp -d)
   curl -L "https://golang.org/dl/go${GO_VERSION}.linux-amd64.tar.gz" --output $tmpdir/go.tar.gz
   tar -xz -f $tmpdir/go.tar.gz -C $tmpdir
-  mv $tmpdir/go ~/.go
+  mv -f $tmpdir/go ~/.go
   rm -r $tmpdir
   bar
 }
