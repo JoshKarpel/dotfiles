@@ -1,3 +1,6 @@
+[cmd_duration]
+format=" took [$duration]($style) "
+
 [status]
 disabled = false
 symbol = '✗'
