@@ -85,4 +85,4 @@ source $ZSH/oh-my-zsh.sh
 
 source "$HOME/.commonrc"
 
-return 0
+eval "$(starship init zsh)"

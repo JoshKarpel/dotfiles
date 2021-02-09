@@ -1,0 +1,7 @@
+[status]
+disabled = false
+symbol = '✗'
+symbols_mapping = true
+
+[time]
+disabled = false

@@ -23,8 +23,4 @@ shopt -s cmdhist
 
 source "$HOME/.commonrc"
 
-use_fancy_prompt
-enable_timing_display
-unset_title
-
-return 0
+eval "$(starship init bash)"

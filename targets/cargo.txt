@@ -11,5 +11,6 @@ procs
 ripgrep
 sd
 silicon
+starship
 termimage
 tokei
