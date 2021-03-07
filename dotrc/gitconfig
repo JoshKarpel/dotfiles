@@ -18,6 +18,9 @@
     status = auto
     branch = auto
 
+[features]
+    manyFiles = true
+
 [alias]
     st = status
     br = branch
