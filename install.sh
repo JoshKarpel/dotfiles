@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-GO_VERSION=1.15.5
-KUBESEAL_VERSION=0.13.1
-
 function exists_and_not_symlink() {
   [[ (-e $1) && (! -L $1) ]]
 }
@@ -20,6 +17,18 @@ function update_conda() {
   conda update -y --all -n base
   conda clean -y --all
   conda run -n base python -m pip install --no-cache-dir --upgrade $(cat "$BASEDIR/targets/pip.txt" | xargs)
+  bar
+}
+
+function install_poetry() {
+  bar
+  curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python -
+  bar
+}
+
+function update_poetry() {
+  bar
+  poetry self update
   bar
 }
 
@@ -54,49 +63,6 @@ function update_rust() {
 function install_cargo_packages() {
   bar
   cargo install $(cat "$BASEDIR/targets/cargo.txt" | xargs)
-  bar
-}
-
-function install_mc() {
-  bar
-  curl -L https://dl.min.io/client/mc/release/linux-amd64/mc --output $BASEDIR/bin/mc
-  chmod +x $BASEDIR/bin/mc
-  bar
-}
-
-function install_ammonite() {
-  bar
-  curl -L https://github.com/lihaoyi/Ammonite/releases/download/2.2.0/2.12-2.2.0 --output $BASEDIR/bin/amm
-  chmod +x $BASEDIR/bin/amm
-  bar
-}
-
-function install_go() {
-  bar
-  local tmpdir=$(mktemp -d)
-  curl -L "https://golang.org/dl/go${GO_VERSION}.linux-amd64.tar.gz" --output $tmpdir/go.tar.gz
-  tar -xz -f $tmpdir/go.tar.gz -C $tmpdir
-  rm -rf ~/.go
-  mv $tmpdir/go ~/.go
-  rm -r $tmpdir
-  bar
-}
-
-function install_kubeseal() {
-  bar
-  curl -L "https://github.com/bitnami-labs/sealed-secrets/releases/download/v${KUBESEAL_VERSION}/kubeseal-linux-amd64" --output $BASEDIR/bin/kubeseal
-  chmod +x $BASEDIR/bin/kubeseal
-  bar
-}
-
-function install_k9s() {
-  bar
-  local tmpdir=$(mktemp -d)
-  curl -L https://github.com/derailed/k9s/releases/download/v0.24.0/k9s_Linux_x86_64.tar.gz --output $tmpdir/k9s.tar.gz
-  tar -xz -f $tmpdir/k9s.tar.gz -C $tmpdir
-  mv $tmpdir/k9s $BASEDIR/bin/k9s
-  chmod +x $BASEDIR/bin/k9s
-  rm -r $tmpdir
   bar
 }
 
@@ -160,6 +126,16 @@ source ~/.commonrc
 echo "updating base conda and cleaning"
 update_conda
 
+if exists poetry; then
+  echo "poetry already installed"
+else
+  echo "installing poetry"
+  install_poetry
+fi
+
+echo "updating poetry"
+update_poetry
+
 if exists rbenv; then
   echo "updating rbenv"
   install_rbenv
@@ -189,21 +165,6 @@ echo "installing cargo packages"
 install_cargo_packages
 
 source ~/.commonrc
-
-echo "installing go"
-install_go
-
-echo "installing mc"
-install_mc
-
-echo "installing ammonite"
-install_ammonite
-
-echo "installing kubeseal"
-install_kubeseal
-
-echo "installing k9s"
-install_k9s
 
 if [[ $(shell) == "zsh" && ! -d "$ZSH" ]]; then
   echo "installing Oh My Zsh"
