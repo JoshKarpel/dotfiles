@@ -56,6 +56,7 @@ function install_rust() {
 
 function update_rust() {
   bar
+  rustup default stable
   rustup update
   bar
 }
