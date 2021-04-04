@@ -5,6 +5,9 @@ export LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
 export LANGUAGE=en_US.UTF-8
 
+# set truecolor on
+export COLORTERM=truecolor
+
 # set default editor
 export EDITOR=$(command -v vim)
 
@@ -82,9 +85,7 @@ if exists mc; then
   complete -C $HOME/dotfiles/bin/mc mc
 fi
 
-if exists poetry; then
-  alias p='poetry'
-fi
+alias p='poetry'
 
 # add any local config, letting it overwrite if necessary
 for file in ~/.bashrc{.,_}local; do
