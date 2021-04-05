@@ -134,6 +134,8 @@ else
   install_poetry
 fi
 
+source ~/.commonrc
+
 echo "updating poetry"
 update_poetry
 

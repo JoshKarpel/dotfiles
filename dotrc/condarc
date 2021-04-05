@@ -7,4 +7,4 @@ create_default_packages:
   - line_profiler
   - memory_profiler
   - pytest
-changeps1: False
+changeps1: false

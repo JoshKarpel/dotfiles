@@ -28,6 +28,7 @@ done
 
 # add dotfiles/bin to path so we can use the functions there
 path_prefix $DOTFILES/bin
+path_prefix "$HOME/.poetry/bin"
 
 # >>> conda initialize >>>
 # !! Contents within this block are managed by 'conda init' !!
