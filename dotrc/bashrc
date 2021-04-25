@@ -18,6 +18,12 @@ shopt -s checkwinsize
 # save multi-line commands as one command
 shopt -s cmdhist
 
+# automatically correct small typos in cd
+shopt -s cdspell
+
+# only auto-complete directory names for cd
+complete -d cd
+
 # make less more friendly for non-text input files, see lesspipe(1)
 [ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
 

@@ -1,4 +1,5 @@
 dis-cli
 httpie
 pre-commit
+rich
 tldr

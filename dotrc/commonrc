@@ -11,6 +11,9 @@ export COLORTERM=truecolor
 # set default editor
 export EDITOR=$(command -v vim)
 
+# nonlocal cd
+export CDPATH=.:~:~/projects:~/work
+
 # default options for less
 export LESS="--quit-if-one-screen --no-init -R"
 
@@ -83,7 +86,7 @@ if exists rg; then
 fi
 
 if exists mc; then
-  complete -C $HOME/dotfiles/bin/mc mc
+  complete -C "$HOME/dotfiles/bin/mc" mc
 fi
 
 alias p='poetry'
