@@ -40,9 +40,6 @@ function install_rbenv() {
 
 function update_ruby() {
   bar
-  version="$(rbenv install -l | grep -v - | tail -1)"
-  rbenv install -s "$version"
-  rbenv global "$version"
   gem update --system
   gem cleanup
   bar
