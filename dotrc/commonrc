@@ -17,6 +17,9 @@ export CDPATH=.:~:~/projects:~/work
 # default options for less
 export LESS="--quit-if-one-screen --no-init -R"
 
+# docker options
+export DOCKER_BUILDKIT=1
+
 d="$HOME/.dircolors"
 [[ $(uname) -ne "Darwin" && -r "$d" ]] && eval "$(dircolors "$d")"
 
@@ -57,6 +60,12 @@ fi
 
 if exists jenv; then
   eval "$(jenv init -)"
+fi
+
+export NVM_DIR="$HOME/.nvm"
+if [[ -d "$NVM_DIR" ]]; then
+  [ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"
+  [ -s "$NVM_DIR/bash_completion" ] && source "$NVM_DIR/bash_completion"
 fi
 
 # ruby environment
