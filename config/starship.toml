@@ -8,3 +8,6 @@ map_symbol = true
 
 [time]
 disabled = false
+
+[kubernetes]
+disabled = false
