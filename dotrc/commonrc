@@ -81,9 +81,6 @@ fi
 # rust environment
 path_prefix ~/.cargo/bin
 
-# go environment
-path_prefix ~/.go/bin
-
 # prefer bat to cat
 if exists bat; then
   alias cat='bat'
