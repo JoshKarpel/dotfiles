@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 alias k="kubectl"
+alias wk="watch kubectl"
 
 if exists kubectl; then
   case $(shell) in
