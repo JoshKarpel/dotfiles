@@ -52,12 +52,6 @@ fi
 unset __conda_setup
 # <<< conda initialize <<<
 
-if exists pyenv; then
-  eval "$(pyenv init -)"
-  eval "$(pyenv virtualenv-init -)"
-  export PYENV_VIRTUALENV_DISABLE_PROMPT=1
-fi
-
 if exists jenv; then
   eval "$(jenv init -)"
 fi

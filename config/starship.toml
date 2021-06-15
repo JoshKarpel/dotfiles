@@ -8,3 +8,9 @@ map_symbol = true
 
 [time]
 disabled = false
+
+[python]
+pyenv_version_name = false
+
+[kubernetes]
+disabled = false
