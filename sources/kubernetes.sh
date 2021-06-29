@@ -19,9 +19,14 @@ fi
 function ktx() {
   local ctx=$1
 
-  if [[ -z $ctx ]]; then
+  if [[ -f $ctx ]]; then
+    ctx=$(realpath $ctx)
+    echo "Setting KUBECONFIG=${ctx}"
+    export KUBECONFIG="${ctx}"
+  elif [[ -z $ctx ]]; then
     kubectl config get-contexts
   else
-    kubectl config use-context $ctx
+    echo "Switching to context ${ctx}"
+    kubectl config use-context "${ctx}"
   fi
 }
