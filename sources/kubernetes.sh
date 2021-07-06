@@ -26,7 +26,6 @@ function ktx() {
   elif [[ -z $ctx ]]; then
     kubectl config get-contexts
   else
-    echo "Switching to context ${ctx}"
     kubectl config use-context "${ctx}"
   fi
 }
