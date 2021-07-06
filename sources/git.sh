@@ -62,7 +62,3 @@ function git_page_maybe() {
     less --quit-if-one-screen --no-init --RAW-CONTROL-CHARS --chop-long-lines
   fi
 }
-
-function git_track_upstream() {
-  git checkout master && git fetch origin -v && git fetch upstream -v && git merge upstream/master && git push
-}
