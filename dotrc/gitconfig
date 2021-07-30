@@ -32,6 +32,7 @@
     wip = commit --message "wip"
     undo = reset --soft HEAD^
     g = grep
+    dc = diff --cached
 
     last = log -1 HEAD
     l = !bash -c \"source ~/dotfiles/sources/git.sh && git_pretty_log $*\"
@@ -45,3 +46,5 @@
 	clean = git-lfs clean -- %f
 	smudge = git-lfs smudge -- %f
 	process = git-lfs filter-process
+[pull]
+	ff = only
