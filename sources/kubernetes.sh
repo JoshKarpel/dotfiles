@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 
-alias k="kubectl"
-alias wk="watch kubectl"
+if exists kubecolor; then
+  alias k="kubecolor"
+  alias wk="watch kubecolor"
+else
+  alias k="kubectl"
+  alias wk="watch kubectl"
+fi
 
 if exists kubectl; then
   case $(shell) in
@@ -14,6 +19,7 @@ if exists kubectl; then
   esac
 
   complete -F __start_kubectl k
+  complete -F __start_kubectl wk
 fi
 
 function ktx() {
