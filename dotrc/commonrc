@@ -33,7 +33,7 @@ for file in "$DOTFILES/sources/"*; do
 done
 
 # add dotfiles/bin to path so we can use the functions there
-path_prefix $DOTFILES/bin
+path_prefix "$DOTFILES/bin"
 path_prefix "$HOME/.poetry/bin"
 
 # >>> conda initialize >>>
@@ -51,10 +51,6 @@ else
 fi
 unset __conda_setup
 # <<< conda initialize <<<
-
-if exists jenv; then
-  eval "$(jenv init -)"
-fi
 
 export NVM_DIR="$HOME/.nvm"
 if [[ -d "$NVM_DIR" ]]; then
@@ -83,10 +79,6 @@ fi
 # prefer ripgrep to grep
 if exists rg; then
   alias grep='rg'
-fi
-
-if exists mc; then
-  complete -C "$HOME/dotfiles/bin/mc" mc
 fi
 
 alias c='cargo'

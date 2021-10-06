@@ -10,6 +10,9 @@
 [push]
 	default = simple
 
+[pull]
+	ff = only
+
 [diff]
 
 [color]
@@ -20,6 +23,18 @@
 
 [features]
     manyFiles = true
+
+[filter "lfs"]
+	required = true
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+
+[include]
+    path = ~/.gitconfig-local
+
+[includeIf "gitdir:~/work/"]
+    path = ~/.gitconfig-work
 
 [alias]
     st = status
@@ -37,14 +52,3 @@
     last = log -1 HEAD
     l = !bash -c \"source ~/dotfiles/sources/git.sh && git_pretty_log $*\"
     r = "!git l -30"
-
-[includeIf "gitdir:~/work/"]
-    path = ~/.gitconfig-work
-
-[filter "lfs"]
-	required = true
-	clean = git-lfs clean -- %f
-	smudge = git-lfs smudge -- %f
-	process = git-lfs filter-process
-[pull]
-	ff = only

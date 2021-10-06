@@ -1,0 +1,16 @@
+asciinema
+build-essential
+cmake
+curl
+git
+graphviz
+libfontconfig1-dev
+libfreetype6-dev
+libxcb-xfixes0-dev
+libxkbcommon-dev
+parallel
+pkg-config
+python3
+rbenv
+sqlite3
+unzip

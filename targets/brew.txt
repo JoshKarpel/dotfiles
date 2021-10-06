@@ -1,0 +1,5 @@
+asciinema
+git
+k9s
+rbenv
+ruby-build
