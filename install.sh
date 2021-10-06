@@ -45,30 +45,36 @@ function do_config() {
 }
 
 function do_apt() {
-  if ! exists apt; then
+  if ! exists apt-get; then
     return 0
   fi
 
-  log "Updating apt packages..."
+  log "Updating apt targets..."
 
-  apt update -y
-  xargs -r -a "$BASEDIR/targets/apt.txt" -- apt install -y
-  apt upgrade -y
-  apt autoremove -y
+  sudo apt update -y
+  xargs -r -a "$BASEDIR/targets/apt.txt" -- sudo apt install -y
+  sudo apt upgrade -y
+  sudo apt autoremove -y
 }
 
 function do_brew() {
-  if [[ $(uname) -eq "Darwin" ]]; then
+  if [[ $(uname) -ne "Darwin" ]]; then
     return 0
   fi
 
   if ! exists brew; then
+    log "Installing brew..."
+
     curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | bash
   fi
 
+  log "Updating brew targets..."
+
   brew update
-  xargs -r -a "BASEDIR/targets/brew.txt" -- brew install
+  brew install --display-times findutils  # BSD xargs doesn't have -a
+  xargs -r -a "$BASEDIR/targets/brew.txt" -- brew install --display-times
   brew upgrade
+  brew cleanup
 }
 
 function do_conda() {
@@ -107,7 +113,7 @@ function do_poetry() {
   if ! exists poetry; then
     log "Installing poetry..."
 
-    curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python -
+    curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python -
   fi
 
   log "Updating poetry..."

@@ -12,14 +12,13 @@ if exists kubectl; then
   case $(shell) in
     "bash")
       source <(kubectl completion bash)
+      complete -F __start_kubectl k
+      complete -F __start_kubectl wk
       ;;
     "zsh")
       source <(kubectl completion zsh)
       ;;
   esac
-
-  complete -F __start_kubectl k
-  complete -F __start_kubectl wk
 fi
 
 function ktx() {
