@@ -17,5 +17,3 @@ bindkey "^[[B" down-line-or-beginning-search # Down
 source "$HOME/.commonrc"
 
 eval "$(starship init zsh)"
-
-export PATH="$HOME/.poetry/bin:$PATH"

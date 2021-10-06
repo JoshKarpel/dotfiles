@@ -58,7 +58,7 @@ function do_apt() {
 }
 
 function do_brew() {
-  if [[ $(uname) -ne "Darwin" ]]; then
+  if ! [[ $(uname) == "Darwin" ]]; then
     return 0
   fi
 
@@ -71,9 +71,14 @@ function do_brew() {
   log "Updating brew targets..."
 
   brew update
+
   brew install --display-times findutils  # BSD xargs doesn't have -a
+  path_prefix "/usr/local/opt/findutils/libexec/gnubin"
+
   xargs -r -a "$BASEDIR/targets/brew.txt" -- brew install --display-times
+
   brew upgrade
+
   brew cleanup
 }
 
@@ -106,6 +111,7 @@ function do_conda() {
   xargs -r -a "$BASEDIR/targets/pip.txt" -- conda run -n base python -m pip install --no-cache-dir --upgrade
 
   log "Cleaning conda and pip caches..."
+
   conda clean -y --all
 }
 
