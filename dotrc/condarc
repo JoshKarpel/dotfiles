@@ -1,10 +1,1 @@
-create_default_packages:
-  - python
-  - pip
-  - twine
-  - ipython
-  - black
-  - line_profiler
-  - memory_profiler
-  - pytest
 changeps1: false

@@ -1,9 +1,5 @@
-[cmd_duration]
-format = ' took [$duration]($style) '
-
 [status]
 disabled = false
-symbol = '✗'
 map_symbol = true
 
 [time]
@@ -15,5 +11,5 @@ pyenv_version_name = false
 [kubernetes]
 disabled = false
 
-[docker_context]
-disabled = true
+[git_metrics]
+disabled = false

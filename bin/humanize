@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-
-~/.python/bin/python -c "import humanize, datetime; print(humanize.naturaldelta(datetime.timedelta(seconds=$1)))"

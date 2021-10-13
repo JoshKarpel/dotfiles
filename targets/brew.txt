@@ -12,9 +12,7 @@ k9s
 kubecolor
 kubernetes-cli
 ncdu
-rbenv
 rsync
-ruby-build
 sqlite
 tmux
 tree
