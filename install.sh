@@ -82,6 +82,15 @@ function do_brew() {
   brew cleanup
 }
 
+function do_kitty() {
+  log "Installing kitty..."
+
+  curl -s -L https://sw.kovidgoyal.net/kitty/installer.sh | sh /dev/stdin launch=n
+  ln -sf ~/.local/kitty.app/bin/kitty ~/.local/bin/
+  cp ~/.local/kitty.app/share/applications/kitty.desktop ~/.local/share/applications/
+  sed -i "s|Icon=kitty|Icon=/home/$USER/.local/kitty.app/share/icons/hicolor/256x256/apps/kitty.png|g" ~/.local/share/applications/kitty.desktop
+}
+
 function do_conda() {
   if ! exists conda; then
     log "Installing conda..."
@@ -167,6 +176,7 @@ source ~/.commonrc
 
 do_apt
 do_brew
+do_kitty
 do_conda
 do_poetry
 do_nvm
