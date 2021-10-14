@@ -6,10 +6,11 @@ cmake
 curl
 ffmpeg
 findutils
-gh
+fswatch
 git
 graphviz
 gzip
+i3
 inotify-tools
 leiningen
 libfontconfig1-dev
@@ -26,5 +27,6 @@ pkg-config
 python3
 rbenv
 sqlite3
+sway
 unzip
 vim
