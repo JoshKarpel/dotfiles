@@ -23,10 +23,12 @@ llvm
 ncdu
 ntpdate
 parallel
+pass
 pkg-config
 python3
 rbenv
 sqlite3
 sway
+tree
 unzip
 vim
