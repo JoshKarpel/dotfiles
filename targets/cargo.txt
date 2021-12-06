@@ -1,6 +1,8 @@
 alacritty
 bat
 bottom
+cargo-edit
+cargo-expand
 cargo-outdated
 cargo-update
 cargo-watch

@@ -81,9 +81,6 @@ if exists rg; then
   alias grep='rg'
 fi
 
-alias c='cargo'
-alias p='poetry'
-
 # override some BSD utils with GNU utils from the brew findutils package
 if [[ $(uname) == "Darwin" ]]; then
   path_prefix "/usr/local/opt/findutils/libexec/gnubin"

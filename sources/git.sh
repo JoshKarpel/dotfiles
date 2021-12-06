@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+alias g="git"
+
 function git_root() {
   git rev-parse --show-toplevel
 }

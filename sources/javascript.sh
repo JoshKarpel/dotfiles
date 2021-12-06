@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 
-alias clj="clojure"
+alias y="yarn"
