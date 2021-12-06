@@ -1,3 +1,4 @@
+alt-tab
 asciinema
 findutils
 fzf
@@ -12,6 +13,7 @@ k9s
 kubecolor
 kubernetes-cli
 ncdu
+pv
 rsync
 sqlite
 tmux
