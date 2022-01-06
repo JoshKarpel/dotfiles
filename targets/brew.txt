@@ -16,6 +16,7 @@ ncdu
 pv
 rsync
 sqlite
+terraform
 tmux
 tree
 watch
