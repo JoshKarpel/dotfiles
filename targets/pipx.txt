@@ -2,6 +2,7 @@ black
 brood
 dis-cli
 httpie
+humanize
 pre-commit
-rich
+rich-cli
 tldr

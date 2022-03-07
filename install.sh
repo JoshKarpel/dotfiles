@@ -110,14 +110,9 @@ function do_conda() {
     rm -f "$MINICONDA_INSTALLER_PATH"
   fi
 
-  log "Updating conda and conda targets..."
+  log "Updating conda..."
 
-  xargs -r -a "$BASEDIR/targets/conda.txt" -- conda install -y -n base
   conda update -y --all -n base
-
-  log "Updating pip targets..."
-
-  xargs -r -a "$BASEDIR/targets/pip.txt" -- conda run -n base python -m pip install --no-cache-dir --upgrade
 
   log "Cleaning conda and pip caches..."
 
@@ -136,6 +131,13 @@ function do_poetry() {
   poetry self update
 }
 
+function do_pipx() {
+  conda run -n base python -m pip install pipx
+
+  xargs -r -a "$BASEDIR/targets/pipx.txt" -n 1 -- conda run -n base python -m pipx install
+  conda run -n base python -m pipx upgrade-all
+}
+
 function do_nvm() {
   NVM_DIR="$HOME/.nvm"
 
@@ -151,7 +153,8 @@ function do_nvm() {
   git checkout "$(git describe --abbrev=0 --tags --match "v[0-9]*" "$(git rev-list --tags --max-count=1)")"
 
   nvm install --lts
-  npm install --global yarn
+  npm install --global npm@latest
+  npm install --global yarn@latest
 }
 
 function do_rust() {
@@ -179,5 +182,6 @@ do_brew
 do_kitty
 do_conda
 do_poetry
+do_pipx
 do_nvm
 do_rust

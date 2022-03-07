@@ -34,6 +34,10 @@ function path_remove() {
   export PATH=${path/%:/}
 }
 
+function path_dedup() {
+  export PATH=$(dedup-path)
+}
+
 function path_display() {
   IFS=':' read -r -a paths <<<"$PATH"
   for index in "${!paths[@]}"; do
