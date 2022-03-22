@@ -1,7 +1,0 @@
-black
-brood
-dis-cli
-httpie
-pre-commit
-rich
-tldr

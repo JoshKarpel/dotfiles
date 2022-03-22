@@ -35,7 +35,6 @@ done
 
 # add dotfiles/bin to path so we can use the functions there
 path_prefix "$DOTFILES/bin"
-path_prefix "$HOME/.local/bin"
 
 # >>> conda initialize >>>
 # !! Contents within this block are managed by 'conda init' !!
@@ -87,7 +86,11 @@ if [[ $(uname) == "Darwin" ]]; then
   path_prefix "/usr/local/opt/findutils/libexec/gnubin"
 fi
 
+path_postfix "$HOME/.local/bin"
+
 # add any local config, letting it overwrite if necessary
 for file in ~/.bashrc{.,_}local; do
   [[ -f $file ]] && source "$file"
 done
+
+path_dedup

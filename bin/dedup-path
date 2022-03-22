@@ -1,0 +1,21 @@
+#!/usr/bin/env python
+import os
+import sys
+from itertools import filterfalse
+
+def unique_everseen(iterable, key=None):
+    seen = set()
+    seen_add = seen.add
+    if key is None:
+        for element in filterfalse(seen.__contains__, iterable):
+            seen_add(element)
+            yield element
+    else:
+        for element in iterable:
+            k = key(element)
+            if k not in seen:
+                seen_add(k)
+                yield element
+
+if __name__ == "__main__":
+    print(":".join(unique_everseen(os.getenv("PATH").split(":"))))
