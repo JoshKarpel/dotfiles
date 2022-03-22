@@ -119,18 +119,6 @@ function do_conda() {
   conda clean -y --all
 }
 
-function do_poetry() {
-  if ! exists poetry; then
-    log "Installing poetry..."
-
-    curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python -
-  fi
-
-  log "Updating poetry..."
-
-  poetry self update
-}
-
 function do_pipx() {
   conda run -n base python -m pip install pipx
 
