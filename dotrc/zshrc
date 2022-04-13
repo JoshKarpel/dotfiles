@@ -1,7 +1,5 @@
 #!/usr/bin/env zsh
 
-export PATH=$HOME/bin:/usr/local/bin:$PATH
-
 autoload -Uz compinit
 compinit
 

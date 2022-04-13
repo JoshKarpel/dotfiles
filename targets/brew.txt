@@ -10,7 +10,6 @@ htop
 iterm2
 jq
 k9s
-kubecolor
 kubernetes-cli
 ncdu
 pv

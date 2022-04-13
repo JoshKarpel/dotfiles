@@ -65,7 +65,7 @@ function do_brew() {
   if ! exists brew; then
     log "Installing brew..."
 
-    curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | bash
+    NONINTERACTIVE=1 sudo /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   fi
 
   log "Updating brew targets..."
@@ -83,6 +83,10 @@ function do_brew() {
 }
 
 function do_kitty() {
+  if [[ $(uname) == "Darwin" ]]; then
+    return 0
+  fi
+
   log "Installing kitty..."
 
   curl -s -L https://sw.kovidgoyal.net/kitty/installer.sh | sh /dev/stdin launch=n
@@ -120,7 +124,7 @@ function do_conda() {
 }
 
 function do_pipx() {
-  conda run -n base python -m pip install pipx
+  conda run -n base python -m pip install --upgrade pip pipx
 
   xargs -r -a "$BASEDIR/targets/pipx.txt" -n 1 -- conda run -n base python -m pipx install
   conda run -n base python -m pipx upgrade-all
@@ -169,7 +173,6 @@ do_apt
 do_brew
 do_kitty
 do_conda
-do_poetry
 do_pipx
 do_nvm
 do_rust
