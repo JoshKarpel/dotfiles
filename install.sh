@@ -83,7 +83,7 @@ function do_brew() {
 }
 
 function do_kitty() {
-  if [[ $(uname) == "Darwin" ]]; then
+  if [[ $(uname) == "Darwin" || -n "${WSL_DISTRO_NAME}" ]]; then
     return 0
   fi
 
