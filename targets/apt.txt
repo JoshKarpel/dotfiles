@@ -28,6 +28,7 @@ parallel
 pass
 pkg-config
 plasma-browser-integration
+postgresql
 python3
 rbenv
 sqlite3

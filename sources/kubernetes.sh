@@ -34,3 +34,5 @@ function ktx() {
     kubectl config use-context "${ctx}"
   fi
 }
+
+alias h="helm"
