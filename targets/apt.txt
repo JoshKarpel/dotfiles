@@ -1,4 +1,5 @@
 asciinema
+bash-completion
 build-essential
 ca-certificates
 clang
@@ -11,6 +12,7 @@ docker-ce-cli
 ffmpeg
 findutils
 fswatch
+fzf
 gcmcore
 git
 gnupg

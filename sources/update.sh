@@ -7,7 +7,7 @@ function update() {
 
 function reload() {
   case $(shell) in
-    "bash") source ~/.bashrc ;;
-    "zsh") source ~/.zshrc ;;
+    "bash") . ~/.bashrc ;;
+    "zsh") . ~/.zshrc ;;
   esac
 }

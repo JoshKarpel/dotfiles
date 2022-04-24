@@ -28,7 +28,7 @@ d="$HOME/.dircolors"
 
 DOTFILES=$(realpath ~/dotfiles)
 
-source "$DOTFILES/sources/shell.sh"
+. "$DOTFILES/sources/shell.sh"
 
 # source everything in dotfiles/sources
 for file in "$DOTFILES/sources/"*; do
@@ -46,7 +46,7 @@ if [ $? -eq 0 ]; then
   eval "$__conda_setup"
 else
   if [ -f "$HOME/.python/etc/profile.d/conda.sh" ]; then
-    source "$HOME/.python/etc/profile.d/conda.sh"
+    . "$HOME/.python/etc/profile.d/conda.sh"
   else
     path_prefix ~/.python/bin
   fi
@@ -56,8 +56,8 @@ unset __conda_setup
 
 export NVM_DIR="$HOME/.nvm"
 if [[ -d "$NVM_DIR" ]]; then
-  source "$NVM_DIR/nvm.sh"
-  source "$NVM_DIR/bash_completion"
+  . "$NVM_DIR/nvm.sh"
+  . "$NVM_DIR/bash_completion"
 fi
 
 # ruby environment
@@ -92,7 +92,7 @@ path_postfix "$HOME/.local/bin"
 
 # add any local config, letting it overwrite if necessary
 for file in ~/.bashrc{.,_}local; do
-  [[ -f $file ]] && source "$file"
+  [[ -f $file ]] && . "$file"
 done
 
 path_dedup

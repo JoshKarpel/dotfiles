@@ -1,22 +1,28 @@
 #!/usr/bin/env bash
 
-if exists kubecolor; then
-  alias k="kubecolor"
-  alias wk="watch kubecolor"
-else
-  alias k="kubectl"
-  alias wk="watch kubectl"
+if exists microk8s; then
+  function kubectl() {
+    microk8s kubectl "$@"
+  }
+
+  function helm() {
+    microk8s helm3 "$@"
+  }
 fi
+
+alias k="kubectl"
+alias wk="watch kubectl"
+alias h="helm"
 
 if exists kubectl; then
   case $(shell) in
     "bash")
-      source <(kubectl completion bash)
+      . <(kubectl completion bash)
       complete -F __start_kubectl k
       complete -F __start_kubectl wk
       ;;
     "zsh")
-      source <(kubectl completion zsh)
+      . <(kubectl completion zsh)
       ;;
   esac
 fi
@@ -35,4 +41,33 @@ function ktx() {
   fi
 }
 
-alias h="helm"
+function kns() {
+  local target=$1
+
+  local current="$(kubectl config view --minify -o jsonpath='{..namespace}')"
+
+  if [[ -z $current ]]; then
+    kubectl config set-context --current --namespace="default"
+    current="$(kubectl config view --minify -o jsonpath='{..namespace}')"
+  fi
+
+  local available="$(kubectl get namespaces -o jsonpath='{..name}')"
+
+  if [[ -z $target ]]; then
+    for ns in $available; do
+      if [[ "${current}" == "${ns}" ]]; then
+        echo "* ${ns}"
+      else
+        echo "  ${ns}"
+      fi
+    done
+  else
+    if [[ "\b${available}\b" =~ ${target} ]]; then
+      kubectl config set-context --current --namespace="${target}"
+    else
+      echo "No namespace named ${target}"
+      echo "Available namespaces: ${available}"
+      return 1
+    fi
+  fi
+}

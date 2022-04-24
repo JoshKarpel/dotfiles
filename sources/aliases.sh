@@ -6,7 +6,7 @@ alias dir="dir --color=auto"
 alias vdir="vdir --color=auto"
 alias grep="grep --color=auto"
 alias fgrep="fgrep --color=auto"
-alias egrep="egrep--color=auto"
+alias egrep="egrep --color=auto"
 
 # move/copy verbose by default
 alias cp="cp -v"
@@ -41,9 +41,6 @@ alias untar="tar -xvf"
 
 # tree defaults to 5 levels deep
 alias tree="tree -L 5"
-
-# screen
-alias s="screen"
 
 # wsl clock drift
 alias fix-clock-drift="sudo ntpdate -sb time.nist.gov"

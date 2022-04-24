@@ -171,7 +171,7 @@ function do_rust() {
 
 do_config
 
-source ~/.commonrc
+. ~/.commonrc
 
 do_apt
 do_brew

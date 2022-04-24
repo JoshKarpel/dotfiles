@@ -38,17 +38,12 @@
 
 [alias]
     st = status
-    br = branch
-    co = checkout
-    p = pull
-    pa = pull --all
     au = add --update
     amend = commit --amend
     wip = commit --message "wip"
     undo = reset --soft HEAD^
-    g = grep
     dc = diff --cached
 
     last = log -1 HEAD
-    l = !bash -c \"source ~/dotfiles/sources/git.sh && git_pretty_log $*\"
+    l = !bash -c \". ~/dotfiles/sources/git.sh && git_pretty_log $*\"
     r = "!git l -30"

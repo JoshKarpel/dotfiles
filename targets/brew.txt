@@ -1,5 +1,6 @@
 alt-tab
 asciinema
+bash-completion@2
 findutils
 fzf
 git
