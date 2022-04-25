@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 
+export PATH="$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+
 function path_prefix() {
   [[ -n $1 ]] || {
     echo "ERROR: missing argument for path_prefix"
     return 1
   }
 
-  path_remove "$1"
   export PATH="$(realpath "$1")":$PATH
 }
 
@@ -16,22 +17,7 @@ function path_postfix() {
     return 1
   }
 
-  path_remove "$1"
   export PATH=$PATH:"$(realpath "$1")"
-}
-
-function path_remove() {
-  [[ -n $1 ]] || {
-    echo "ERROR: missing argument for path_remove"
-    return 1
-  }
-
-  local component path
-  component=":$1:"
-  path=":$PATH:"
-  path=${path//$component/:}
-  path=${path/#:/}
-  export PATH=${path/%:/}
 }
 
 function path_dedup() {

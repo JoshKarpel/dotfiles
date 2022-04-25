@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-export PATH=$HOME/bin:/usr/local/bin:$PATH
+export PATH="$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
 
 # utf-8 everywhere
 export LC_ALL=en_US.UTF-8
@@ -14,7 +14,7 @@ export COLORTERM=truecolor
 export EDITOR=$(command -v vim)
 
 # nonlocal cd
-export CDPATH=.:~:~/projects:~/work
+export CDPATH=".:$HOME:$HOME/projects:$HOME/work"
 
 # default options for less
 export LESS="--quit-if-one-screen --no-init -R"
@@ -26,7 +26,7 @@ export DOCKER_SCAN_SUGGEST=false
 d="$HOME/.dircolors"
 [[ $(uname) -ne "Darwin" && -r "$d" ]] && eval "$(dircolors "$d")"
 
-DOTFILES=$(realpath ~/dotfiles)
+DOTFILES="$HOME/dotfiles"
 
 . "$DOTFILES/sources/shell.sh"
 
@@ -61,7 +61,7 @@ if [[ -d "$NVM_DIR" ]]; then
 fi
 
 # ruby environment
-path_prefix ~/.rbenv/bin
+path_prefix "$HOME/.rbenv/bin"
 if exists rbenv; then
   eval "$(rbenv init -)"
 fi
@@ -71,7 +71,7 @@ if exists yarn; then
 fi
 
 # rust environment
-path_prefix ~/.cargo/bin
+path_prefix "$HOME/.cargo/bin"
 
 # prefer bat to cat
 if exists bat; then
@@ -88,10 +88,8 @@ if [[ $(uname) == "Darwin" ]]; then
   path_prefix "/usr/local/opt/findutils/libexec/gnubin"
 fi
 
-path_postfix "$HOME/.local/bin"
-
 # add any local config, letting it overwrite if necessary
-for file in ~/.bashrc{.,_}local; do
+for file in "$HOME"/.bashrc{.,_}local; do
   [[ -f $file ]] && . "$file"
 done
 

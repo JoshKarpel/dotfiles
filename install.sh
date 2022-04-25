@@ -13,7 +13,7 @@ function log() {
 function do_config() {
   BACKUPS=~/.dotfiles-backups
 
-  log "Creating symlinks in $HOME for files in dotrc..."
+  log "Creating symlinks in $HOME for files in dotrc/ and config/ ..."
 
   DOTRC=$BASEDIR/dotrc
   for file in "$DOTRC"/*; do
@@ -24,11 +24,11 @@ function do_config() {
     if exists_and_not_symlink "$target"; then
       mkdir -p $BACKUPS
       backup=$BACKUPS/"$(basename "$target")"
-      echo "  mv $target -> $backup"
+      echo "mv $target -> $backup"
       mv $target $backup
     fi
 
-    echo "  ln -s $target -> $file"
+    echo "link $target -> $file"
     ln -sf "$file" "$target"
   done
 
@@ -39,7 +39,7 @@ function do_config() {
   mkdir -p ~/.config
   for dir in "$CONFIG"/*; do
     target=~/.config/"$(basename "$dir")"
-    echo "  ln -s $target -> $dir"
+    echo "link $target -> $dir"
     ln -nsf "$dir" "$target"
   done
 }
@@ -171,7 +171,7 @@ function do_rust() {
 
 do_config
 
-. ~/.commonrc
+. "$HOME/.commonrc"
 
 do_apt
 do_brew
