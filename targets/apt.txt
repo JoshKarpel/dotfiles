@@ -10,7 +10,6 @@ ffmpeg
 findutils
 fswatch
 fzf
-gcmcore
 git
 gnupg
 graphviz
@@ -30,7 +29,6 @@ openjdk-17-jre
 parallel
 pass
 pkg-config
-podman
 postgresql
 python3
 rbenv

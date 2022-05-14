@@ -141,6 +141,7 @@ function do_rust() {
     log "Installing rust..."
 
     curl https://sh.rustup.rs -fsSL | bash -s -- -y --no-modify-path
+    . $HOME/.cargo/env
   fi
 
   log "Updating rust..."

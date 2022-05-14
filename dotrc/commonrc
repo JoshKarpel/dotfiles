@@ -92,5 +92,3 @@ fi
 for file in "$HOME"/.bashrc{.,_}local; do
   [[ -f $file ]] && . "$file"
 done
-
-path_dedup

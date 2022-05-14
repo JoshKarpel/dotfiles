@@ -20,10 +20,6 @@ function path_postfix() {
   export PATH=$PATH:"$(realpath "$1")"
 }
 
-function path_dedup() {
-  export PATH=$(dedup-path)
-}
-
 function path_display() {
   IFS=':' read -r -a paths <<<"$PATH"
   for index in "${!paths[@]}"; do
