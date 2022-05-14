@@ -49,10 +49,6 @@ function do_apt() {
     return 0
   fi
 
-  log "Setting up Docker repository..."
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --yes --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
   log "Updating apt targets..."
 
   sudo apt update -y
@@ -84,19 +80,6 @@ function do_brew() {
   brew upgrade
 
   brew cleanup
-}
-
-function do_kitty() {
-  if [[ $(uname) == "Darwin" || -n "${WSL_DISTRO_NAME}" ]]; then
-    return 0
-  fi
-
-  log "Installing kitty..."
-
-  curl -s -L https://sw.kovidgoyal.net/kitty/installer.sh | sh /dev/stdin launch=n
-  ln -sf ~/.local/kitty.app/bin/kitty ~/.local/bin/
-  cp ~/.local/kitty.app/share/applications/kitty.desktop ~/.local/share/applications/
-  sed -i "s|Icon=kitty|Icon=/home/$USER/.local/kitty.app/share/icons/hicolor/256x256/apps/kitty.png|g" ~/.local/share/applications/kitty.desktop
 }
 
 function do_conda() {
@@ -175,7 +158,6 @@ do_config
 
 do_apt
 do_brew
-do_kitty
 do_conda
 do_pipx
 do_nvm
