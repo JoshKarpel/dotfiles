@@ -1,0 +1,48 @@
+# editors
+.idea
+.vscode
+
+# compiled files
+*.dll
+*.exe
+*.o
+*.so
+
+# zips
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.war
+*.ear
+*.rar
+*.tar
+*.zip
+
+# python
+*.py[cod]
+__pycache__
+.pytest_cache
+.mypy_cache
+.dmypy.json
+dmypy.json
+.hypothesis
+.coverage
+.coverage.*
+coverage.xml
+htmlcov
+*.egg*
+.ipynb_checkpoints
+*.py.lprof
+
+
+# javascript
+node_modules
+tsconfig.tsbuildinfo
+
+# vim
+*.swp
+
+# env
+.env

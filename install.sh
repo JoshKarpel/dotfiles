@@ -45,7 +45,7 @@ function do_config() {
 }
 
 function do_apt() {
-  if ! exists apt-get; then
+  if ! exists apt; then
     return 0
   fi
 
@@ -132,8 +132,8 @@ function do_nvm() {
   git checkout "$(git describe --abbrev=0 --tags --match "v[0-9]*" "$(git rev-list --tags --max-count=1)")"
 
   nvm install --lts
-  npm install --global npm@latest
-  npm install --global yarn@latest
+  npm install --location=global npm@latest
+  npm install --location=global yarn@latest
 }
 
 function do_rust() {
@@ -142,6 +142,8 @@ function do_rust() {
 
     curl https://sh.rustup.rs -fsSL | bash -s -- -y --no-modify-path
     . $HOME/.cargo/env
+
+    rustup install nightly
   fi
 
   log "Updating rust..."
