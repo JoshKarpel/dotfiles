@@ -45,6 +45,5 @@
     undo = reset --soft HEAD^
     dc = diff --cached
 
-    last = log -1 HEAD
     l = !bash -c \". ~/dotfiles/sources/git.sh && git_pretty_log $*\"
     r = "!git l -30"
