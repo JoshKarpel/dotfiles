@@ -45,7 +45,7 @@ function do_config() {
 }
 
 function do_apt() {
-  if ! exists apt; then
+  if ! exists apt-get; then
     return 0
   fi
 

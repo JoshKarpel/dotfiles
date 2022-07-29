@@ -8,6 +8,7 @@
 
 [push]
 	default = simple
+	autoSetupRemote = true
 
 [pull]
 	ff = only
@@ -37,6 +38,7 @@
 
 [alias]
     st = status
+    co = checkout
     au = add --update
     amend = commit --amend
     wip = commit --message "wip"

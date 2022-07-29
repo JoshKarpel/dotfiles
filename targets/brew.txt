@@ -21,3 +21,4 @@ tmux
 tree
 watch
 wget
+xclip
