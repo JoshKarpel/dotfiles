@@ -12,7 +12,7 @@ fi
 
 # history file config
 export HISTCONTROL=ignoreboth
-export HISTSIZE=100000
+export HISTSIZE=1000000
 export HISTFILESIZE=10000000
 export HISTIGNORE='fg:bg:history'
 shopt -s histappend
@@ -31,6 +31,9 @@ complete -d cd
 
 # make less more friendly for non-text input files, see lesspipe(1)
 [ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
+
+[ -f /usr/share/doc/fzf/examples/key-bindings.bash ] && . /usr/share/doc/fzf/examples/key-bindings.bash
+[ -f /usr/share/doc/fzf/examples/completion.bash ] && . /usr/share/doc/fzf/examples/completion.bash
 
 . "$HOME/.commonrc"
 
