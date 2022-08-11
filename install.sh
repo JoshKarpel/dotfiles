@@ -53,6 +53,8 @@ function do_apt() {
 
   sudo apt update -y
   xargs -r -a "$BASEDIR/targets/apt.txt" -- sudo apt install -y
+  sudo apt update -y
+  sudo add-apt-repository ppa:git-core/ppa -y
   sudo apt upgrade -y
   sudo apt autoremove -y
 }

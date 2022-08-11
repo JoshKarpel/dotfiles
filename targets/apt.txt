@@ -33,6 +33,7 @@ pkg-config
 postgresql
 python3
 rbenv
+software-properties-common
 sqlite3
 tree
 unzip
