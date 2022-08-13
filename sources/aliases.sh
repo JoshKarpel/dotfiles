@@ -44,3 +44,6 @@ alias tree="tree -L 5"
 
 # wsl clock drift
 alias fix-clock-drift="sudo ntpdate -sb time.nist.gov"
+
+# zellij
+alias z="zellij"
