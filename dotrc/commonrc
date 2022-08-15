@@ -88,10 +88,6 @@ if [[ $(uname) == "Darwin" ]]; then
   path_prefix "/usr/local/opt/findutils/libexec/gnubin"
 fi
 
-if exists brew && exists fzf; then
-  "$(brew --prefix)"/opt/fzf/install
-fi
-
 # add any local config, letting it overwrite if necessary
 for file in "$HOME"/.bashrc{.,_}local; do
   [[ -f $file ]] && . "$file"

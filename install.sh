@@ -82,6 +82,8 @@ function do_brew() {
   brew upgrade
 
   brew cleanup
+
+  "$(brew --prefix)"/opt/fzf/install --completion --key-bindings --no-update-rc
 }
 
 function do_conda() {
