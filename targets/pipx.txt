@@ -7,3 +7,4 @@ poetry
 pre-commit
 rich-cli
 tldr
+watchfiles
