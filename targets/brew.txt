@@ -4,6 +4,7 @@ bash-completion
 cmake
 findutils
 fzf
+gh
 git
 git-lfs
 graphviz

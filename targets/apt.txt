@@ -12,6 +12,7 @@ ffmpeg
 findutils
 fswatch
 fzf
+gh
 git
 gnupg
 graphviz
