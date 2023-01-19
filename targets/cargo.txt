@@ -12,6 +12,7 @@ fd-find
 flamegraph
 hyperfine
 jless
+just
 procs
 ripgrep
 sd

@@ -1,5 +1,4 @@
 alt-tab
-asciinema
 bash-completion
 cmake
 findutils

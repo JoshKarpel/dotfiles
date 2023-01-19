@@ -1,4 +1,3 @@
-asciinema
 bash-completion
 build-essential
 ca-certificates

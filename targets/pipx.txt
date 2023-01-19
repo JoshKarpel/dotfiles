@@ -1,7 +1,7 @@
+asciinema
 black
 brood
 dis-cli
-git+https://github.com/JoshKarpel/when.git
 httpie
 poetry
 pre-commit
