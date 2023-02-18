@@ -1,10 +1,10 @@
 asciinema
 black
-brood
 dis-cli
 httpie
 poetry
 pre-commit
 rich-cli
+synth
 tldr
 watchfiles
