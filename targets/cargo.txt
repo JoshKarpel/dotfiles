@@ -1,8 +1,10 @@
 alacritty
 bat
 bottom
+cargo-cache
 cargo-edit
 cargo-expand
+cargo-insta
 cargo-outdated
 cargo-update
 cargo-watch
