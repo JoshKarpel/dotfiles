@@ -5,6 +5,6 @@ httpie
 poetry
 pre-commit
 rich-cli
-synth
+synthesize
 tldr
 watchfiles
