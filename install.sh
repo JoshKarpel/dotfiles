@@ -59,6 +59,17 @@ function do_apt() {
   sudo apt autoremove -y
 }
 
+function do_locale() {
+  log "Updating locale..."
+
+  if ! exists locale-gen; then
+    return 0
+  fi
+
+  sudo localedef -i en_US -f UTF-8 en_US.UTF-8
+  sudo locale-gen "en_US.UTF-8"
+}
+
 function do_brew() {
   if ! [[ $(uname) == "Darwin" ]]; then
     return 0
@@ -99,7 +110,7 @@ function do_conda() {
         ;;
     esac
 
-    MINICONDA_INSTALLER_PATH=$(mktemp)
+    MINICONDA_INSTALLER_PATH="$(mktemp).sh"  # dumb check in their installer script requires .sh ending
     curl $URL -fsSL -o "$MINICONDA_INSTALLER_PATH"
     bash "$MINICONDA_INSTALLER_PATH" -b -p ~/.python
     rm -f "$MINICONDA_INSTALLER_PATH"
@@ -164,6 +175,7 @@ do_config
 . "$HOME/.commonrc"
 
 do_apt
+do_locale
 do_brew
 do_conda
 do_pipx

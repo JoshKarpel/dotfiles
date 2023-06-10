@@ -47,3 +47,9 @@ alias fix-clock-drift="sudo ntpdate -sb time.nist.gov"
 
 # zellij
 alias z="zellij"
+
+# just
+alias j="just"
+
+# watchfiles
+alias w="watchfiles"

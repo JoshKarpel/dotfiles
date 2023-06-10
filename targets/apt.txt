@@ -28,6 +28,7 @@ libssl-dev
 libxcb-xfixes0-dev
 libxkbcommon-dev
 llvm
+locales
 lsb-release
 ncdu
 ntpdate
@@ -37,7 +38,6 @@ pass
 pkg-config
 postgresql
 python3
-rbenv
 software-properties-common
 sqlite3
 tree

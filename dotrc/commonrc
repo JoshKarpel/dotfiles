@@ -60,12 +60,6 @@ if [[ -d "$NVM_DIR" ]]; then
   . "$NVM_DIR/bash_completion"
 fi
 
-# ruby environment
-path_prefix "$HOME/.rbenv/bin"
-if exists rbenv; then
-  eval "$(rbenv init -)"
-fi
-
 if exists yarn; then
   path_prefix "$(yarn global bin)"
 fi
