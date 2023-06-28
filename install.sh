@@ -167,7 +167,7 @@ function do_rust() {
 
   log "Updating rust targets..."
 
-  xargs -r -a "$BASEDIR/targets/cargo.txt" -- cargo install
+  xargs -r -a "$BASEDIR/targets/cargo.txt" -- cargo install --locked
 }
 
 do_config
