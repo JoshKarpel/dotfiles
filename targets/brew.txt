@@ -1,5 +1,6 @@
 alt-tab
 bash-completion
+clojure/tools/clojure
 cmake
 findutils
 fzf
@@ -13,6 +14,7 @@ iterm2
 jq
 k9s
 kubernetes-cli
+leiningen
 ncdu
 pv
 rsync

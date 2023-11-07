@@ -20,6 +20,7 @@ gzip
 imagemagick
 inotify-tools
 jq
+leiningen
 libasound2-dev
 libfontconfig1-dev
 libfreetype6-dev
