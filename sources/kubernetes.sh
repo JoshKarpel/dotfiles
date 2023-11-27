@@ -44,31 +44,5 @@ function ktx() {
 function kns() {
   local target=$1
 
-  local current="$(kubectl config view --minify -o jsonpath='{..namespace}')"
-
-  if [[ -z $current ]]; then
-    kubectl config set-context --current --namespace="default"
-    current="$(kubectl config view --minify -o jsonpath='{..namespace}')"
-  fi
-
-  local available="$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}' | xargs -n 1)"
-
-  if [[ -z "$target" ]]; then
-    for ns in $(echo $available); do  # bash/zsh compatibility https://stackoverflow.com/questions/23157613/how-to-iterate-through-string-one-word-at-a-time-in-zsh
-      if [[ "${current}" == "${ns}" ]]; then
-        echo "* ${ns}"
-      else
-        echo "  ${ns}"
-      fi
-    done
-  else
-    if [[ "\b${available}\b" =~ ${target} ]]; then
-      kubectl config set-context --current --namespace="${target}"
-    else
-      echo "No namespace named ${target}"
-      echo "Available namespaces:"
-      echo "${available}"
-      return 1
-    fi
-  fi
+  kubectl config set-context --current --namespace="${target}"
 }

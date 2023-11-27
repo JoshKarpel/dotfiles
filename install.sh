@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-BASEDIR="$(dirname "$(realpath -s "$0")")"
+BASEDIR="$(dirname "$(realpath "$0")")"
 
 function exists_and_not_symlink() {
   [[ (-e $1) && (! -L $1) ]]

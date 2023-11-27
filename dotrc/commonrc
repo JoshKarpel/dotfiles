@@ -13,6 +13,8 @@ export COLORTERM=truecolor
 # set default editor
 export EDITOR=$(command -v vim)
 
+export GPG_TTY=$(tty)
+
 # nonlocal cd
 export CDPATH=".:$HOME:$HOME/projects:$HOME/work"
 
