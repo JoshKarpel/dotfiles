@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 
-alias l="leiningen"
+alias l="lein"
