@@ -2,3 +2,4 @@ changeps1: false
 channels:
   - defaults
   - conda-forge
+channel_priority: strict

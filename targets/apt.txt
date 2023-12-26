@@ -5,6 +5,7 @@ clang
 clojure
 cmake
 curl
+dos2unix
 elixir
 erlang-dev
 ffmpeg
