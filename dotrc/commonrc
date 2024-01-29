@@ -12,6 +12,7 @@ export COLORTERM=truecolor
 
 # set default editor
 export EDITOR=$(command -v vim)
+export PAGER="bat --paging always --plain"
 
 export GPG_TTY=$(tty)
 
