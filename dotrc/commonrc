@@ -20,7 +20,7 @@ export GPG_TTY=$(tty)
 export CDPATH=".:$HOME:$HOME/projects:$HOME/work"
 
 # default options for less
-export LESS="--quit-if-one-screen --no-init -R"
+export LESS="--no-init -R"
 
 # docker options
 export DOCKER_BUILDKIT=1

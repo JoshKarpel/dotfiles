@@ -32,6 +32,9 @@ alias el="exa -l --ignore-glob='__pycache__'"
 alias et="exa -lT --git --ignore-glob='__pycache__'"
 alias ea="exa -la --git"
 
+# less
+alias less="bat --paging always --plain"
+
 # procs
 alias pt="procs -t"
 
