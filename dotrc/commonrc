@@ -41,22 +41,6 @@ done
 # add dotfiles/bin to path so we can use the functions there
 path_prefix "$DOTFILES/bin"
 
-# >>> conda initialize >>>
-# !! Contents within this block are managed by 'conda init' !!
-# ... but modified by me
-__conda_setup="$($HOME/.python/bin/conda 'shell.bash' 'hook' 2>/dev/null)"
-if [ $? -eq 0 ]; then
-  eval "$__conda_setup"
-else
-  if [ -f "$HOME/.python/etc/profile.d/conda.sh" ]; then
-    . "$HOME/.python/etc/profile.d/conda.sh"
-  else
-    path_prefix ~/.python/bin
-  fi
-fi
-unset __conda_setup
-# <<< conda initialize <<<
-
 export NVM_DIR="$HOME/.nvm"
 if [[ -d "$NVM_DIR" ]]; then
   . "$NVM_DIR/nvm.sh"
@@ -77,7 +61,7 @@ fi
 
 # override some BSD utils with GNU utils from the brew findutils package
 if [[ $(uname) == "Darwin" ]]; then
-  path_prefix "/usr/local/opt/findutils/libexec/gnubin"
+  path_prefix "/opt/homebrew/opt/findutils/libexec/gnubin"
 fi
 
 # add any local config, letting it overwrite if necessary

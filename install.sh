@@ -78,7 +78,7 @@ function do_brew() {
   if ! exists brew; then
     log "Installing brew..."
 
-    NONINTERACTIVE=1 sudo /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   fi
 
   log "Updating brew targets..."
@@ -98,6 +98,8 @@ function do_brew() {
 }
 
 function do_uv() {
+  log "Installing uv..."
+
   curl -LsSf https://astral.sh/uv/install.sh | sh
 }
 

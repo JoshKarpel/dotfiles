@@ -5,17 +5,17 @@ alias pcaa="pre-commit autoupdate"
 
 function pcr() {
   git add --update
-  pre-commit run $@
+  uvx pre-commit run $@
   git add --update
 }
 
 function pca() {
   git add --update
-  pre-commit run -a $@
+  uvx pre-commit run -a $@
   git add --update
 }
 
 function pcinit() {
-  pre-commit sample-config > .pre-commit-config.yaml
-  pre-commit autoupdate
+  uvx pre-commit sample-config > .pre-commit-config.yaml
+  uvx pre-commit autoupdate
 }

@@ -35,3 +35,5 @@ bindkey "^[[B" down-line-or-beginning-search # Down
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
 eval "$(starship init zsh)"
+
+. "$HOME/.cargo/env"

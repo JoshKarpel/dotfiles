@@ -5,9 +5,7 @@ cargo-cache
 cargo-edit
 cargo-expand
 cargo-insta
-cargo-outdated
 cargo-update
-cargo-watch
 du-dust
 exa
 fd-find

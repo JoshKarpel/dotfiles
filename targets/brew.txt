@@ -1,5 +1,6 @@
 alt-tab
 bash-completion
+caffeine
 cmake
 findutils
 fzf
