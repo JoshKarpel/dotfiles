@@ -97,39 +97,8 @@ function do_brew() {
   "$(brew --prefix)"/opt/fzf/install --completion --key-bindings --no-update-rc
 }
 
-function do_conda() {
-  if ! exists conda; then
-    log "Installing conda..."
-
-    case $(uname) in
-      Darwin)
-        URL=https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
-        ;;
-      *)
-        URL=https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-        ;;
-    esac
-
-    MINICONDA_INSTALLER_PATH="$(mktemp).sh"  # dumb check in their installer script requires .sh ending
-    curl $URL -fsSL -o "$MINICONDA_INSTALLER_PATH"
-    bash "$MINICONDA_INSTALLER_PATH" -b -p ~/.python
-    rm -f "$MINICONDA_INSTALLER_PATH"
-  fi
-
-  log "Updating conda..."
-
-  conda update -y --all -n base
-
-  log "Cleaning conda and pip caches..."
-
-  conda clean -y --all
-}
-
-function do_pipx() {
-  conda run -n base python -m pip install --upgrade pip pipx
-
-  xargs -r -a "$BASEDIR/targets/pipx.txt" -n 1 -- conda run -n base python -m pipx install
-  conda run -n base python -m pipx upgrade-all
+function do_uv() {
+  curl -LsSf https://astral.sh/uv/install.sh | sh
 }
 
 function do_nvm() {
@@ -177,7 +146,6 @@ do_config
 do_apt
 do_locale
 do_brew
-do_conda
-do_pipx
+do_uv
 do_nvm
 do_rust

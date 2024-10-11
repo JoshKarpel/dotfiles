@@ -14,6 +14,8 @@ alias k="kubectl"
 alias wk="watch kubectl"
 alias h="helm"
 
+alias kge="kubectl get events --sort-by='.lastTimestamp'"
+
 if exists kubectl; then
   case $(shell) in
     "bash")
