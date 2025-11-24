@@ -20,7 +20,7 @@ repos:
       - id: file-contents-sorter
         files: "^targets/.*$"
   - repo: https://github.com/lovesegfault/beautysh
-    rev: v6.2.1
+    rev: v6.4.2
     hooks:
       - id: beautysh
         args: ["--indent-size", "2"]
