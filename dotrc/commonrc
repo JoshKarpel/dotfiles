@@ -48,7 +48,7 @@ if [[ -d "$NVM_DIR" ]]; then
 fi
 
 # rust environment
-path_prefix "$HOME/.cargo/bin"
+path_postfix "$HOME/.cargo/bin"
 
 # override some BSD utils with GNU utils from the brew findutils package
 if [[ $(uname) == "Darwin" ]]; then
