@@ -23,18 +23,6 @@ alias ~="cd ~"
 alias ..="cd .."
 alias cd..="cd .." # typos...
 
-# ls
-alias ll="el"
-alias la="ea"
-
-# exa
-alias el="exa -l --ignore-glob='__pycache__'"
-alias et="exa -lT --git --ignore-glob='__pycache__'"
-alias ea="exa -la --git"
-
-# less
-#alias less="bat --paging always --plain"
-
 # procs
 alias pt="procs -t"
 
@@ -47,9 +35,6 @@ alias tree="tree -L 5"
 
 # wsl clock drift
 alias fix-clock-drift="sudo ntpdate -sb time.nist.gov"
-
-# zellij
-alias z="zellij"
 
 # just
 alias j="just"

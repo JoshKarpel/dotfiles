@@ -40,8 +40,10 @@ parallel
 pass
 pkg-config
 postgresql
+pulseaudio-utils
 python3
 software-properties-common
+sound-theme-freedesktop
 sqlite3
 tree
 unzip

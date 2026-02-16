@@ -46,3 +46,5 @@ tsconfig.tsbuildinfo
 
 # env
 .env
+
+**/.claude/settings.local.json

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Play a notification sound, cross-platform (macOS + Linux).
+# Usage: claude-sound <stop|notify>
+
+set -euo pipefail
+
+role="${1:-stop}"
+
+case "$(uname -s)" in
+  Darwin)
+    case "$role" in
+      stop)   afplay -v 0.40 /System/Library/Sounds/Morse.aiff ;;
+      notify) afplay -v 0.35 /System/Library/Sounds/Ping.aiff ;;
+    esac
+    ;;
+  Linux)
+    case "$role" in
+      stop)   paplay /usr/share/sounds/freedesktop/stereo/complete.oga ;;
+      notify) paplay /usr/share/sounds/freedesktop/stereo/message.oga ;;
+    esac
+    ;;
+esac

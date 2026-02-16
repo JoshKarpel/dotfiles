@@ -1,4 +1,3 @@
-alacritty
 bat
 bottom
 cargo-cache
@@ -7,15 +6,11 @@ cargo-expand
 cargo-insta
 cargo-update
 du-dust
-exa
 fd-find
-flamegraph
 hyperfine
-jless
 just
 procs
 ripgrep
 sd
 starship
-termimage
 tokei

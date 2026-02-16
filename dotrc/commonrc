@@ -47,17 +47,8 @@ if [[ -d "$NVM_DIR" ]]; then
   . "$NVM_DIR/bash_completion"
 fi
 
-if exists yarn; then
-  path_prefix "$(yarn global bin)"
-fi
-
 # rust environment
 path_prefix "$HOME/.cargo/bin"
-
-# prefer ripgrep to grep
-if exists rg; then
-  alias grep='rg'
-fi
 
 # override some BSD utils with GNU utils from the brew findutils package
 if [[ $(uname) == "Darwin" ]]; then

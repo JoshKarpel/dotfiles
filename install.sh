@@ -42,6 +42,25 @@ function do_config() {
     echo "link $target -> $dir"
     ln -nsf "$dir" "$target"
   done
+
+  CLAUDE=$BASEDIR/claude
+  mkdir -p ~/.claude
+  while IFS= read -r -d '' file; do
+    rel="${file#"$CLAUDE"/}"
+    target=~/.claude/"$rel"
+
+    mkdir -p "$(dirname "$target")"
+
+    if exists_and_not_symlink "$target"; then
+      mkdir -p $BACKUPS
+      backup=$BACKUPS/"$(basename "$target")"
+      echo "mv $target -> $backup"
+      mv $target $backup
+    fi
+
+    echo "link $target -> $file"
+    ln -sf "$file" "$target"
+  done < <(find "$CLAUDE" -type f -print0)
 }
 
 function do_apt() {
