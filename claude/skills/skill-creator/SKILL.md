@@ -22,10 +22,8 @@ Create well-structured Claude Code skills that are discoverable and effective.
 
 Use the template at [assets/SKILL.template.md](assets/SKILL.template.md) as a starting SKILL.md file.
 
-```bash
-mkdir -p .claude/skills/my-skill-name
-cp .claude/skills/skill-creator/assets/SKILL.template.md .claude/skills/my-skill-name/SKILL.md
-```
+Upstream documentation on skills is available [here](https://code.claude.com/docs/en/skills).
+The rest of this document provides guidelines and best practices for creating high-quality skills that are valuable to future Claudes and that have a high likelihood of being used.
 
 ## Writing Discoverable Descriptions
 
@@ -87,7 +85,7 @@ Instead, Claude should strive to document in SKILL.md only information that:
 
 Claude should also avoid recording **derived data**. Lead a horse to water, don't teach it how to drink. If there's an easily available source that will tell Claude all it needs to know, point Claude at that source. If the information Claude needs can be trivially derived from information Claude already knows or has already been provided, don't provide the derived data.
 
-Before finalizing a skill, revisit this section. Often cruft will creep in in the course of writing the skill. A strong editing pass at the end is recommended.
+Before finalizing a skill, revisit this section. Often cruft will creep in over the course of writing the skill. A strong editing pass at the end is recommended.
 
 ### Automation
 

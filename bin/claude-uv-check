@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# PreToolUse hook: remind Claude to use uv when python is invoked in a uv project
+
+set -euo pipefail
+
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
+REPO_ROOT=$(git -C "$(echo "$INPUT" | jq -r '.cwd')" rev-parse --show-toplevel 2>/dev/null)
+
+# Only if uv.lock exists in the git repo root
+if [[ -z "$REPO_ROOT" ]] || [[ ! -f "$REPO_ROOT/uv.lock" ]]; then
+  exit 0
+fi
+
+# Check if command contains python but not uv
+if echo "$COMMAND" | grep -q 'python' && ! echo "$COMMAND" | grep -q 'uv'; then
+  echo "Use 'uv run python' instead of 'python' directly." >&2
+  exit 2
+fi
+
+exit 0
