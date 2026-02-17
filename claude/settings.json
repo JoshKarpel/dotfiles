@@ -79,6 +79,7 @@
       "Bash(touch *)",
       "Bash(mkdir *)",
       "Bash(cat *)",
+      "Bash(diff *)",
       "Bash(git status *)",
       "Bash(git diff *)",
       "Bash(git log *)",
@@ -87,6 +88,7 @@
       "Bash(git rev-parse *)",
       "Bash(git remote *)",
       "Bash(git fetch *)",
+      "Bash(git add *)",
       "Bash(gh repo list *)",
       "Bash(gh repo view *)",
       "Bash(gh repo clone *)",
@@ -102,6 +104,7 @@
       "Bash(gh cache list *)",
       "Bash(gh search *)",
       "Bash(gh status *)",
+      "Bash(dyff *)",
       "Bash(* --version *)",
       "Bash(* --help *)"
     ]
