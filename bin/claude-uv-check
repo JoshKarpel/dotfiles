@@ -5,10 +5,8 @@ set -euo pipefail
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
-REPO_ROOT=$(git -C "$(echo "$INPUT" | jq -r '.cwd')" rev-parse --show-toplevel 2>/dev/null)
 
-# Only if uv.lock exists in the git repo root
-if [[ -z "$REPO_ROOT" ]] || [[ ! -f "$REPO_ROOT/uv.lock" ]]; then
+if ! is_uv_project; then
   exit 0
 fi
 

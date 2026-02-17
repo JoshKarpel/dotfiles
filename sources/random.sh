@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 function random() {
-  python -c "import random; print(random.randrange($1, $(($2 + 1))))"
+  local min=$1 max=$2
+  echo $(( RANDOM % (max - min + 1) + min ))
 }
 
 function flip() {

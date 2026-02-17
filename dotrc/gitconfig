@@ -47,3 +47,5 @@
 
     l = !bash -c \". ~/dotfiles/sources/git.sh && git_pretty_log $*\"
     r = "!git l -30"
+
+    root = rev-parse --show-toplevel

@@ -1,21 +1,29 @@
 #!/usr/bin/env bash
 
-alias pci="pre-commit install"
-alias pcaa="pre-commit autoupdate"
+function _pre_commit() {
+  if is_uv_project; then
+    uv run pre-commit "$@"
+  else
+    uvx pre-commit "$@"
+  fi
+}
+
+alias pci="_pre_commit install"
+alias pcaa="_pre_commit autoupdate"
 
 function pcr() {
   git add --update
-  uvx pre-commit run $@
+  _pre_commit run "$@"
   git add --update
 }
 
 function pca() {
   git add --update
-  uvx pre-commit run -a $@
+  _pre_commit run -a "$@"
   git add --update
 }
 
 function pcinit() {
-  uvx pre-commit sample-config > .pre-commit-config.yaml
-  uvx pre-commit autoupdate
+  _pre_commit sample-config > .pre-commit-config.yaml
+  _pre_commit autoupdate
 }
