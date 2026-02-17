@@ -33,6 +33,7 @@ llvm
 locales
 lsb-release
 ncdu
+net-tools
 ntpdate
 openjdk-17-jdk
 openjdk-17-jre
