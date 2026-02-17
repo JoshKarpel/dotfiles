@@ -12,7 +12,7 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 - **`config/`** — Directories symlinked into `~/.config/` (alacritty, git, bottom, procs, starship)
 - **`sources/`** — Shell scripts sourced by `commonrc` at shell startup (aliases, git helpers, path management, etc.)
 - **`targets/`** — Package lists for apt, brew, and cargo (one package per line, kept sorted by pre-commit)
-- **`bin/`** — Scripts added to PATH via `dotfiles/bin`
+- **`bin/`** — Scripts added to PATH via `dotfiles/bin`; add any executable scripts here and they will be available in the shell (e.g., for Claude Code hooks)
 
 ## Shell Startup Chain
 

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# SessionStart hook: if a justfile exists, show available just commands
+
+set -euo pipefail
+
+INPUT=$(cat)
+CWD=$(echo "$INPUT" | jq -r '.cwd')
+
+JUST_OUTPUT=$(just --list --list-prefix='' --no-aliases 2>/dev/null) || exit 0
+
+cat <<EOF
+This project has a justfile. Prefer using just recipes when they match the task at hand to ensure consistency: \`just <recipe>\`
+
+$JUST_OUTPUT
+EOF
