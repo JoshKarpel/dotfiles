@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Stop hook: ask Claude to check if docs need updating based on recent work
+
+set -euo pipefail
+
+# Read the hook input from stdin
+INPUT=$(cat)
+STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
+
+# If the hook has already run this session, allow stop
+if [[ "$STOP_HOOK_ACTIVE" == "true" ]]; then
+  exit 0
+fi
+
+# Ask Claude to check documentation
+cat >&2 <<'EOF'
+Before stopping, please check if any internal or external documentation needs updating based on the work you just completed. Consider:
+
+- CLAUDE.md (your instructions to future Claudes working on this project)
+- README.md, docs/ directory, or equivalents
+- justfile recipes and comments, or equivalents like Makefile, package.json scripts, etc.
+- Code comments or docstrings for new or related features
+
+If you find documentation that should be updated, please update it. If everything is current, you can stop.
+EOF
+
+# Exit 2 blocks the stop and shows the message to Claude
+exit 2

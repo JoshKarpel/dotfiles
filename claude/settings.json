@@ -32,6 +32,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "claude-doc-check"
+          },
+          {
+            "type": "command",
             "command": "claude-sound stop"
           }
         ]
@@ -54,7 +58,9 @@
       "Bash(git push *)",
       "Bash(git remote set*)",
       "Read(**/.env*)",
-      "Edit(**/.env*)"
+      "Edit(**/.env*)",
+      "Bash(*.env*)",
+      "Edit(**/uv.lock)"
     ],
     "ask": [],
     "allow": [
@@ -68,6 +74,11 @@
       "Bash(which *)",
       "Bash(wc *)",
       "Bash(pwd *)",
+      "Bash(cd *)",
+      "Bash(echo *)",
+      "Bash(touch *)",
+      "Bash(mkdir *)",
+      "Bash(cat *)",
       "Bash(git status *)",
       "Bash(git diff *)",
       "Bash(git log *)",
