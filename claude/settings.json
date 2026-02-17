@@ -1,4 +1,8 @@
 {
+  "statusLine": {
+    "type": "command",
+    "command": "claude-statusline"
+  },
   "hooks": {
     "SessionStart": [
       {
@@ -43,6 +47,14 @@
     ]
   },
   "permissions": {
+    "deny": [
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git remote set*)",
+      "Read(**/.env*)",
+      "Edit(**/.env*)"
+    ],
+    "ask": [],
     "allow": [
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
@@ -61,18 +73,24 @@
       "Bash(git show *)",
       "Bash(git rev-parse *)",
       "Bash(git remote *)",
-      "Bash(gh pr list *)",
-      "Bash(gh pr view *)",
-      "Bash(gh pr diff *)",
-      "Bash(gh issue view *)",
+      "Bash(git fetch *)",
+      "Bash(gh repo list *)",
+      "Bash(gh repo view *)",
+      "Bash(gh repo clone *)",
+      "Bash(gh repo gitignore *)",
+      "Bash(gh repo license *)",
       "Bash(gh issue list *)",
-      "Bash(gh repo view *)"
-    ],
-    "deny": [
-      "Bash(git commit *)",
-      "Bash(git push *)",
-      "Read(**/.env*)",
-      "Edit(**/.env*)"
+      "Bash(gh issue view *)",
+      "Bash(gh issue status *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr status *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr view *)",
+      "Bash(gh cache list *)",
+      "Bash(gh search *)",
+      "Bash(gh status *)",
+      "Bash(* --version *)",
+      "Bash(* --help *)"
     ]
   }
 }

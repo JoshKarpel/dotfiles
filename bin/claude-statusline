@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Claude Code status line script
+# Receives JSON session data on stdin, outputs formatted text lines
+
+data=$(cat)
+
+model=$(echo "$data" | jq -r '.model.display_name // "unknown"')
+context_pct=$(echo "$data" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
+
+# Build a simple progress bar for context usage
+bar_width=10
+filled=$(( context_pct * bar_width / 100 ))
+empty=$(( bar_width - filled ))
+bar=$(printf '%0.s█' $(seq 1 $filled 2>/dev/null))
+bar+=$(printf '%0.s░' $(seq 1 $empty 2>/dev/null))
+
+echo "[$model] ${bar} ${context_pct}% ctx"

@@ -39,4 +39,6 @@ complete -d cd
 
 eval "$(starship init bash)"
 
+eval "$(gh completion -s bash)"
+
 . "$HOME/.cargo/env"
