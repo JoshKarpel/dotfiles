@@ -2,6 +2,9 @@
     name = Josh Karpel
     email = josh.karpel@gmail.com
 
+[init]
+    defaultBranch = main
+
 [core]
     editor = vim
 	autocrlf = input
@@ -12,6 +15,19 @@
 
 [pull]
 	ff = only
+
+[rebase]
+    autoStash = true
+    autoSquash = true
+
+[merge]
+    conflictStyle = zdiff3
+
+[rerere]
+    enabled = true
+
+[help]
+    autoCorrect = prompt
 
 [diff]
 
@@ -47,5 +63,6 @@
 
     l = !bash -c \". ~/dotfiles/sources/git.sh && git_pretty_log $*\"
     r = "!git l -30"
+    changed = "!git diff --name-only $(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD origin/master 2>/dev/null || echo HEAD)"
 
     root = rev-parse --show-toplevel

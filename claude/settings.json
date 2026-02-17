@@ -1,5 +1,6 @@
 {
   "model": "opusplan",
+  "defaultMode": "acceptEdits",
   "statusLine": {
     "type": "command",
     "command": "claude-statusline"

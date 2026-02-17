@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-export PATH="$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
-
 function path_prefix() {
   [[ -n $1 ]] || {
     echo "ERROR: missing argument for path_prefix"

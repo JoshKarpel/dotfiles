@@ -14,8 +14,10 @@ autocmd FileType json setlocal shiftwidth=2 softtabstop=2 expandtab
 autocmd FileType yaml setlocal shiftwidth=2 softtabstop=2 expandtab
 
 set number
+set relativenumber
 set nocursorline
 set showmode
+set mouse=a
 
 syntax on
 
@@ -35,6 +37,7 @@ set ignorecase smartcase
 set shell=bash
 
 set encoding=utf-8
+set clipboard=unnamedplus
 
 set t_Co=256
 
@@ -46,6 +49,10 @@ set foldmethod=manual
 set nofoldenable
 
 set completeopt=menu,preview
+
+" persistent undo
+set undofile
+set undodir=~/.vim/undodir
 
 " toggle insert mode
 set pastetoggle=<F2>

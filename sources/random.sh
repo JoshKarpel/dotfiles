@@ -2,7 +2,7 @@
 
 function random() {
   local min=$1 max=$2
-  echo $(( RANDOM % (max - min + 1) + min ))
+  echo "$((RANDOM % (max - min + 1) + min))"
 }
 
 function flip() {

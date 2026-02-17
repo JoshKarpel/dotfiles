@@ -6,6 +6,7 @@ cargo-expand
 cargo-insta
 cargo-update
 du-dust
+eza
 fd-find
 hyperfine
 just

@@ -85,8 +85,12 @@ function do_locale() {
     return 0
   fi
 
-  sudo localedef -i en_US -f UTF-8 en_US.UTF-8
-  sudo locale-gen "en_US.UTF-8"
+  if ! locale -a | grep -q "^en_US.utf8$\|^en_US.UTF-8$"; then
+    sudo localedef -i en_US -f UTF-8 en_US.UTF-8
+    sudo locale-gen "en_US.UTF-8"
+  else
+    echo "Locale en_US.UTF-8 already generated"
+  fi
 }
 
 function do_brew() {

@@ -1,7 +1,22 @@
 #!/usr/bin/env bash
 
 function update() {
-  (cd ~/dotfiles/ || exit 1 && git pull && bash ~/dotfiles/install.sh)
+  (
+    cd ~/dotfiles/ || {
+      echo "ERROR: Could not cd to ~/dotfiles/" >&2
+      return 1
+    }
+    echo "Pulling latest changes..."
+    git pull || {
+      echo "ERROR: git pull failed" >&2
+      return 1
+    }
+    echo "Running install.sh..."
+    bash ~/dotfiles/install.sh || {
+      echo "ERROR: install.sh failed" >&2
+      return 1
+    }
+  )
   reload
 }
 

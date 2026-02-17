@@ -27,7 +27,7 @@ export DOCKER_BUILDKIT=1
 export DOCKER_SCAN_SUGGEST=false
 
 d="$HOME/.dircolors"
-[[ $(uname) -ne "Darwin" && -r "$d" ]] && eval "$(dircolors "$d")"
+[[ $(uname) != "Darwin" && -r "$d" ]] && eval "$(dircolors "$d")"
 
 DOTFILES="$HOME/dotfiles"
 

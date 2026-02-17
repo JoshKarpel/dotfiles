@@ -2,12 +2,8 @@
 
 alias g="git"
 
-function git_root() {
-  git rev-parse --show-toplevel
-}
-
 function git_cd_root() {
-  local root=$(git_root)
+  local root=$(git root)
   [[ -d "$root" ]] && cd "$root" || return 1
 }
 
@@ -18,11 +14,11 @@ function git_branch_name() {
 }
 
 function is_inside_git_repo() {
-  git_root >/dev/null 2>&1
+  git root >/dev/null 2>&1
 }
 
 function git_repo_name() {
-  basename "$(git_root)"
+  basename "$(git root)"
 }
 
 function git_repo_is_clean() {
