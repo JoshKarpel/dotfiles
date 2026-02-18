@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Stop hook: remind Claude to complete followup work before stopping
+
+set -euo pipefail
+
+# Read the hook input from stdin
+INPUT=$(cat)
+STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
+
+# If the hook has already run this session, allow stop
+if [[ "$STOP_HOOK_ACTIVE" == "true" ]]; then
+  exit 0
+fi
+
+# Remind Claude to do followup work
+cat >&2 <<'EOF'
+Before stopping, please do a quick followup check on the work you just completed:
+
+**Tests**
+- Are existing tests passing? If you made changes, run the relevant test suite.
+- Are there new tests worth adding for the functionality you touched?
+
+**Documentation**
+- Update README.md, docs/ directory, or equivalents
+- Update justfile recipes and comments, or equivalents like Makefile, package.json scripts, etc.
+- Update code comments or docstrings for new or related features
+
+**Claude**
+- Update CLAUDE.md (your instructions to future Claudes working on this project)
+- Did we learn anything that we can capture as a new Claude Skill?
+
+**Git**
+- Stage any changes that are ready to commit (but don't commit unless asked)
+- If there are pre-commit checks, are they passing?
+
+If everything looks good, you can stop.
+EOF
+
+# Exit 2 blocks the stop and shows the message to Claude
+exit 2
