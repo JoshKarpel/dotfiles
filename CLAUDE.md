@@ -28,6 +28,20 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 pre-commit run --all-files
 ```
 
+## Claude Code Hooks
+
+Active hooks configured in `~/.claude/settings.json`:
+
+- **SessionStart**: `claude-just-list` — Lists available justfile recipes at session start
+- **PreToolUse (Bash)**:
+  - `claude-uv-check` — Reminds Claude to use `uv run python` in uv projects
+  - `claude-head-tail-check` — Reminds Claude to redirect full output to files instead of using head/tail
+- **Stop**:
+  - `claude-doc-check` — Prompts Claude to update documentation before stopping
+  - `claude-sound stop` — Plays stop sound notification
+- **Notification**: `claude-sound notify` — Plays notification sound
+- **StatusLine**: `claude-statusline` — Custom status line display
+
 ## Conventions
 
 - Shell scripts use 2-space indentation (enforced by beautysh via pre-commit)

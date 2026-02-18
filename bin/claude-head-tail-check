@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# PreToolUse hook: remind Claude to redirect full output to file instead of using head/tail
+
+set -euo pipefail
+
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
+
+# Check if command contains head or tail (as separate commands, not just as part of a word)
+if echo "$COMMAND" | grep -qE '\b(head|tail)\b'; then
+  cat >&2 <<'EOF'
+Instead of using head/tail to limit output, redirect the full output to a file for later consultation:
+  - Use standard redirection: command > /tmp/output.txt 2>&1
+  - Use tee for both display and save: command | tee /tmp/output.txt
+  - Then reference the file (in parts or in full) later when needed
+This preserves complete information for thorough analysis.
+EOF
+  exit 2
+fi
+
+exit 0
