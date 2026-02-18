@@ -12,15 +12,14 @@ alias pci="_pre_commit install"
 alias pcaa="_pre_commit autoupdate"
 
 function pcr() {
+  local rc
   git add --update
-  _pre_commit run "$@"
-  git add --update
-}
-
-function pca() {
-  git add --update
-  _pre_commit run -a "$@"
-  git add --update
+  _pre_commit run --show-diff-on-failure "$@"
+  rc=$?
+  if [[ $rc -ne 0 ]]; then
+    git add --update
+  fi
+  return $rc
 }
 
 function pcinit() {
