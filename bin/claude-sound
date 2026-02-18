@@ -6,6 +6,18 @@ set -euo pipefail
 
 role="${1:-stop}"
 
+# For stop events, only play when stop_hook_active is true (i.e. this is a
+# "real" stop after any blocking hooks have already run and cleared). This
+# prevents the sound from playing when another Stop hook (e.g. claude-doc-check)
+# is about to block the stop.
+if [[ "$role" == "stop" ]]; then
+  INPUT=$(cat)
+  STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
+  if [[ "$STOP_HOOK_ACTIVE" != "true" ]]; then
+    exit 0
+  fi
+fi
+
 case "$(uname -s)" in
   Darwin)
     case "$role" in
