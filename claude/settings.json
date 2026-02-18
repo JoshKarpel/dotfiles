@@ -40,7 +40,8 @@
           },
           {
             "type": "command",
-            "command": "claude-sound stop"
+            "command": "claude-sound stop",
+            "async": true
           }
         ]
       }
@@ -50,7 +51,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "claude-sound notify"
+            "command": "claude-sound notify",
+            "async": true
           }
         ]
       }
@@ -73,6 +75,8 @@
       "WebFetch(domain:docs.python.org)",
       "WebFetch(domain:packaging.python.org)",
       "WebFetch(domain:just.systems)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:code.claude.com)",
       "Bash(ls *)",
       "Bash(find *)",
       "Bash(which *)",

@@ -31,7 +31,7 @@ The only things Claude sees before using a skill are the name and description in
 
 Don't rely on users saying magic words. Think about what *situations* call for this skill, including ones where Claude should decide to use it on its own, then write a description that captures those scenarios.
 
-Note that the description must be 1024 characters or less, and it must be on a single line (Claude Code does not support multiline YAML).
+Note that the description must be 1024 characters or fewer, and it must be on a single line (Claude Code does not support multiline YAML).
 
 Here are some good examples of discoverable frontmatters:
 
