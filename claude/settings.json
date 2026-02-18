@@ -1,72 +1,5 @@
 {
-  "model": "opusplan",
-  "defaultMode": "acceptEdits",
-  "statusLine": {
-    "type": "command",
-    "command": "claude-statusline"
-  },
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "claude-just-list"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "claude-uv-check"
-          },
-          {
-            "type": "command",
-            "command": "claude-head-tail-check"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "claude-followup-check"
-          },
-          {
-            "type": "command",
-            "command": "claude-sound stop"
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "claude-sound notify"
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
-    "deny": [
-      "Bash(git commit *)",
-      "Bash(git push *)",
-      "Bash(git remote set*)",
-      "Read(**/.env*)",
-      "Edit(**/.env*)",
-      "Bash(*.env*)",
-      "Edit(**/uv.lock)"
-    ],
-    "ask": [],
     "allow": [
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
@@ -113,6 +46,68 @@
       "Bash(dyff *)",
       "Bash(* --version *)",
       "Bash(* --help *)"
+    ],
+    "deny": [
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git remote set*)",
+      "Read(**/.env*)",
+      "Edit(**/.env*)",
+      "Bash(*.env*)",
+      "Edit(**/uv.lock)"
+    ],
+    "ask": []
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-just-list"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-uv-check"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-followup-check"
+          },
+          {
+            "type": "command",
+            "command": "claude-sound stop"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-sound notify"
+          }
+        ]
+      }
     ]
-  }
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "claude-statusline"
+  },
+  "defaultMode": "acceptEdits"
 }
