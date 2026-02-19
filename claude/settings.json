@@ -8,6 +8,7 @@
       "WebFetch(domain:just.systems)",
       "WebFetch(domain:docs.anthropic.com)",
       "WebFetch(domain:code.claude.com)",
+      "WebFetch(domain:pre-commit.com)",
       "Bash(ls *)",
       "Bash(find *)",
       "Bash(which *)",
