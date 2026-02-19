@@ -76,6 +76,10 @@
           {
             "type": "command",
             "command": "claude-uv-check"
+          },
+          {
+            "type": "command",
+            "command": "claude-head-tail-check"
           }
         ]
       }

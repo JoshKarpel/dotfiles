@@ -6,8 +6,9 @@ set -euo pipefail
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 
-# Check if command contains head or tail (as separate commands, not just as part of a word)
-if echo "$COMMAND" | grep -qE '\b(head|tail)\b'; then
+# Check if head/tail is used after a pipe (truncating command output)
+# Allow head/tail when reading files directly (e.g., head /tmp/output.txt)
+if echo "$COMMAND" | grep -qE '\|\s*(head|tail)\b'; then
   cat >&2 <<'EOF'
 Instead of using head/tail to limit output, redirect the full output to a file for later consultation:
   - Use standard redirection: command > /tmp/output.txt 2>&1
