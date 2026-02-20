@@ -16,6 +16,3 @@ disabled = false
 
 [memory_usage]
 disabled = false
-
-[sudo]
-disabled = false
