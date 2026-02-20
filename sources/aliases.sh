@@ -2,6 +2,8 @@
 
 # auto color on everything
 alias ls="ls --color=auto"
+alias ll="ls -lh --color=auto"
+alias la="ls -lha --color=auto"
 alias dir="dir --color=auto"
 alias vdir="vdir --color=auto"
 alias grep="grep --color=auto"
