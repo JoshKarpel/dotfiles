@@ -9,6 +9,7 @@
       "WebFetch(domain:docs.anthropic.com)",
       "WebFetch(domain:code.claude.com)",
       "WebFetch(domain:pre-commit.com)",
+      "WebFetch(domain:istio.io)",
       "Bash(ls *)",
       "Bash(find *)",
       "Bash(which *)",
@@ -59,6 +60,7 @@
     ],
     "ask": []
   },
+  "model": "opus",
   "hooks": {
     "SessionStart": [
       {
@@ -110,6 +112,5 @@
     "type": "command",
     "command": "claude-statusline"
   },
-  "defaultMode": "acceptEdits",
-  "model": "opus"
+  "defaultMode": "acceptEdits"
 }
