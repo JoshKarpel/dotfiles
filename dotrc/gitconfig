@@ -54,15 +54,20 @@
 
 [alias]
     st = status
+    s = status
     co = checkout
+    cob = checkout -b
+    br = branch
+    branches = branch -a
+    remotes = remote -v
     au = add --update
+    aa = add --all
     amend = commit --amend
-    wip = commit --message "wip"
+    wip = commit --message "WIP"
     undo = reset --soft HEAD^
     dc = diff --cached
-
-    l = !bash -c \". ~/dotfiles/sources/git.sh && git_pretty_log $*\"
-    r = "!git l -30"
-    changed = "!git diff --name-only $(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD origin/master 2>/dev/null || echo HEAD)"
-
     root = rev-parse --show-toplevel
+    discard = reset --hard
+    remove-untracked = clean -fd
+    l = log --graph --decorate --pretty=oneline --abbrev-commit
+    la = log --graph --decorate --pretty=oneline --abbrev-commit --all

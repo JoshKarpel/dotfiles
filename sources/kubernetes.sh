@@ -13,6 +13,8 @@ fi
 alias k="kubectl"
 alias wk="watch kubectl"
 alias h="helm"
+alias k9="k9s"
+alias kk="k9s"
 
 alias kge="kubectl get events --sort-by='.lastTimestamp'"
 

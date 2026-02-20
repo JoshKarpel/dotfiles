@@ -18,7 +18,7 @@ alias mv="mv -v"
 alias rm="rm -r"
 
 # mkdir is always verbose and full path
-alias mkdir="mkdir -p"
+alias mkdir="mkdir -v -p"
 
 # cd
 alias ~="cd ~"

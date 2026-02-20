@@ -110,5 +110,6 @@
     "type": "command",
     "command": "claude-statusline"
   },
-  "defaultMode": "acceptEdits"
+  "defaultMode": "acceptEdits",
+  "model": "opus"
 }

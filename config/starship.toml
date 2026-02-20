@@ -13,3 +13,9 @@ disabled = false
 
 [git_metrics]
 disabled = false
+
+[memory_usage]
+disabled = false
+
+[sudo]
+disabled = false
