@@ -70,6 +70,10 @@
           {
             "type": "command",
             "command": "claude-just-list"
+          },
+          {
+            "type": "command",
+            "command": "claude-git-status"
           }
         ]
       }
@@ -95,6 +99,10 @@
           {
             "type": "command",
             "command": "claude-followup-check"
+          },
+          {
+            "type": "command",
+            "command": "claude-untracked-warn"
           },
           {
             "type": "command",

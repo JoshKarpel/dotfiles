@@ -32,13 +32,16 @@ pre-commit run --all-files
 
 Active hooks configured in `~/.claude/settings.json`:
 
-- **SessionStart**: `claude-just-list` — Lists available justfile recipes at session start
+- **SessionStart**:
+  - `claude-just-list` — Lists available justfile recipes at session start
+  - `claude-git-status` — Shows git status at session start
 - **PreToolUse (Bash)**:
   - `claude-uv-check` — Reminds Claude to use `uv run python` in uv projects
   - `claude-head-tail-check` — Reminds Claude to redirect full output to files instead of using head/tail
 - **Stop**:
   - `claude-git-add` — Stages files
   - `claude-followup-check` — Prompts Claude to run tests, update docs, and stage changes before stopping
+  - `claude-untracked-warn` — Asks Claude to handle untracked files (stage, gitignore, or delete) before stopping
   - `claude-sound stop` — Plays stop sound notification; skips when `stop_hook_active` is false so it doesn't play when `claude-followup-check` blocks the stop
 - **Notification**: `claude-sound notify` — Plays notification sound
 - **StatusLine**: `claude-statusline` — Custom status line display

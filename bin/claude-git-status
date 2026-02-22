@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# SessionStart hook: show git status
+
+set -euo pipefail
+
+STATUS=$(git status 2>/dev/null) || exit 0
+
+cat <<EOF
+Current git status:
+
+$STATUS
+EOF
