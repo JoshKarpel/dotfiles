@@ -54,7 +54,14 @@
     "deny": [
       "Bash(git commit *)",
       "Bash(git push *)",
+      "Bash(git reset --hard*)",
+      "Bash(git checkout .)",
+      "Bash(git clean -f*)",
+      "Bash(git restore .)",
+      "Bash(git branch -D *)",
       "Bash(git remote set*)",
+      "Bash(rm -rf *)",
+      "Bash(sudo *)",
       "Read(**/.env*)",
       "Edit(**/.env*)",
       "Bash(*.env*)",
@@ -98,11 +105,11 @@
           },
           {
             "type": "command",
-            "command": "claude-followup-check"
+            "command": "claude-untracked-warn"
           },
           {
             "type": "command",
-            "command": "claude-untracked-warn"
+            "command": "claude-followup-check"
           },
           {
             "type": "command",
