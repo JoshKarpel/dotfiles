@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Stop hook: stage all modified tracked files before stopping
+
+set -euo pipefail
+
+git add --update

@@ -14,4 +14,6 @@ empty=$(( bar_width - filled ))
 bar=$(printf '%0.s█' $(seq 1 $filled 2>/dev/null))
 bar+=$(printf '%0.s░' $(seq 1 $empty 2>/dev/null))
 
-echo "[$model] ${bar} ${context_pct}% ctx"
+date_str=$(date +%Y-%m-%d\ %H:%M:%S)
+
+echo "${date_str} [$model] ${bar} ${context_pct}% ctx"

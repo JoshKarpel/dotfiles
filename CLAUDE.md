@@ -37,6 +37,7 @@ Active hooks configured in `~/.claude/settings.json`:
   - `claude-uv-check` — Reminds Claude to use `uv run python` in uv projects
   - `claude-head-tail-check` — Reminds Claude to redirect full output to files instead of using head/tail
 - **Stop**:
+  - `claude-git-add` — Stages files
   - `claude-followup-check` — Prompts Claude to run tests, update docs, and stage changes before stopping
   - `claude-sound stop` — Plays stop sound notification; skips when `stop_hook_active` is false so it doesn't play when `claude-followup-check` blocks the stop
 - **Notification**: `claude-sound notify` — Plays notification sound

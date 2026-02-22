@@ -10,6 +10,8 @@
       "WebFetch(domain:code.claude.com)",
       "WebFetch(domain:pre-commit.com)",
       "WebFetch(domain:istio.io)",
+      "Edit(//tmp/**)",
+      "Read(//tmp/**)",
       "Bash(ls *)",
       "Bash(find *)",
       "Bash(which *)",
@@ -86,6 +88,10 @@
     "Stop": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "claude-git-add"
+          },
           {
             "type": "command",
             "command": "claude-followup-check"
