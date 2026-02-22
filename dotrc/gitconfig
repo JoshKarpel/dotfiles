@@ -70,4 +70,5 @@
     discard = reset --hard
     remove-untracked = clean -fd
     l = log --graph --decorate --pretty=oneline --abbrev-commit
+    r = !git --no-pager l -n 30
     la = log --graph --decorate --pretty=oneline --abbrev-commit --all
