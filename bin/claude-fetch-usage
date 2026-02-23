@@ -33,12 +33,19 @@ get_token() {
 }
 
 token=$(get_token)
-[[ -n "$token" ]] || exit 0
+if [[ -z "$token" ]]; then
+  echo "claude-fetch-usage: no OAuth token found in credential store" >&2
+  exit 0
+fi
 
 # Fetch usage from the Anthropic API
 response=$(curl -sf \
     -H "Authorization: Bearer ${token}" \
     -H "Accept: application/json" \
-  "https://api.anthropic.com/api/oauth/usage" 2>/dev/null) || exit 0
+  "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
+if [[ $? -ne 0 || -z "$response" ]]; then
+  echo "claude-fetch-usage: API request failed" >&2
+  exit 0
+fi
 
 echo "$response" | tee "$CACHE_FILE"

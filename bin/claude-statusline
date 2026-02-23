@@ -19,8 +19,8 @@ date_str=$(date +%Y-%m-%d\ %H:%M:%S)
 # Fetch cached usage limits (gracefully skipped if unavailable)
 usage=$(claude-fetch-usage 2>/dev/null)
 if [[ -n "$usage" ]]; then
-  five_hour_pct=$(echo "$usage" | jq -r '(.five_hour.utilization * 100 | floor | tostring) + "%" // empty' 2>/dev/null)
-  seven_day_pct=$(echo "$usage" | jq -r '(.seven_day.utilization * 100 | floor | tostring) + "%" // empty' 2>/dev/null)
+  five_hour_pct=$(echo "$usage" | jq -r 'if (.five_hour.utilization | type) == "number" then (.five_hour.utilization * 100 | floor | tostring) + "%" else empty end' 2>/dev/null)
+  seven_day_pct=$(echo "$usage" | jq -r 'if (.seven_day.utilization | type) == "number" then (.seven_day.utilization * 100 | floor | tostring) + "%" else empty end' 2>/dev/null)
 fi
 
 status="${date_str} [$model] ${bar} ${context_pct}% ctx"
