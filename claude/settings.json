@@ -12,6 +12,7 @@
       "WebFetch(domain:code.claude.com)",
       "WebFetch(domain:pre-commit.com)",
       "WebFetch(domain:istio.io)",
+      "WebFetch(domain:argo-cd.readthedocs.io)",
       "Edit(//tmp/**)",
       "Read(//tmp/**)",
       "Bash(ls *)",
