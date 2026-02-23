@@ -8,10 +8,10 @@ UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null)
 [[ -z "$UNTRACKED" ]] && exit 0
 
 cat >&2 <<EOF
-There are untracked files:
+There are untracked files.
+For each file, decide what to do with it: stage it with git add, add it to .gitignore, or delete it. If you're not sure, ask for help.
+Files:
 
 $UNTRACKED
-
-For each file, decide what to do with it: stage it with git add, add it to .gitignore, or delete it. If you're not sure, ask for help.
 EOF
 exit 2
