@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Show current Claude Code API usage limits
+
+usage=$(claude-fetch-usage 2>/dev/null)
+if [[ -z "$usage" ]]; then
+  echo "Could not fetch usage data (no token or API error)"
+  exit 1
+fi
+
+# Format seconds remaining as human-readable string
+fmt_remaining() {
+  local secs=$1
+  if (( secs <= 0 )); then echo "now"; return; fi
+  local d=$(( secs / 86400 )) h=$(( (secs % 86400) / 3600 )) m=$(( (secs % 3600) / 60 ))
+  if (( d > 0 )); then echo "${d}d ${h}h ${m}m"
+  elif (( h > 0 )); then echo "${h}h ${m}m"
+else echo "${m}m"; fi
+}
+
+# Colorize a value: red >80%, yellow >60%
+colorize() {
+  local val=$1 text=$2
+  if (( val > 80 )); then echo "\033[31m${text}\033[0m"
+  elif (( val > 60 )); then echo "\033[33m${text}\033[0m"
+else echo "\033[32m${text}\033[0m"; fi
+}
+
+now=$(date +%s)
+
+echo ""
+for window in five_hour seven_day; do
+  pct=$(echo "$usage" | jq -r "if (.${window}.utilization | type) == \"number\" then .${window}.utilization | floor else empty end" 2>/dev/null)
+  resets_at=$(echo "$usage" | jq -r ".${window}.resets_at // empty" 2>/dev/null)
+
+  if [[ -z "$pct" ]]; then continue; fi
+
+  remaining=""
+  if [[ -n "$resets_at" ]]; then
+    remaining=$(fmt_remaining $(( $(date -d "$resets_at" +%s 2>/dev/null) - now )))
+  fi
+
+  case "$window" in
+    five_hour) label="5-hour" ;;
+    seven_day) label="7-day " ;;
+  esac
+
+  pct_padded=$(printf '%4s' "${pct}%")
+  echo -e "  ${label}  $(colorize "$pct" "$pct_padded")  resets in ${remaining:-unknown}"
+done
