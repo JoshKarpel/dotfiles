@@ -7,24 +7,48 @@ data=$(cat)
 model=$(echo "$data" | jq -r '.model.display_name // "unknown"')
 context_pct=$(echo "$data" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
 
-# Build a simple progress bar for context usage
-bar_width=10
-filled=$(( context_pct * bar_width / 100 ))
-empty=$(( bar_width - filled ))
-bar=$(printf '%0.s█' $(seq 1 $filled 2>/dev/null))
-bar+=$(printf '%0.s░' $(seq 1 $empty 2>/dev/null))
-
-date_str=$(date +%Y-%m-%d\ %H:%M:%S)
+date_str=$(date +%Y-%m-%d\ %H:%M)
 
 # Fetch cached usage limits (gracefully skipped if unavailable)
 usage=$(claude-fetch-usage 2>/dev/null)
+
+# Format seconds remaining as human-readable string
+fmt_remaining() {
+  local secs=$1
+  if (( secs <= 0 )); then echo "now"; return; fi
+  local h=$(( secs / 3600 )) m=$(( (secs % 3600) / 60 ))
+  if (( h > 0 )); then echo "${h}h${m}m"
+else echo "${m}m"; fi
+}
+
 if [[ -n "$usage" ]]; then
-  five_hour_pct=$(echo "$usage" | jq -r 'if (.five_hour.utilization | type) == "number" then (.five_hour.utilization * 100 | floor | tostring) + "%" else empty end' 2>/dev/null)
-  seven_day_pct=$(echo "$usage" | jq -r 'if (.seven_day.utilization | type) == "number" then (.seven_day.utilization * 100 | floor | tostring) + "%" else empty end' 2>/dev/null)
+  now=$(date +%s)
+  five_hour_pct=$(echo "$usage" | jq -r 'if (.five_hour.utilization | type) == "number" then (.five_hour.utilization | floor | tostring) + "%" else empty end' 2>/dev/null)
+  seven_day_pct=$(echo "$usage" | jq -r 'if (.seven_day.utilization | type) == "number" then (.seven_day.utilization | floor | tostring) + "%" else empty end' 2>/dev/null)
+  five_hour_resets=$(echo "$usage" | jq -r '.five_hour.resets_at // empty' 2>/dev/null)
+  seven_day_resets=$(echo "$usage" | jq -r '.seven_day.resets_at // empty' 2>/dev/null)
+  if [[ -n "$five_hour_resets" ]]; then
+    five_hour_remaining=$(fmt_remaining $(( $(date -d "$five_hour_resets" +%s 2>/dev/null) - now )))
+  fi
+  if [[ -n "$seven_day_resets" ]]; then
+    seven_day_remaining=$(fmt_remaining $(( $(date -d "$seven_day_resets" +%s 2>/dev/null) - now )))
+  fi
 fi
 
-status="${date_str} [$model] ${bar} ${context_pct}% ctx"
+# Colorize a value: red >80%, yellow >60%
+colorize() {
+  local val=$1 text=$2
+  if (( val > 80 )); then echo "\033[31m${text}\033[0m"
+  elif (( val > 60 )); then echo "\033[33m${text}\033[0m"
+else echo "$text"; fi
+}
+
+status="${date_str} | $model $(colorize "$context_pct" "ctx:${context_pct}%")"
 if [[ -n "${five_hour_pct:-}" && -n "${seven_day_pct:-}" ]]; then
-  status+=" | 5h:${five_hour_pct} 7d:${seven_day_pct}"
+  five_hour_val=${five_hour_pct%\%}
+  seven_day_val=${seven_day_pct%\%}
+  local_5h="${five_hour_pct}${five_hour_remaining:+ (${five_hour_remaining})}"
+  local_7d="${seven_day_pct}${seven_day_remaining:+ (${seven_day_remaining})}"
+  status+=" | $(colorize "${five_hour_val}" "5h:${local_5h}") $(colorize "${seven_day_val}" "7d:${local_7d}")"
 fi
-echo "$status"
+echo -e "$status"

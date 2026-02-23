@@ -42,6 +42,7 @@ fi
 response=$(curl -sf \
     -H "Authorization: Bearer ${token}" \
     -H "Accept: application/json" \
+    -H "anthropic-beta: oauth-2025-04-20" \
   "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
 if [[ $? -ne 0 || -z "$response" ]]; then
   echo "claude-fetch-usage: API request failed" >&2
