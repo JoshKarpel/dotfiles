@@ -26,11 +26,6 @@
 [rerere]
     enabled = true
 
-[help]
-    autoCorrect = prompt
-
-[diff]
-
 [color]
     ui = auto
     diff = auto
