@@ -16,4 +16,15 @@ bar+=$(printf '%0.s░' $(seq 1 $empty 2>/dev/null))
 
 date_str=$(date +%Y-%m-%d\ %H:%M:%S)
 
-echo "${date_str} [$model] ${bar} ${context_pct}% ctx"
+# Fetch cached usage limits (gracefully skipped if unavailable)
+usage=$(claude-fetch-usage 2>/dev/null)
+if [[ -n "$usage" ]]; then
+  five_hour_pct=$(echo "$usage" | jq -r '(.five_hour.utilization * 100 | floor | tostring) + "%" // empty' 2>/dev/null)
+  seven_day_pct=$(echo "$usage" | jq -r '(.seven_day.utilization * 100 | floor | tostring) + "%" // empty' 2>/dev/null)
+fi
+
+status="${date_str} [$model] ${bar} ${context_pct}% ctx"
+if [[ -n "${five_hour_pct:-}" && -n "${seven_day_pct:-}" ]]; then
+  status+=" | 5h:${five_hour_pct} 7d:${seven_day_pct}"
+fi
+echo "$status"

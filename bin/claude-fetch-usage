@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Fetch Claude Code usage limits from the Anthropic API, with caching.
+# Outputs the raw JSON from the API, or exits silently if unavailable.
+# Cache is stored globally (shared across Claude Code instances on this machine).
+
+CACHE_FILE="${TMPDIR:-/tmp}/claude-usage-cache.json"
+CACHE_TTL=30 # seconds
+
+# Return cached result if still fresh
+if [[ -f "$CACHE_FILE" ]]; then
+  case "$(uname -s)" in
+    Darwin) mtime=$(stat -f %m "$CACHE_FILE") ;;
+    *) mtime=$(stat -c %Y "$CACHE_FILE") ;;
+  esac
+  if (( $(date +%s) - mtime < CACHE_TTL )); then
+    cat "$CACHE_FILE"
+    exit 0
+  fi
+fi
+
+# Get the OAuth access token from platform-specific credential storage
+get_token() {
+  case "$(uname -s)" in
+    Darwin)
+      security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null \
+        | jq -r '.claudeAiOauth.accessToken // empty' 2>/dev/null
+      ;;
+    *)
+      jq -r '.claudeAiOauth.accessToken // empty' \
+        "${HOME}/.claude/.credentials.json" 2>/dev/null
+      ;;
+  esac
+}
+
+token=$(get_token)
+[[ -n "$token" ]] || exit 0
+
+# Fetch usage from the Anthropic API
+response=$(curl -sf \
+    -H "Authorization: Bearer ${token}" \
+    -H "Accept: application/json" \
+  "https://api.anthropic.com/api/oauth/usage" 2>/dev/null) || exit 0
+
+echo "$response" | tee "$CACHE_FILE"
