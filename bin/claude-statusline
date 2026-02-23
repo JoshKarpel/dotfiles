@@ -33,6 +33,13 @@ if [[ -n "$usage" ]]; then
   if [[ -n "$seven_day_resets" ]]; then
     seven_day_remaining=$(fmt_remaining $(( $(date -d "$seven_day_resets" +%s 2>/dev/null) - now )))
   fi
+
+  extra_enabled=$(echo "$usage" | jq -r '.extra_usage.is_enabled // false' 2>/dev/null)
+  if [[ "$extra_enabled" == "true" ]]; then
+    extra_pct=$(echo "$usage" | jq -r '.extra_usage.utilization | floor | tostring' 2>/dev/null)
+    extra_used=$(echo "$usage" | jq -r '.extra_usage.used_credits / 100 | floor' 2>/dev/null)
+    extra_limit=$(echo "$usage" | jq -r '.extra_usage.monthly_limit / 100' 2>/dev/null)
+  fi
 fi
 
 # Colorize a value: red >80%, yellow >60%
@@ -50,5 +57,8 @@ if [[ -n "${five_hour_pct:-}" && -n "${seven_day_pct:-}" ]]; then
   local_5h="${five_hour_pct}${five_hour_remaining:+ (${five_hour_remaining})}"
   local_7d="${seven_day_pct}${seven_day_remaining:+ (${seven_day_remaining})}"
   status+=" | $(colorize "${five_hour_val}" "5h:${local_5h}") $(colorize "${seven_day_val}" "7d:${local_7d}")"
+fi
+if [[ -n "${extra_pct:-}" ]]; then
+  status+=" | $(colorize "${extra_pct}" "extra:${extra_pct}% \$${extra_used}/\$${extra_limit}")"
 fi
 echo -e "$status"

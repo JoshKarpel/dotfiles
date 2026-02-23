@@ -47,3 +47,16 @@ for window in five_hour seven_day; do
   pct_padded=$(printf '%4s' "${pct}%")
   echo -e "  ${label}  $(colorize "$pct" "$pct_padded")  resets in ${remaining:-unknown}"
 done
+
+# Extra usage (monthly spend limit)
+extra_enabled=$(echo "$usage" | jq -r '.extra_usage.is_enabled // false' 2>/dev/null)
+if [[ "$extra_enabled" == "true" ]]; then
+  extra_pct=$(echo "$usage" | jq -r '.extra_usage.utilization | floor' 2>/dev/null)
+  extra_used=$(echo "$usage" | jq -r '.extra_usage.used_credits / 100 | floor' 2>/dev/null)
+  extra_limit=$(echo "$usage" | jq -r '.extra_usage.monthly_limit / 100' 2>/dev/null)
+
+  if [[ -n "$extra_pct" ]]; then
+    pct_padded=$(printf '%4s' "${extra_pct}%")
+    echo -e "  extra   $(colorize "$extra_pct" "$pct_padded")  \$${extra_used}/\$${extra_limit}"
+  fi
+fi
