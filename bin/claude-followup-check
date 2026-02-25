@@ -12,6 +12,12 @@ if [[ "$STOP_HOOK_ACTIVE" == "true" ]]; then
   exit 0
 fi
 
+# If the last message ended with a question, Claude is waiting for user input
+LAST_MSG=$(echo "$INPUT" | jq -r '.last_assistant_message // ""')
+if [[ "$LAST_MSG" =~ \?[[:space:]]*$ ]]; then
+  exit 0
+fi
+
 # Remind Claude to do followup work
 cat >&2 <<'EOF'
 Do you need to add, change, or remove any tests, documentation, plans, code comments, justfile recipes, CLAUDE.md, or similar?
