@@ -20,7 +20,7 @@ fi
 
 # Remind Claude to do followup work
 cat >&2 <<'EOF'
-Do you need to add, change, or remove any tests, documentation, plans, code comments, justfile recipes, CLAUDE.md, or similar?
+Do you need to add, change, or remove any tests, documentation, changelogs, plans, code comments, justfile recipes, CLAUDE.md, or similar?
 EOF
 
 # Exit 2 blocks the stop and shows the message to Claude
