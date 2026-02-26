@@ -14,6 +14,7 @@
       "WebFetch(domain:istio.io)",
       "WebFetch(domain:argo-cd.readthedocs.io)",
       "WebFetch(domain:keepachangelog.com)",
+      "WebFetch(domain:joshkarpel.github.io)",
       "Edit(//tmp/**)",
       "Read(//tmp/**)",
       "Bash(ls *)",
