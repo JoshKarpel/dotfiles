@@ -2,6 +2,7 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:github.com)",
+      "WebFetch(domain:api.github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:gist.github.com)",
       "WebFetch(domain:gist.githubusercontent.com)",
@@ -15,6 +16,7 @@
       "WebFetch(domain:argo-cd.readthedocs.io)",
       "WebFetch(domain:keepachangelog.com)",
       "WebFetch(domain:joshkarpel.github.io)",
+      "WebFetch(domain:docs.rs)",
       "Edit(//tmp/**)",
       "Read(//tmp/**)",
       "Bash(ls *)",
