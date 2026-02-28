@@ -50,6 +50,9 @@ fi
 # rust environment
 path_postfix "$HOME/.cargo/bin"
 
+# repository-local node modules binaries
+export PATH="$PATH:./node_modules/.bin"
+
 # override some BSD utils with GNU utils from the brew findutils package
 if [[ $(uname) == "Darwin" ]]; then
   path_prefix "/opt/homebrew/opt/findutils/libexec/gnubin"
