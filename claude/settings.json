@@ -58,6 +58,7 @@
       "Bash(gh pr view *)",
       "Bash(gh cache list *)",
       "Bash(gh search *)",
+      "Bash(gh api graphql *)",
       "Bash(gh status *)",
       "Bash(dyff *)",
       "Bash(* --version *)",
@@ -81,7 +82,6 @@
     ],
     "ask": []
   },
-  "model": "opus",
   "hooks": {
     "SessionStart": [
       {
@@ -145,5 +145,6 @@
     "type": "command",
     "command": "claude-statusline"
   },
-  "defaultMode": "acceptEdits"
+  "defaultMode": "acceptEdits",
+  "model": "opus"
 }

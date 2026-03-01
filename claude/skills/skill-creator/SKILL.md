@@ -53,7 +53,7 @@ description: Toolkit for viewing, reading, extracting text, creating, editing, c
 
 The toolbox pattern is implemented by skills that contain non-trivial automation scripts (AKA "tools") and teach Claude how to use them. SKILL.md provides context and information about how to properly use the tools; the tools themselves are python scripts that encapsulate complexity and run commands without clogging up Claude's context window or making silly mistakes. This helps keeps Claude focused on *when* and *how* to invoke tools rather than repeatedly reimplementing their logic, which over the course of a long session substantially increases reliability.
 
-For scripting, always prefer python. Run shell commands with `subprocess.run`. Don't use shell commands for operations that could be performed in python (file manipulation, hashing, regex, etc). When done properly, these scripts are trivially portable across platforms.
+Bash is fine for simple wrappers (a few commands, no parsing). For anything with non-trivial logic — parsing, data transformation, multi-step operations, error handling — prefer python. Run shell commands with `subprocess.run`. Don't use shell commands for operations that could be performed in python (file manipulation, hashing, regex, etc). When done properly, these scripts are trivially portable across platforms.
 
 Always use `uv` with inline dependencies. In the SKILL.md text, make it clear that the scripts must be invoked with `uv`. If you're not *extremely clear* that Claude should use `uv`, Claude **will** try to run the scripts with `python3` and then be confused when it doesn't work.
 
