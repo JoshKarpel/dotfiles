@@ -17,6 +17,7 @@
       "WebFetch(domain:keepachangelog.com)",
       "WebFetch(domain:joshkarpel.github.io)",
       "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:pyo3.rs)",
       "Edit(//tmp/**)",
       "Read(//tmp/**)",
       "Bash(ls *)",
