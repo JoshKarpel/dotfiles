@@ -16,8 +16,9 @@ usage=$(claude-fetch-usage 2>/dev/null)
 fmt_remaining() {
   local secs=$1
   if (( secs <= 0 )); then echo "now"; return; fi
-  local h=$(( secs / 3600 )) m=$(( (secs % 3600) / 60 ))
-  if (( h > 0 )); then echo "${h}h${m}m"
+  local d=$(( secs / 86400 )) h=$(( (secs % 86400) / 3600 )) m=$(( (secs % 3600) / 60 ))
+  if (( d > 0 )); then echo "${d}d${h}h${m}m"
+  elif (( h > 0 )); then echo "${h}h${m}m"
 else echo "${m}m"; fi
 }
 
