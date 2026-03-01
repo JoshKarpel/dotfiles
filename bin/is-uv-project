@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Check if the current directory is inside a uv project (has uv.lock at repo root)
+
+set -euo pipefail
+
+[[ -f "$(git root)/uv.lock" ]]

@@ -6,7 +6,7 @@ set -euo pipefail
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 
-if ! is_uv_project; then
+if ! is-uv-project; then
   exit 0
 fi
 

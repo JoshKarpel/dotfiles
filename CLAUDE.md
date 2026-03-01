@@ -45,6 +45,10 @@ Active hooks configured in `~/.claude/settings.json`:
 - **Notification**: `claude-sound notify` — Plays notification sound
 - **StatusLine**: `claude-statusline` — Custom status line display
 
+## Hook Design
+
+Hooks run in non-interactive shell subprocesses, so functions defined in `sources/` (e.g., `exists`) are **not available**. Any shared logic needed by hooks must be a standalone script in `bin/`, not a sourced function.
+
 ## Conventions
 
 - Shell scripts use 2-space indentation (enforced by beautysh via pre-commit)

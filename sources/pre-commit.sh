@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 function _pre_commit() {
-  if is_uv_project; then
+  if is-uv-project; then
     uv run pre-commit "$@"
   else
     uvx pre-commit "$@"
