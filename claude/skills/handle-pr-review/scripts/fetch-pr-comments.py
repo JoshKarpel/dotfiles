@@ -99,11 +99,12 @@ def detect_repo() -> tuple[str, str]:
 
 
 def fetch_pr_data(owner: str, name: str, number: int) -> dict:
-    variables = json.dumps({"owner": owner, "name": name, "number": number})
     raw = run_gh(
         "api", "graphql",
         "-f", f"query={GRAPHQL_QUERY}",
-        "-f", f"variables={variables}",
+        "-f", f"owner={owner}",
+        "-f", f"name={name}",
+        "-F", f"number={number}",
     )
     data = json.loads(raw)
     if "errors" in data:
