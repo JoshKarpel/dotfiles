@@ -37,6 +37,7 @@ Active hooks configured in `~/.claude/settings.json`:
   - `claude-git-status` — Shows git status at session start
 - **PreToolUse (Bash)**:
   - `claude-uv-check` — Reminds Claude to use `uv run python` in uv projects
+  - `claude-read-check` — Blocks `sed -n X,Yp`, `head -n N file`, and `tail -n N file` used just to read files; tells Claude to use the Read tool with `offset`/`limit` instead
 - **Stop**:
   - `claude-git-add` — Stages files
   - `claude-followup-check` — Prompts Claude to run tests, update docs, and stage changes before stopping

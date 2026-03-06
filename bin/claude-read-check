@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# PreToolUse hook: block sed/head/tail used just to read file line ranges;
+# the Read tool handles this natively with offset/limit and doesn't need approval.
+
+set -euo pipefail
+
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
+
+# Detect: sed -n 'X,Yp' file  (line-range reads)
+if echo "$COMMAND" | grep -qE "sed\s+-n\s+['\"]?[0-9]+,[0-9]+p['\"]?"; then
+  echo "Use the Read tool with 'offset' and 'limit' parameters instead of 'sed -n X,Yp'. It reads line ranges natively and doesn't require Bash approval." >&2
+  exit 2
+fi
+
+# Detect: head -n N file  (reading first N lines of a file, not in a pipeline)
+if echo "$COMMAND" | grep -qE "^head\s+-n\s+[0-9]+\s+\S+$"; then
+  echo "Use the Read tool with 'limit' instead of 'head -n N file'. It reads the first N lines natively and doesn't require Bash approval." >&2
+  exit 2
+fi
+
+# Detect: tail -n N file  (reading last N lines of a file, not in a pipeline)
+if echo "$COMMAND" | grep -qE "^tail\s+-n\s+[0-9]+\s+\S+$"; then
+  echo "Use the Read tool instead of 'tail -n N file'. Read the file with an appropriate offset (use 'wc -l' first if needed to find the line count). This avoids Bash approval." >&2
+  exit 2
+fi
+
+exit 0
