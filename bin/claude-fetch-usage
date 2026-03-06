@@ -4,18 +4,31 @@
 # Cache is stored globally (shared across Claude Code instances on this machine).
 
 CACHE_FILE="${TMPDIR:-/tmp}/claude-usage-cache.json"
-CACHE_TTL=30 # seconds
+LOCK_FILE="${TMPDIR:-/tmp}/claude-usage-cache.lock"
+CACHE_TTL=60 # seconds
 
-# Return cached result if still fresh
-if [[ -f "$CACHE_FILE" ]]; then
+cache_fresh() {
+  [[ -f "$CACHE_FILE" ]] || return 1
   case "$(uname -s)" in
     Darwin) mtime=$(stat -f %m "$CACHE_FILE") ;;
     *) mtime=$(stat -c %Y "$CACHE_FILE") ;;
   esac
-  if (( $(date +%s) - mtime < CACHE_TTL )); then
-    cat "$CACHE_FILE"
-    exit 0
-  fi
+  (( $(date +%s) - mtime < CACHE_TTL ))
+}
+
+# Fast path: return cached result if still fresh (no lock needed)
+if cache_fresh; then
+  cat "$CACHE_FILE"
+  exit 0
+fi
+
+# Slow path: acquire lock, re-check, then fetch
+exec 9>"$LOCK_FILE"
+flock 9
+
+if cache_fresh; then
+  cat "$CACHE_FILE"
+  exit 0
 fi
 
 # Get the OAuth access token from platform-specific credential storage
@@ -39,14 +52,19 @@ if [[ -z "$token" ]]; then
 fi
 
 # Fetch usage from the Anthropic API
-response=$(curl -sf \
+response=$(curl -s \
     -H "Authorization: Bearer ${token}" \
     -H "Accept: application/json" \
     -H "anthropic-beta: oauth-2025-04-20" \
-  "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
-if [[ $? -ne 0 || -z "$response" ]]; then
-  echo "claude-fetch-usage: API request failed" >&2
+    -w "\n%{http_code}" \
+  "https://api.anthropic.com/api/oauth/usage" 2>&1)
+http_status="${response##*$'\n'}"
+body="${response%$'\n'*}"
+if [[ "$http_status" != "200" || -z "$body" ]]; then
+  echo "claude-fetch-usage: API request failed (HTTP ${http_status}): ${body}" >&2
   exit 0
 fi
+response="$body"
 
-echo "$response" | tee "$CACHE_FILE"
+echo "$response" > "${CACHE_FILE}.tmp" && mv "${CACHE_FILE}.tmp" "$CACHE_FILE"
+echo "$response"
