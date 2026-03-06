@@ -10,17 +10,22 @@ Fetch PR review data and address reviewer feedback locally in the code. **Never 
 ## Fetching Review Data
 
 ```bash
-claude/skills/handle-pr-review/scripts/fetch-pr-comments.py
-claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --unresolved-only
 claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --no-diff
-claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --number 42
+claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --no-diff --unresolved-only
+claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --no-diff --number 42
 ```
 
-The script is directly executable (uses `uv run` via shebang). It auto-detects the PR from the current branch. Use `--number` to override. Use `--unresolved-only` to focus on threads that still need attention. Use `--no-diff` to skip the diff (saves context when you only need comments).
+The script is directly executable (uses `uv run` via shebang). It auto-detects the PR from the current branch. Use `--number` to override. Use `--unresolved-only` to focus on threads that still need attention.
+
+If you need the diff (e.g. to understand context not visible from the comments alone), omit `--no-diff`:
+
+```bash
+claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --unresolved-only
+```
 
 ## Workflow
 
-1. **Fetch** the review data using the script above (start with `--unresolved-only` unless the user wants everything)
+1. **Fetch** the review data using the script above (start with `--no-diff --unresolved-only` unless the user wants everything)
 2. **Triage** the threads:
    - If multiple threads share a pattern (e.g., "add type annotations", "use consistent naming"), group them and address as a batch
    - Otherwise, work through threads one by one

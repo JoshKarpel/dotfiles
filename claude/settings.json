@@ -18,6 +18,7 @@
       "WebFetch(domain:joshkarpel.github.io)",
       "WebFetch(domain:docs.rs)",
       "WebFetch(domain:pyo3.rs)",
+      "WebFetch(domain:www.w3.org)",
       "Edit(//tmp/**)",
       "Read(//tmp/**)",
       "Bash(ls *)",
@@ -146,5 +147,5 @@
     "command": "claude-statusline"
   },
   "defaultMode": "acceptEdits",
-  "model": "opus"
+  "model": "opusplan"
 }
