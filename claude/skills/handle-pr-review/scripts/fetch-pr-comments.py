@@ -141,7 +141,7 @@ def format_truncation_warnings(pr: dict) -> list[str]:
     return warnings
 
 
-def format_output(pr: dict, diff: str | None, unresolved_only: bool) -> str:
+def format_output(pr: dict, diff: str | None, unresolved_only: bool, no_outdated: bool = False) -> str:
     lines: list[str] = []
 
     # Header
@@ -192,6 +192,10 @@ def format_output(pr: dict, diff: str | None, unresolved_only: bool) -> str:
     threads = pr.get("reviewThreads", {}).get("nodes", [])
     unresolved = [t for t in threads if not t["isResolved"]]
     resolved = [t for t in threads if t["isResolved"]]
+
+    if no_outdated:
+        unresolved = [t for t in unresolved if not t.get("isOutdated")]
+        resolved = [t for t in resolved if not t.get("isOutdated")]
 
     if unresolved_only:
         thread_groups = [("Unresolved Threads", unresolved)]
@@ -268,6 +272,10 @@ def main():
         "--unresolved-only", action="store_true",
         help="Only show unresolved review threads",
     )
+    parser.add_argument(
+        "--no-outdated", action="store_true",
+        help="Exclude outdated review threads",
+    )
     args = parser.parse_args()
 
     # Detect PR and repo
@@ -282,7 +290,7 @@ def main():
         diff = fetch_diff(number)
 
     # Format and print
-    output = format_output(pr, diff, args.unresolved_only)
+    output = format_output(pr, diff, args.unresolved_only, args.no_outdated)
     print(output)
 
 

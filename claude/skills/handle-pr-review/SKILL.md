@@ -17,8 +17,9 @@ Run the fetch script directly:
 
 ```bash
 ~/.claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --no-diff --unresolved-only
-# or, to specify a PR:
-~/.claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --no-diff --unresolved-only --number 42
+# common additions:
+#   --no-outdated   skip threads marked as outdated (code changed since the comment was made)
+#   --number 42     specify a PR instead of auto-detecting from the current branch
 ```
 
 If diff context is needed to understand a specific thread, fetch it in a subagent for that thread only (see step 3).
