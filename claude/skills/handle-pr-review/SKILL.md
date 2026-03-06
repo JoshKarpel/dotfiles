@@ -10,9 +10,9 @@ Fetch PR review data and address reviewer feedback locally in the code. **Never 
 ## Fetching Review Data
 
 ```bash
-claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --no-diff
-claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --no-diff --unresolved-only
-claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --no-diff --number 42
+~/.claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --no-diff
+~/.claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --no-diff --unresolved-only
+~/.claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --no-diff --number 42
 ```
 
 The script is directly executable (uses `uv run` via shebang). It auto-detects the PR from the current branch. Use `--number` to override. Use `--unresolved-only` to focus on threads that still need attention.
@@ -20,7 +20,7 @@ The script is directly executable (uses `uv run` via shebang). It auto-detects t
 If you need the diff (e.g. to understand context not visible from the comments alone), omit `--no-diff`:
 
 ```bash
-claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --unresolved-only
+~/.claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --unresolved-only
 ```
 
 ## Workflow
