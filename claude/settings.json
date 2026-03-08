@@ -19,6 +19,7 @@
       "WebFetch(domain:docs.rs)",
       "WebFetch(domain:pyo3.rs)",
       "WebFetch(domain:www.w3.org)",
+      "WebFetch(domain:www.structlog.org)",
       "Edit(//tmp/**)",
       "Read(//tmp/**)",
       "Bash(ls *)",
@@ -83,6 +84,7 @@
     ],
     "ask": []
   },
+  "model": "opusplan",
   "hooks": {
     "SessionStart": [
       {
@@ -150,6 +152,5 @@
     "type": "command",
     "command": "claude-statusline"
   },
-  "defaultMode": "acceptEdits",
-  "model": "opusplan"
+  "defaultMode": "acceptEdits"
 }
