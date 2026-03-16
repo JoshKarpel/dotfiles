@@ -23,6 +23,7 @@
       "WebFetch(domain:webkit.org)",
       "WebFetch(domain:pypi.org)",
       "WebFetch(domain:en.wikipedia.org)",
+      "WebFetch(domain:docs.crossplane.io)",
       "Edit(//tmp/**)",
       "Read(//tmp/**)",
       "Bash(ls *)",
