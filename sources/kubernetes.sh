@@ -45,6 +45,19 @@ function ktx() {
   fi
 }
 
+function kfg() {
+  local cfg=$1
+
+  if [[ -z $cfg ]]; then
+    for f in ~/.kube/*; do
+      [[ -f $f ]] && echo "${f##*/}"
+    done
+  else
+    echo "Setting KUBECONFIG=${HOME}/.kube/${cfg}"
+    export KUBECONFIG="${HOME}/.kube/${cfg}"
+  fi
+}
+
 function kns() {
   local target=$1
 
