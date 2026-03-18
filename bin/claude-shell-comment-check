@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# PreToolUse hook: block shell commands containing #.
+# The permission harness treats # as a comment, truncating the rest of the
+# command and causing it to fail pattern matching, which requires manual approval.
+
+set -euo pipefail
+
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
+
+if echo "$COMMAND" | grep -q '#'; then
+  echo "Do not use # in shell commands. If you need inline comments or a multi-line script, write it to a temporary file (e.g. /tmp/script_$$.sh or /tmp/script_$$.py) and run that instead." >&2
+  exit 2
+fi
+
+exit 0

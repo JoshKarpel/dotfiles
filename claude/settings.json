@@ -44,12 +44,13 @@
       "Bash(git status *)",
       "Bash(git diff *)",
       "Bash(git log *)",
-      "Bash(git branch *)",
-      "Bash(git show *)",
+      "Bash(git branch*)",
+      "Bash(git show*)",
       "Bash(git rev-parse *)",
-      "Bash(git remote *)",
-      "Bash(git fetch *)",
+      "Bash(git remote*)",
+      "Bash(git fetch*)",
       "Bash(git add *)",
+      "Bash(git mv *)",
       "Bash(gh repo list *)",
       "Bash(gh repo view *)",
       "Bash(gh repo clone *)",
@@ -66,9 +67,23 @@
       "Bash(gh search *)",
       "Bash(gh api graphql *)",
       "Bash(gh status *)",
+      "Bash(uv run *)",
+      "Bash(uv sync *)",
+      "Bash(cp *)",
+      "Bash(sort *)",
+      "Bash(uniq *)",
+      "Bash(pre-commit run*)",
+      "Bash(kubectl get *)",
+      "Bash(kubectl describe *)",
+      "Bash(kubectl logs *)",
+      "Bash(kubectl explain *)",
+      "Bash(helm list*)",
+      "Bash(helm status *)",
+      "Bash(helm get *)",
+      "Bash(helm show *)",
       "Bash(dyff *)",
-      "Bash(* --version *)",
-      "Bash(* --help *)"
+      "Bash(* --version*)",
+      "Bash(* --help*)"
     ],
     "deny": [
       "Bash(git commit *)",
@@ -115,6 +130,10 @@
           {
             "type": "command",
             "command": "claude-read-check"
+          },
+          {
+            "type": "command",
+            "command": "claude-shell-comment-check"
           }
         ]
       }
