@@ -5,8 +5,32 @@ set -euo pipefail
 
 STATUS=$(git status 2>/dev/null) || exit 0
 
+CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null) || CURRENT_BRANCH=""
+
+# Determine the default branch
+DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||') || DEFAULT_BRANCH=""
+if [[ -z "$DEFAULT_BRANCH" ]]; then
+  if git show-ref --verify --quiet refs/heads/main; then
+    DEFAULT_BRANCH="main"
+  elif git show-ref --verify --quiet refs/heads/master; then
+    DEFAULT_BRANCH="master"
+  fi
+fi
+
 cat <<EOF
 Current git status:
 
 $STATUS
 EOF
+
+if [[ -n "$CURRENT_BRANCH" && -n "$DEFAULT_BRANCH" && "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]]; then
+  LOG=$(git log "${DEFAULT_BRANCH}..HEAD" --oneline --stat 2>/dev/null)
+  if [[ -n "$LOG" ]]; then
+    cat <<EOF
+
+Recent commits:
+
+$LOG
+EOF
+  fi
+fi
