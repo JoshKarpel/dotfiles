@@ -24,6 +24,7 @@
       "WebFetch(domain:pypi.org)",
       "WebFetch(domain:en.wikipedia.org)",
       "WebFetch(domain:docs.crossplane.io)",
+      "WebFetch(domain:docs.temporal.io)",
       "Edit(//tmp/**)",
       "Read(//tmp/**)",
       "Bash(ls *)",
