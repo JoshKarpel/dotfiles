@@ -26,6 +26,9 @@ export LESS="--no-init -R"
 export DOCKER_BUILDKIT=1
 export DOCKER_SCAN_SUGGEST=false
 
+# gh options
+export GH_TELEMETRY=false
+
 d="$HOME/.dircolors"
 [[ $(uname) != "Darwin" && -r "$d" ]] && eval "$(dircolors "$d")"
 
