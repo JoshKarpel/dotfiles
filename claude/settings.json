@@ -136,6 +136,10 @@
           {
             "type": "command",
             "command": "claude-shell-comment-check"
+          },
+          {
+            "type": "command",
+            "command": "claude-gh-repo-check"
           }
         ]
       }

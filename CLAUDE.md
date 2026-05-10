@@ -39,6 +39,7 @@ Active hooks configured in `~/.claude/settings.json`:
   - `claude-uv-check` — Reminds Claude to use `uv run python` in uv projects
   - `claude-read-check` — Blocks `sed -n X,Yp`, `head -n N file`, and `tail -n N file` used just to read files; tells Claude to use the Read tool with `offset`/`limit` instead
   - `claude-shell-comment-check` — Blocks any shell command containing `#`; tells Claude to write to a temp script file instead
+  - `claude-gh-repo-check` — Blocks commands using `--repo` together with `gh repo view` and no explicit repo argument (e.g. `--repo $(gh repo view --json ...)`); gh already defaults to the current repo so the lookup is redundant
 - **Stop**:
   - `claude-git-add` — Stages files
   - `claude-followup-check` — Prompts Claude to run tests, update docs, and stage changes before stopping
