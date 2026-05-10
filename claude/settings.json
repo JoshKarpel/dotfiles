@@ -117,6 +117,10 @@
           {
             "type": "command",
             "command": "claude-git-status"
+          },
+          {
+            "type": "command",
+            "command": "claude-gh-status"
           }
         ]
       }
@@ -136,10 +140,6 @@
           {
             "type": "command",
             "command": "claude-shell-comment-check"
-          },
-          {
-            "type": "command",
-            "command": "claude-gh-repo-check"
           }
         ]
       }

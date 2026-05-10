@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# SessionStart hook: inject current GitHub repo context into Claude's session
+
+set -euo pipefail
+
+# Bail silently if not in a git repo
+git rev-parse --git-dir &>/dev/null || exit 0
+
+# Bail silently if gh is not installed or not authenticated
+command -v gh &>/dev/null || exit 0
+gh auth status &>/dev/null || exit 0
+
+# Bail silently if not in a GitHub-backed repo
+REPO_JSON=$(gh repo view --json url,defaultBranchRef 2>/dev/null) || exit 0
+
+URL=$(echo "$REPO_JSON" | jq -r '.url')
+DEFAULT_BRANCH=$(echo "$REPO_JSON" | jq -r '.defaultBranchRef.name')
+
+cat <<EOF
+Current GitHub repository: $URL (default branch: $DEFAULT_BRANCH)
+
+When using gh commands (issues, PRs, workflows, etc.), they already default to this repository — omit --repo unless you are explicitly targeting a different one.
+EOF
