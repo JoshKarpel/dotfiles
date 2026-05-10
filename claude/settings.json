@@ -177,5 +177,6 @@
     "type": "command",
     "command": "claude-statusline"
   },
+  "theme": "dark",
   "defaultMode": "acceptEdits"
 }
