@@ -3,9 +3,6 @@
 
 set -euo pipefail
 
-INPUT=$(cat)
-CWD=$(echo "$INPUT" | jq -r '.cwd')
-
 JUST_OUTPUT=$(just --list --list-prefix='' --no-aliases 2>/dev/null) || exit 0
 
 cat <<EOF
