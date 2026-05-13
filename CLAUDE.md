@@ -42,9 +42,8 @@ Active hooks configured in `~/.claude/settings.json`:
   - `claude-shell-comment-check` — Blocks any shell command containing `#`; tells Claude to write to a temp script file instead
 - **Stop**:
   - `claude-git-add` — Stages files
-  - `claude-followup-check` — Prompts Claude to run tests, update docs, and stage changes before stopping
   - `claude-untracked-warn` — Asks Claude to handle untracked files (stage, gitignore, or delete) before stopping
-  - `claude-sound stop` — Plays stop sound notification; skips when `stop_hook_active` is false so it doesn't play when `claude-followup-check` blocks the stop
+  - `claude-sound stop` — Plays stop sound notification
 - **Notification**: `claude-sound notify` — Plays notification sound
 - **StatusLine**: `claude-statusline` — Custom status line display
 

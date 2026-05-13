@@ -157,10 +157,6 @@
           },
           {
             "type": "command",
-            "command": "claude-followup-check"
-          },
-          {
-            "type": "command",
             "command": "claude-sound stop"
           }
         ]
