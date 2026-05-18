@@ -26,6 +26,7 @@
       "WebFetch(domain:docs.crossplane.io)",
       "WebFetch(domain:docs.temporal.io)",
       "WebFetch(domain:docs.astral.sh)",
+      "WebFetch(domain:sqlite.org)",
       "Edit(//tmp/**)",
       "Read(//tmp/**)",
       "Bash(ls *)",
