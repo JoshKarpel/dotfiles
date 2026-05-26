@@ -15,7 +15,6 @@ htop
 iterm2
 jq
 k9s
-kubectl
 kubernetes-cli
 ncdu
 parallel
