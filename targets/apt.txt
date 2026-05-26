@@ -25,6 +25,7 @@ leiningen
 libasound2-dev
 libfontconfig1-dev
 libfreetype6-dev
+libsox-fmt-pulse
 libsqlite3-dev
 libssl-dev
 libxcb-xfixes0-dev
@@ -44,6 +45,7 @@ pulseaudio-utils
 python3
 software-properties-common
 sound-theme-freedesktop
+sox
 sqlite3
 tree
 unzip

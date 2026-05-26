@@ -6,6 +6,9 @@ data=$(cat)
 
 model=$(echo "$data" | jq -r '.model.display_name // "unknown"')
 context_pct=$(echo "$data" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
+effort=$(echo "$data" | jq -r '.effort.level // empty')
+pr_number=$(echo "$data" | jq -r '.pr.number // empty')
+pr_review_state=$(echo "$data" | jq -r '.pr.review_state // empty')
 
 date_str=$(date +%Y-%m-%d\ %H:%M)
 
@@ -52,6 +55,16 @@ else echo "$text"; fi
 }
 
 status="${date_str} | $model $(colorize "$context_pct" "ctx:${context_pct}%")"
+if [[ -n "${effort:-}" ]]; then
+  status+=" | effort:${effort}"
+fi
+if [[ -n "${pr_number:-}" ]]; then
+  pr_info="pr:#${pr_number}"
+  if [[ -n "${pr_review_state:-}" ]]; then
+    pr_info+=" (${pr_review_state})"
+  fi
+  status+=" | ${pr_info}"
+fi
 if [[ -n "${five_hour_pct:-}" && -n "${seven_day_pct:-}" ]]; then
   five_hour_val=${five_hour_pct%\%}
   seven_day_val=${seven_day_pct%\%}
