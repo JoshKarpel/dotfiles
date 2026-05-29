@@ -84,6 +84,7 @@
       "Bash(kubectl describe *)",
       "Bash(kubectl logs *)",
       "Bash(kubectl explain *)",
+      "Bash(kubectl api-resources *)",
       "Bash(helm list*)",
       "Bash(helm status *)",
       "Bash(helm get *)",
