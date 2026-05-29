@@ -1,4 +1,7 @@
 {
+  "env": {
+    "CLAUDE_CODE_NO_FLICKER": "1"
+  },
   "permissions": {
     "allow": [
       "WebFetch(domain:api.github.com)",
@@ -85,6 +88,7 @@
       "Bash(helm status *)",
       "Bash(helm get *)",
       "Bash(helm show *)",
+      "Bash(helm lint *)",
       "Bash(dyff *)",
       "Bash(* --version*)",
       "Bash(* --help*)"
@@ -105,7 +109,8 @@
       "Bash(*.env*)",
       "Edit(**/uv.lock)"
     ],
-    "ask": []
+    "ask": [],
+    "defaultMode": "auto"
   },
   "model": "opusplan",
   "hooks": {
@@ -185,9 +190,8 @@
     "mode": "hold",
     "autoSubmit": false
   },
-  "env": {
-    "CLAUDE_CODE_NO_FLICKER": "1"
-  },
   "theme": "dark",
-  "defaultMode": "acceptEdits"
+  "skipAutoPermissionPrompt": true,
+  "defaultMode": "acceptEdits",
+  "effortLevel": "xhigh"
 }
