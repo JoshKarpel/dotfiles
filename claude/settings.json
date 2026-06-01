@@ -13,6 +13,7 @@
       "WebFetch(domain:docs.python.org)",
       "WebFetch(domain:docs.rs)",
       "WebFetch(domain:docs.temporal.io)",
+      "WebFetch(domain:python.temporal.io)",
       "WebFetch(domain:en.wikipedia.org)",
       "WebFetch(domain:gist.github.com)",
       "WebFetch(domain:gist.githubusercontent.com)",
