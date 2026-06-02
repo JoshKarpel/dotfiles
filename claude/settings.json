@@ -34,6 +34,7 @@
       "WebFetch(domain:www.w3.org)",
       "Edit(//tmp/**)",
       "Read(//tmp/**)",
+      "Bash(~/.claude/skills/handle-pr-review/scripts/fetch-pr-comments.py *)",
       "Bash(ls *)",
       "Bash(find *)",
       "Bash(which *)",
