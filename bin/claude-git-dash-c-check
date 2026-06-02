@@ -9,7 +9,7 @@ INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 
 # Extract the path argument from the first "git -C <dir>" in the command
-DIR=$(echo "$COMMAND" | grep -oE '(^|[|;&[:space:]])git\s+-C\s+\S+' | head -1 | awk '{print $NF}')
+DIR=$(echo "$COMMAND" | grep -oE '(^|[|;&[:space:]])git\s+-C\s+\S+' | head -1 | awk '{print $NF}') || DIR=""
 
 if [ -z "$DIR" ]; then
   exit 0
