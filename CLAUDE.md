@@ -40,6 +40,7 @@ Active hooks configured in `~/.claude/settings.json`:
   - `claude-uv-check` — Reminds Claude to use `uv run python` in uv projects
   - `claude-read-check` — Blocks `sed -n X,Yp`, `head -n N file`, and `tail -n N file` used just to read files; tells Claude to use the Read tool with `offset`/`limit` instead
   - `claude-shell-comment-check` — Blocks any shell command containing `#`; tells Claude to write to a temp script file instead
+  - `claude-git-dash-c-check` — Blocks `git -C <dir>` when the path resolves to the current repository (redundant; just run without `-C`); allows it when targeting a different repo
 - **Stop**:
   - `claude-git-add` — Stages files
   - `claude-untracked-warn` — Asks Claude to handle untracked files (stage, gitignore, or delete) before stopping

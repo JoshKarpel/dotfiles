@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# PreToolUse hook: block "git -C <dir>" when <dir> resolves to the current repository.
+# Using -C to target the current repo is redundant; just run git without -C.
+# Using -C to target a different repo is fine.
+
+set -euo pipefail
+
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
+
+# Extract the path argument from the first "git -C <dir>" in the command
+DIR=$(echo "$COMMAND" | grep -oE '(^|[|;&[:space:]])git\s+-C\s+\S+' | head -1 | awk '{print $NF}')
+
+if [ -z "$DIR" ]; then
+  exit 0
+fi
+
+GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+TARGET=$(realpath "$DIR" 2>/dev/null) || TARGET=""
+
+if [ -n "$TARGET" ] && [ "$TARGET" = "$GIT_ROOT" ]; then
+  echo "Do not use 'git -C $DIR' when targeting the current repository. Just run the git command without -C." >&2
+  exit 2
+fi
+
+exit 0

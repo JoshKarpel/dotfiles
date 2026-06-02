@@ -149,6 +149,10 @@
           {
             "type": "command",
             "command": "claude-shell-comment-check"
+          },
+          {
+            "type": "command",
+            "command": "claude-git-dash-c-check"
           }
         ]
       }

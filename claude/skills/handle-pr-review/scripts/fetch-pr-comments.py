@@ -233,7 +233,7 @@ def format_output(pr: dict, diff: str | None, unresolved_only: bool, no_outdated
 
     # General comments
     general_comments = pr.get("comments", {}).get("nodes", [])
-    if general_comments and not unresolved_only:
+    if general_comments:
         lines.append(f"## General Comments ({len(general_comments)})")
         lines.append("")
         for comment in general_comments:
