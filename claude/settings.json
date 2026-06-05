@@ -76,6 +76,7 @@
       "Bash(gh search *)",
       "Bash(gh api graphql *)",
       "Bash(gh status *)",
+      "Bash(gh run *)",
       "Bash(uv run *)",
       "Bash(uv sync *)",
       "Bash(uv tree *)",
