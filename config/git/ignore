@@ -48,3 +48,10 @@ tsconfig.tsbuildinfo
 .env
 
 **/.claude/settings.local.json
+
+# profiling
+*.austin
+*.memray
+*.prof
+*.pstats
+*.speedscope
