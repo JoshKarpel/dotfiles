@@ -78,6 +78,7 @@
       "Bash(gh status *)",
       "Bash(uv run *)",
       "Bash(uv sync *)",
+      "Bash(uv tree *)",
       "Bash(cp *)",
       "Bash(sort *)",
       "Bash(uniq *)",
