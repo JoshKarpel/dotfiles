@@ -22,10 +22,11 @@ description: Python performance profiling and optimization. Use when investigati
 
 ```bash
 python -m cProfile -o profile.out myscript.py
-python -m pstats profile.out  # interactive viewer
-# or sort by cumulative time:
+# sort by cumulative time:
 python -c "import pstats; p = pstats.Stats('profile.out'); p.sort_stats('cumulative'); p.print_stats(30)"
 ```
+
+For other ways to visualize `.prof`/`.out` files (GUI browsers, SnakeViz, gprof2dot, etc.), see the [Python profiling docs](https://docs.python.org/3/library/profile.html) and check what's available in the environment.
 
 ### line_profiler (line-level CPU)
 
@@ -95,8 +96,6 @@ scalene is a high-detail profiler that simultaneously tracks CPU time, memory al
 
 ```bash
 uv add --dev scalene
-scalene myscript.py
-# Opens an HTML report automatically; or:
 scalene --json --outfile profile.json myscript.py
 ```
 
@@ -243,6 +242,16 @@ Also look for work that a parent already did that a child re-does (e.g., re-pars
 - **Re-parsing HTTP responses**: parse once, pass the parsed object. Don't call `response.json()` or `response.text` multiple times (some HTTP clients re-decode on each access).
 - **Look before you leap**: `if x in y and y[x] is not None` does two lookups; replace with `if y.get(x) is not None` or just `if y.get(x)`. More generally, avoid checking for membership and then immediately accessing — do the access once and handle the miss.
 - **Repeated expensive calls with the same args**: consider `functools.lru_cache` or `functools.cache` for pure functions.
+- **Reinitializing objects that don't change per-request**: some objects are expensive to construct but are constructed fresh on every request. Common culprits: `pydantic-settings` `BaseSettings` subclasses (reads env vars, validates, coerces types on every instantiation), HTTP clients, database connection pools, compiled regex patterns. The preferred fix is **manual dependency injection** — functions that need `Settings` (or any expensive object) should take it as an argument, and the caller is responsible for passing a single long-lived instance. This bubbles construction up to application startup (e.g., a FastAPI lifespan), where it naturally happens once. If refactoring to DI isn't practical, `@cache` on a no-arg factory is a reasonable fallback:
+
+```python
+from functools import cache
+from myapp.config import Settings
+
+@cache
+def get_settings() -> Settings:
+    return Settings()
+```
 
 ---
 
