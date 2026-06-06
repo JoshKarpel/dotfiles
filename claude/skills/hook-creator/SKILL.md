@@ -7,8 +7,10 @@ description: Guide for designing and writing Claude Code hooks. Use when creatin
 
 Hooks are shell scripts (or prompt/agent handlers) that fire at lifecycle events in a Claude Code session. They let you enforce behavior, inject context, play sounds, run side effects, and more.
 
-**Fetch the full upstream reference before writing or modifying hooks:**
-https://code.claude.com/docs/en/hooks
+**Fetch the upstream reference NOW before writing or modifying any hooks:**
+https://docs.claude.ai/en/docs/claude-code/hooks
+
+Do not rely on memory for event types, JSON schemas, exit code semantics, `stop_hook_active`, `async`, permission decision format, `$CLAUDE_ENV_FILE`, or `settings.json` structure — always fetch first.
 
 ## When to Write a Hook
 
