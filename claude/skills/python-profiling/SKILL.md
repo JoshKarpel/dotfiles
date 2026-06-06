@@ -7,14 +7,25 @@ description: Python performance profiling and optimization. Use when investigati
 
 ## The Profiling Loop
 
-1. **Pick a profiler** based on what you're investigating: cProfile or austin for CPU hotspots, scalene when you also need memory, line_profiler when you've already found the hot function and want line-level detail, `PYTHONASYNCIODEBUG=1` for event loop blocking.
-2. **Profile** a realistic workload — not a toy input if the real bottleneck only appears at scale.
-3. **Read the output** (using the helper scripts if necessary, e.g., `profile_speedscope.py`, `profile_scalene.py`) to get a ranked summary. Focus on self-time (where CPU actually burns), not just inclusive time.
-4. **Pick a few things** to fix — don't try to fix everything at once. Start with the highest self-time hotspot that looks addressable.
-5. **Fix and measure again** — profile with the same workload to confirm the improvement. Speedups that don't show up in the profiler didn't happen. That said, it's fine to rework something into the clearly correct shape even if it doesn't move the benchmark — every nanosecond counts, even when something else is dominating. Focus on the biggest things, but not at the total expense of the small ones.
-6. **Iterate** until the performance is acceptable or the remaining hotspots are outside your control (C extensions, network, OS).
-
----
+1. **Pick a profiler** based on what you're investigating:
+   cProfile or austin for CPU hotspots,
+   scalene when you also need memory,
+   line_profiler when you've found the hot function and want line-level detail,
+   `PYTHONASYNCIODEBUG=1` for event loop blocking.
+2. **Profile** a realistic workload —
+   not a toy input if the real bottleneck only appears at scale.
+3. **Read the output** (using the helper scripts if necessary)
+   to get a ranked summary. Focus on self-time (where CPU actually burns),
+   not inclusive time.
+4. **Pick a few things** to fix — don't try to fix everything at once.
+   Start with the highest self-time hotspot that looks addressable.
+5. **Fix and measure again** — profile with the same workload to confirm the improvement.
+   Speedups that don't show up in the profiler didn't happen.
+   That said, it's fine to rework something into the clearly correct shape,
+   even if it doesn't move the benchmark.
+   Focus on the biggest things, but not at the total expense of the small ones.
+6. **Iterate** until performance is acceptable,
+   or the remaining hotspots are outside your control (C extensions, network, OS).
 
 ## Tools
 
@@ -26,7 +37,9 @@ python -m cProfile -o profile.out myscript.py
 python -c "import pstats; p = pstats.Stats('profile.out'); p.sort_stats('cumulative'); p.print_stats(30)"
 ```
 
-For other ways to visualize `.prof`/`.out` files (GUI browsers, SnakeViz, gprof2dot, etc.), see the [Python profiling docs](https://docs.python.org/3/library/profile.html) and check what's available in the environment.
+For other ways to visualize `.prof`/`.out` files (GUI browsers, SnakeViz, gprof2dot, etc.),
+see the [Python profiling docs](https://docs.python.org/3/library/profile.html)
+and check what's available in the environment.
 
 ### line_profiler (line-level CPU)
 
@@ -34,7 +47,8 @@ For other ways to visualize `.prof`/`.out` files (GUI browsers, SnakeViz, gprof2
 uv add --dev line-profiler
 ```
 
-Decorate functions you want to drill into with `@profile` (no import needed when running via kernprof), then:
+Decorate functions you want to drill into with `@profile`
+(no import needed when running via kernprof), then:
 
 ```bash
 kernprof -l -v myscript.py
@@ -45,7 +59,10 @@ python -m line_profiler myscript.py.lprof
 
 ### austin + speedscope (sampling CPU → flamegraph)
 
-austin is a statistical/sampling profiler that attaches to a running Python process or launches one. It produces output that can be converted to speedscope format for interactive flamegraphs. See the [austin README](https://github.com/P403n1x87/austin) for full details; run `austin --help` to see all flags.
+austin is a statistical/sampling profiler that attaches to a running Python process
+or launches one. It produces output that can be converted to speedscope format
+for interactive flamegraphs. See the [austin README](https://github.com/P403n1x87/austin)
+for full details; run `austin --help` to see all flags.
 
 ```bash
 uv add --dev austin-python  # installs austin-python converter tools
@@ -75,7 +92,8 @@ austin -i 100 -o austin.collapsed python myscript.py
 uvx --from austin-python austin2speedscope austin.collapsed austin.json
 ```
 
-Then open `austin.json` in speedscope: go to https://www.speedscope.app and load the file, or run `npx speedscope austin.json`.
+Then open `austin.json` in speedscope: go to https://www.speedscope.app and load the file,
+or run `npx speedscope austin.json`.
 
 Key austin flags:
 - `-i <microseconds>`: sampling interval (default 100; lower = more detail, more overhead)
@@ -92,24 +110,28 @@ austin -p $(pgrep -f myserver.py) -x 30 -o austin.out
 
 ### scalene (CPU + memory + GPU, line-level)
 
-scalene is a high-detail profiler that simultaneously tracks CPU time, memory allocation, and GPU (if available) at the line level. Good when you need both CPU and memory in one pass.
+scalene is a high-detail profiler that simultaneously tracks CPU time,
+memory allocation, and GPU (if available) at the line level.
+Good when you need both CPU and memory in one pass.
 
 ```bash
 uv add --dev scalene
 scalene --json --outfile profile.json myscript.py
 ```
 
-Scalene distinguishes Python time vs. native/C time per line — useful for finding where numpy/pandas/etc. are spending time.
-
----
+Scalene distinguishes Python time vs. native/C time per line —
+useful for finding where numpy/pandas/etc. are spending time.
 
 ## Analyzing Profile Output Programmatically
 
-Speedscope JSON and scalene JSON are large and dense — don't try to read them directly. Use the helper scripts in `scripts/` to extract actionable summaries. Always invoke them with `uv run`.
+Speedscope JSON and scalene JSON are large and dense — don't try to read them directly.
+Use the helper scripts in `scripts/` to extract actionable summaries.
+Always invoke them with `uv run`.
 
 ### Speedscope summary (`scripts/profile_speedscope.py`)
 
-Parses a speedscope JSON and reports self-time and inclusive-time per function, filtered to user code by default (stdlib/frozen frames hidden unless `--all`).
+Parses a speedscope JSON and reports self-time and inclusive-time per function,
+filtered to user code by default (stdlib/frozen frames hidden unless `--all`).
 
 ```bash
 uv run scripts/profile_speedscope.py austin.json
@@ -118,11 +140,13 @@ uv run scripts/profile_speedscope.py austin.json --top 20     # more entries
 uv run scripts/profile_speedscope.py austin.json --chains     # show top call chains
 ```
 
-Output: ranked tables of self-time (where CPU actually burns) and inclusive-time (what called the hot code), with file:line references for easy navigation.
+Output: ranked tables of self-time (where CPU actually burns)
+and inclusive-time (what called the hot code), with file:line references.
 
 ### Scalene summary (`scripts/profile_scalene.py`)
 
-Parses a scalene JSON and reports CPU breakdown (Python vs native/C) and memory per function and per line.
+Parses a scalene JSON and reports CPU breakdown (Python vs native/C)
+and memory per function and per line.
 
 ```bash
 uv run scripts/profile_scalene.py scalene-profile.json
@@ -130,22 +154,30 @@ uv run scripts/profile_scalene.py scalene-profile.json --top 20
 uv run scripts/profile_scalene.py scalene-profile.json --memory  # sort by memory
 ```
 
-Output: function-level and line-level tables with `P`/`C` bars (Python vs native CPU %), average memory footprint, and async await statistics if present.
-
----
+Output: function-level and line-level tables with `P`/`C` bars (Python vs native CPU %),
+average memory footprint, and async await statistics if present.
 
 ## Async / Event Loop Profiling
 
 ### Detecting hidden blocking I/O
 
-Blocking file I/O inside async code is a major source of event loop stalls, especially in cloud environments with network-backed volumes (e.g., NFS, EFS, GCS FUSE) where filesystem calls that are instant locally can take tens or hundreds of milliseconds. This is often invisible in local dev and only surfaces in production.
+Blocking file I/O inside async code is a major source of event loop stalls,
+especially in cloud environments with network-backed volumes (e.g., NFS, EFS, GCS FUSE)
+where filesystem calls that are instant locally can take tens or hundreds of milliseconds.
+This is often invisible in local dev and only surfaces in production.
 
-This matters most in **servers**, where blocking the event loop delays all other requests (responsiveness + throughput both suffer). In **scripts**, the event loop usually isn't handling concurrent requests, so blocking I/O hurts throughput but not responsiveness — it's still worth fixing, but the priority is different.
+This matters most in **servers**, where blocking the event loop delays all other requests
+(responsiveness + throughput both suffer). In **scripts**, the event loop usually isn't
+handling concurrent requests, so blocking I/O hurts throughput but not responsiveness —
+it's still worth fixing, but the priority is different.
 
 **Detection options:**
 
-- Set `PYTHONASYNCIODEBUG=1` in the environment before running — logs a warning for any coroutine that blocks the loop for more than 100ms. Note: this makes asyncio significantly slower, so only use it for debugging sessions, not in production or benchmarks. Equivalent in code: `asyncio.get_event_loop().set_debug(True)`.
-
+- Set `PYTHONASYNCIODEBUG=1` before running —
+  logs a warning for any coroutine that blocks the loop for more than 100ms.
+  Makes asyncio significantly slower, so only use it for debugging,
+  not production or benchmarks.
+  Equivalent in code: `asyncio.get_event_loop().set_debug(True)`.
 - `aiomonitor` or `aiodebug` for runtime loop inspection
 - `py-spy` with `--threads` can show what threads are blocked on
 
@@ -164,15 +196,19 @@ async def read_file_async(path):
     return await asyncio.to_thread(read_file, path)
 ```
 
-`asyncio.to_thread` helps when the blocking work can drop the GIL internally (file I/O, network calls via C extensions, etc.). It won't improve raw throughput if the work is CPU-bound Python, but it keeps the event loop responsive — which is the main win in servers. In scripts, prefer fixing throughput directly (concurrent awaits, batching) rather than reaching for `asyncio.to_thread`.
-
----
+`asyncio.to_thread` helps when the blocking work can drop the GIL internally
+(file I/O, network calls via C extensions, etc.).
+It won't improve raw throughput if the work is CPU-bound Python,
+but it keeps the event loop responsive — which is the main win in servers.
+In scripts, prefer fixing throughput directly (concurrent awaits, batching)
+rather than reaching for `asyncio.to_thread`.
 
 ## Common Optimization Patterns
 
 ### Awaits in a loop → concurrent execution
 
-Sequential awaits that are independent are a frequent bottleneck. Replace with `asyncio.gather` or `asyncio.TaskGroup`:
+Sequential awaits that are independent are a frequent bottleneck.
+Replace with `asyncio.gather` or `asyncio.TaskGroup`:
 
 ```python
 # Slow: sequential, each waits for the previous
@@ -212,7 +248,9 @@ s = pattern.sub(lambda m: replacements[m.group(0)], s)
 
 ### Recursive functions: hoist repeated work
 
-Look for calculations inside a recursive function that produce the same result at every level, or that duplicate work already done by the caller. Move them outside the recursion or pass them down as parameters:
+Look for calculations inside a recursive function that produce the same result at every level,
+or that duplicate work already done by the caller.
+Move them outside the recursion or pass them down as parameters:
 
 ```python
 # Before: recomputes config/constants at every level
@@ -235,14 +273,31 @@ def _walk(node, depth, config, threshold):
         _walk(child, depth + 1, config, threshold)
 ```
 
-Also look for work that a parent already did that a child re-does (e.g., re-parsing a value that was already parsed one level up).
+Also look for work that a parent already did that a child re-does
+(e.g., re-parsing a value that was already parsed one level up).
 
 ### Eliminate unnecessary or duplicated work
 
-- **Re-parsing HTTP responses**: parse once, pass the parsed object. Don't call `response.json()` or `response.text` multiple times (some HTTP clients re-decode on each access).
-- **Look before you leap**: `if x in y and y[x] is not None` does two lookups; replace with `if y.get(x) is not None` or just `if y.get(x)`. More generally, avoid checking for membership and then immediately accessing — do the access once and handle the miss.
-- **Repeated expensive calls with the same args**: consider `functools.lru_cache` or `functools.cache` for pure functions.
-- **Reinitializing objects that don't change per-request**: some objects are expensive to construct but are constructed fresh on every request. Common culprits: `pydantic-settings` `BaseSettings` subclasses (reads env vars, validates, coerces types on every instantiation), HTTP clients, database connection pools, compiled regex patterns. The preferred fix is **manual dependency injection** — functions that need `Settings` (or any expensive object) should take it as an argument, and the caller is responsible for passing a single long-lived instance. This bubbles construction up to application startup (e.g., a FastAPI lifespan), where it naturally happens once. If refactoring to DI isn't practical, `@cache` on a no-arg factory is a reasonable fallback:
+- **Re-parsing HTTP responses**: parse once, pass the parsed object.
+  Don't call `response.json()` or `response.text` multiple times
+  (some HTTP clients re-decode on each access).
+- **Look before you leap**: `if x in y and y[x] is not None` does two lookups;
+  replace with `if y.get(x) is not None` or just `if y.get(x)`.
+  More generally, avoid checking for membership and then immediately accessing —
+  do the access once and handle the miss.
+- **Repeated expensive calls with the same args**:
+  consider `functools.lru_cache` or `functools.cache` for pure functions.
+- **Reinitializing objects that don't change per-request**:
+  some objects are expensive to construct but are reconstructed on every request.
+  Common culprits: `pydantic-settings` `BaseSettings` subclasses
+  (reads env vars, validates, coerces types on every instantiation),
+  HTTP clients, database connection pools, compiled regex patterns.
+  The preferred fix is **manual dependency injection** —
+  functions that need `Settings` (or any expensive object) should take it as an argument,
+  and the caller passes a single long-lived instance.
+  This bubbles construction up to application startup (e.g., a FastAPI lifespan),
+  where it naturally happens once.
+  If refactoring to DI isn't practical, `@cache` on a no-arg factory is a reasonable fallback:
 
 ```python
 from functools import cache
@@ -253,7 +308,90 @@ def get_settings() -> Settings:
     return Settings()
 ```
 
----
+### Hot-loop micro-optimizations
+
+These matter only in genuinely hot inner loops — don't apply them indiscriminately.
+
+- **Membership tests on lists are O(n)**: `if x in big_list` inside a loop is quadratic overall.
+  Build a `set` or `dict` once before the loop and test against that (O(1) per test).
+
+```python
+# Slow: O(n) per iteration
+for item in items:
+    if item in allowed_list:  # allowed_list is a list
+        ...
+
+# Fast: build set once, O(1) per test
+allowed = set(allowed_list)
+for item in items:
+    if item in allowed:
+        ...
+```
+
+- **String building with `+=`**: repeated concatenation is quadratic for large outputs.
+  Accumulate parts in a list and join once.
+
+```python
+# Slow
+result = ""
+for part in parts:
+    result += part
+
+# Fast
+result = "".join(parts)
+```
+
+- **Hoist repeated attribute/global lookups**: in a tight inner loop, Python resolves
+  `obj.method` or a global name on every iteration. Bind it to a local variable before the loop.
+
+```python
+# Before: attribute looked up every iteration
+for x in data:
+    result.append(process(x))
+
+# After: hoist to local
+append = result.append
+for x in data:
+    append(process(x))
+```
+
+- **Exceptions for control flow in hot paths**: `try/except` with no exception is cheap,
+  but *raising* is expensive.
+  Avoid designs where a frequent/expected branch is signaled by raising an exception in a hot loop.
+
+### Concurrency footguns
+
+- **Threads don't help CPU-bound Python (GIL)**:
+  `ThreadPoolExecutor` over pure-Python CPU work yields no speedup —
+  the GIL serializes Python bytecode execution across threads.
+  Use `ProcessPoolExecutor` or `multiprocessing` instead.
+  (Note: this is *why* `asyncio.to_thread` works for I/O —
+  file/network calls release the GIL, so threads genuinely run in parallel there.)
+- **Unbounded `asyncio.gather` fan-out**: launching thousands of tasks at once
+  can exhaust connection pools, overwhelm downstream services, or spike memory.
+  Bound concurrency with a semaphore:
+
+```python
+sem = asyncio.Semaphore(50)
+
+async def bounded_fetch(item):
+    async with sem:
+        return await fetch(item)
+
+results = await asyncio.gather(*[bounded_fetch(item) for item in items])
+```
+
+### Library-specific footguns
+
+- **Pydantic re-validation of trusted data**: constructing a model from already-valid
+  internal data runs full validation unnecessarily.
+  Use `Model.model_construct(**data)` to skip validation for trusted/internal data.
+  Also avoid repeated `model_dump()` calls on the same instance — compute and reuse the dict.
+- **Prefer pydantic or orjson over stdlib `json`**:
+  use pydantic when you know the structure (parse into a model, serialize with `model_dump_json()`);
+  use `orjson` when the structure is unknown or freeform.
+  Both are substantially faster than stdlib `json`
+  and should be the default choice rather than a late optimization.
 
 ## Fixes
 

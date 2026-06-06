@@ -16,7 +16,3 @@ Prerequisites or one-time configuration (if any). Always push any logic or comma
 ## Workflow
 
 Main body of the skill.
-
-## Fixes
-
-Initially this should be empty. Do not attempt to predict possible failures. Instead, wait for failures to pop up in the course of normal operations then document the fixes that work here. *Never* document a fix for a failure that we have not directly observed.
