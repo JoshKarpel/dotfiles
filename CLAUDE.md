@@ -51,6 +51,10 @@ Active hooks configured in `~/.claude/settings.json`:
 
 Hooks run in non-interactive shell subprocesses, so functions defined in `sources/` (e.g., `exists`) are **not available**. Any shared logic needed by hooks must be a standalone script in `bin/`, not a sourced function.
 
+## Claude Code Skills
+
+When asked to write a skill, place it in `claude/skills/` in this dotfiles repo (not in `~/.claude/`). The install process symlinks that directory into place.
+
 ## Conventions
 
 - Shell scripts use 2-space indentation (enforced by beautysh via pre-commit)
