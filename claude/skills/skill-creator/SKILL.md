@@ -171,7 +171,8 @@ description: Summarize the current pull request
 Summarize the changes above in two or three bullet points...
 ```
 
-For multi-line commands, use a fenced block opened with ` ```! ` as the fence marker.
+For multi-line commands, open the fenced block with `!` as the language specifier
+(three backticks immediately followed by `!`) instead of a language name.
 
 This is preprocessing only: Claude sees the rendered result, not the command itself.
 Use `${CLAUDE_SKILL_DIR}` to reference scripts bundled with the skill regardless of
