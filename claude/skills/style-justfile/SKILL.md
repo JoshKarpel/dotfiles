@@ -10,9 +10,7 @@ description: >
 
 ## File Header
 
-Always start with the shebang and common settings. For multi-line recipes that
-use a bash shebang, add `set -euxo pipefail` to catch failures, undefined
-variables, and pipeline errors early:
+Always start with the shebang and common settings:
 
 ```just
 #!/usr/bin/env just --justfile
@@ -113,6 +111,11 @@ Sigils are per-line prefixes that modify how a command runs:
   `@recipe-name:` to flip the default.
 - **`-`** — continue even if the command fails. Useful for cleanup steps where
   failure is expected and shouldn't halt the recipe (e.g., `-rm -rf dist/`).
+
+## Bash Recipes
+
+When writing a multi-line recipe that uses a bash shebang (i.e., `#!/usr/bin/env bash`),
+load the `style-shell` skill for shell scripting conventions.
 
 ## References
 

@@ -65,11 +65,8 @@ fi
 
 ## Toolchain
 
-- **[shellcheck](https://www.shellcheck.net/)** for static analysis
-- **[`just`](https://just.systems/man/en/)** as the command runner for
-  project tasks
+- **[`just`](https://just.systems/man/en/)** as the command runner for project tasks, recipes can be inline bash scripts
 
 ## References
 
-- [shellcheck](https://www.shellcheck.net/)
 - [bash manual](https://www.gnu.org/software/bash/manual/)
