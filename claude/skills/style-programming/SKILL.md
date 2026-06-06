@@ -1,6 +1,9 @@
 ---
 name: style-programming
-description: General programming style guide. Use whenever writing or significantly editing code in any language. Covers parse-don't-validate, functional core/imperative shell, comment policy, naming, error handling, and function design.
+description: >
+  General programming style guide. Use whenever writing or significantly editing
+  code in any language. Covers parse-don't-validate, functional core/imperative
+  shell, comment policy, naming, error handling, and function design.
 ---
 
 # General Programming Style
@@ -81,28 +84,6 @@ next few like it. If not, restructure so that this and future changes become eas
 Avoid one-off solutions. Prefer building systems out of composable building blocks,
 so each new requirement snaps into place rather than requiring bespoke logic.
 
-## Comments
-
-Write no comments by default. Add one only when the WHY is non-obvious:
-a hidden constraint, a subtle invariant, a specific bug workaround,
-or behavior that would genuinely surprise a future reader.
-
-Never explain what the code does — well-named identifiers do that.
-Never reference the current task, PR, or callers — those belong in commit messages,
-not code, and they rot as the codebase evolves.
-
-## Functions
-
-- Prefer flat code over deep nesting. Use early returns instead of nested conditionals.
-- Don't add error handling, fallbacks, or validation for paths that can't occur.
-
-## Naming
-
-- Names should describe *what*, not *how*.
-- Prefer clear, full words over abbreviations.
-- Boolean names should read as predicates: `is_valid`, `has_error`, `can_retry`.
-- Avoid filler words: `data`, `info`, `manager`, `handler`, `util` are smells.
-
 ## Dependency Injection
 
 Pass dependencies explicitly as arguments — to functions and to class constructors.
@@ -118,6 +99,54 @@ Benefits of this approach:
 The pattern scales well: at the outermost layer (CLI entrypoint, server lifespan,
 test fixture), construct shared objects once and pass them down. Inner code stays
 pure and unaware of how those objects were created.
+
+## Testing
+
+One of the payoffs of functional-core/imperative-shell, parse-don't-validate, and
+dependency injection is that testing becomes easy: pure functions take data in
+and return data out, so tests are plain assertions; and dependencies are just
+arguments, so tests pass in whatever they need without patching.
+
+- **Test the functional core directly, without mocks.** If you find yourself
+  mocking to test a piece of logic, the logic is probably entangled with I/O.
+  Extract it.
+- **Prefer real objects via dependency injection over patching.** Pass a
+  different argument in tests rather than monkeypatching globals or module
+  internals.
+- **One behavior per test; arrange/act/assert; descriptive names.** A test name
+  should state the behavior under test, not the function name. If a test covers
+  multiple behaviors, it can only fail at one of them: split it.
+- **Parametrize over copy-paste.** When the same logic is exercised with
+  different inputs, use the testing library's parametrization facility. Duplicated test
+  bodies are as much of a maintenance burden as duplicated production code.
+- **Property-based testing when the input space is large.** Generating many
+  cases finds edge cases that example-based tests miss. Prefer it when invariants
+  are clearer than specific examples.
+- **Test at the boundary the parser establishes.** Concentrate edge-case tests
+  at the point where external input is parsed into internal types. Once data is
+  internal, trust the types — don't re-test the parser in every downstream unit.
+
+## Comments
+
+Write no comments by default. Add one only when the WHY is non-obvious:
+a hidden constraint, a subtle invariant, a specific bug workaround,
+or behavior that would genuinely surprise a future reader.
+
+Never explain what the code does. Well-named identifiers do that.
+Never reference the current task, PR, or callers: those belong in commit messages,
+not code, and they rot as the codebase evolves (unless it's a forward-looking TODO).
+
+## Functions
+
+- Prefer flat code over deep nesting. Use early returns instead of nested conditionals.
+- Don't add error handling, fallbacks, or validation for paths that can't occur.
+
+## Naming
+
+- Names should describe *what*, not *how*.
+- Prefer clear, full words over abbreviations.
+- Boolean names should read as predicates: `is_valid`, `has_error`, `can_retry`.
+- Avoid filler words: `data`, `info`, `manager`, `handler`, `util` are smells.
 
 ## Toolchain
 

@@ -1,6 +1,11 @@
 ---
 name: style-python
-description: Python-specific style guide. Use whenever writing or editing Python code. Covers type annotation conventions (modern syntax, full coverage), data container choices (dataclass vs TypedDict vs NamedTuple vs dict), idioms (f-strings, pathlib, comprehensions, generators), and preferred toolchain (pydantic, mypy, uv) with a note to defer to project conventions.
+description: >
+  Python-specific style guide. Use whenever writing or editing Python code.
+  Covers type annotation conventions (modern syntax, full coverage), data
+  container choices (dataclass vs TypedDict vs NamedTuple vs dict), idioms
+  (f-strings, pathlib, comprehensions, generators), and preferred toolchain
+  (pydantic, mypy, uv) with a note to defer to project conventions.
 ---
 
 # Python Style Guide
@@ -66,8 +71,9 @@ reach for `TypedDict` only when you genuinely can't control the shape.
 - **[`uv`](https://docs.astral.sh/uv/)** for project management and running scripts
   (`uv run`, `uv add`)
 - **[`ruff`](https://docs.astral.sh/ruff/)** for formatting and linting
-- **[`mypy`](https://mypy.readthedocs.io/)** for static type checking — run with
-  `--strict` unless the project has a different established baseline
+- **[`mypy`](https://mypy.readthedocs.io/)** for static type checking;
+  use strict settings unless the project has a different established baseline;
+  add `plugins = ["pydantic.mypy"]` when pydantic is in use
 - **[`pre-commit`](https://pre-commit.com/)** for pre-commit checks
 - **[`pytest`](https://docs.pytest.org/)** for testing, with:
   - [`pytest-asyncio`](https://pytest-asyncio.readthedocs.io/) for async tests
@@ -77,6 +83,40 @@ reach for `TypedDict` only when you genuinely can't control the shape.
     `mocker` fixture, never `unittest.mock` decorators
   - [`hypothesis`](https://hypothesis.readthedocs.io/) for property-based testing
     (rarely needed, but irreplaceable when you do)
+
+### Ruff Configuration
+
+Use `line-length = 120`. For `[tool.ruff.lint]`, start with this `select` set:
+
+```toml
+[tool.ruff.lint]
+select = [
+  "I",    # isort: import ordering
+  "F",    # pyflakes: unused imports, undefined names
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "PIE",  # flake8-pie: miscellaneous cleanups
+  "PLC",  # pylint convention
+  "PLE",  # pylint error
+  "PLW",  # pylint warning
+  "PTH",  # flake8-use-pathlib: enforce pathlib over os.path (matches style guide)
+  "PGH",  # pygrep-hooks: blanket noqa, deprecated calls
+  "RUF",  # ruff-specific rules
+]
+```
+
+Common `ignore` entries with rationale:
+
+```toml
+ignore = [
+  "E501",  # line length — formatter owns this
+  "E741",  # ambiguous variable name — occasionally fine (e.g. l in math)
+  "T201",  # print — allowed in CLIs and scripts
+  "T203",  # pprint — same
+]
+```
+
+Only add an ignore if you have a concrete reason; don't suppress speculatively.
 
 ## Preferred Libraries
 

@@ -1,6 +1,10 @@
 ---
 name: skill-creator
-description: Create, improve, and troubleshoot Claude Code agent skills. Use when asked to make a new skill, write a SKILL.md file, improve skill discoverability, debug why a skill isn't activating, answer questions about skills, or review skill best practices.
+description: >
+  Create, improve, and troubleshoot Claude Code agent skills. Use when asked
+  to make a new skill, write a SKILL.md file, improve skill discoverability,
+  debug why a skill isn't activating, answer questions about skills, or review
+  skill best practices.
 ---
 
 # Skill Creator

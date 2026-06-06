@@ -1,6 +1,9 @@
 ---
 name: style-justfile
-description: Justfile style guide. Use when writing or editing a justfile or Justfile. Covers file structure, settings, the default list recipe, doc attributes, aliases, variadic arguments, and command echo suppression.
+description: >
+  Justfile style guide. Use when writing or editing a justfile or Justfile.
+  Covers file structure, settings, the default list recipe, doc attributes,
+  aliases, variadic arguments, and command echo suppression.
 ---
 
 # Justfile Style Guide

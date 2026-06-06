@@ -1,6 +1,10 @@
 ---
 name: debug-gha
-description: Debug GitHub Actions (GHA) workflow run failures. Use when a CI/CD run failed, a workflow is broken, steps are erroring, a job was cancelled or timed out, or the user wants to investigate what happened in a specific run. Covers fetching logs, reading job/step output, and identifying root causes.
+description: >
+  Debug GitHub Actions (GHA) workflow run failures. Use when a CI/CD run
+  failed, a workflow is broken, steps are erroring, a job was cancelled or
+  timed out, or the user wants to investigate what happened in a specific run.
+  Covers fetching logs, reading job/step output, and identifying root causes.
 ---
 
 # Debug GitHub Actions Runs

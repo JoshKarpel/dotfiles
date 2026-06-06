@@ -1,6 +1,11 @@
 ---
 name: handle-pr-review
-description: Fetch and address GitHub PR review comments and feedback on the current branch. Use when asked to handle review comments, address reviewer feedback, fix review threads, check what reviewers said, work through unresolved comments, or respond to PR review requests. Also use when the user says "review comments", "PR feedback", or "address comments".
+description: >
+  Fetch and address GitHub PR review comments and feedback on the current
+  branch. Use when asked to handle review comments, address reviewer feedback,
+  fix review threads, check what reviewers said, work through unresolved
+  comments, or respond to PR review requests. Also use when the user says
+  "review comments", "PR feedback", or "address comments".
 ---
 
 # Handle PR Review Comments

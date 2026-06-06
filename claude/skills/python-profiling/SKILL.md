@@ -1,6 +1,12 @@
 ---
 name: python-profiling
-description: Python performance profiling and optimization. Use when investigating CPU hotspots, memory usage, I/O slowness, async event loop blocking, or when optimizing slow Python code. Covers tools (cProfile, line_profiler, austin/speedscope, scalene), flamegraph generation, and common optimization patterns (concurrent awaits, regex combining, recursive memoization, eliminating duplicate work, moving blocking I/O off the event loop).
+description: >
+  Python performance profiling and optimization. Use when investigating CPU
+  hotspots, memory usage, I/O slowness, async event loop blocking, or when
+  optimizing slow Python code. Covers tools (cProfile, line_profiler,
+  austin/speedscope, scalene), flamegraph generation, and common optimization
+  patterns (concurrent awaits, regex combining, recursive memoization,
+  eliminating duplicate work, moving blocking I/O off the event loop).
 ---
 
 # Python Performance Profiling
