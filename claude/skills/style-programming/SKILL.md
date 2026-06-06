@@ -116,9 +116,13 @@ arguments, so tests pass in whatever they need without patching.
 - **One behavior per test; arrange/act/assert; descriptive names.** A test name
   should state the behavior under test, not the function name. If a test covers
   multiple behaviors, it can only fail at one of them: split it.
+- **Use non-default, distinct test values.** Avoid type-default values (`0`, `""`,
+  first enum entry): a broken function may accidentally produce the default,
+  making the test pass despite the bug. When a function takes multiple inputs,
+  use a *different* value for each so argument mix-ups and aliasing bugs surface.
 - **Parametrize over copy-paste.** When the same logic is exercised with
-  different inputs, use the testing library's parametrization facility. Duplicated test
-  bodies are as much of a maintenance burden as duplicated production code.
+  different inputs, use the testing library's parametrization facility. Duplicated
+  test bodies are as much of a maintenance burden as duplicated production code.
 - **Property-based testing when the input space is large.** Generating many
   cases finds edge cases that example-based tests miss. Prefer it when invariants
   are clearer than specific examples.
@@ -157,3 +161,5 @@ not code, and they rot as the codebase evolves (unless it's a forward-looking TO
 - [Parse, Don't Validate](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/) by Alexis King
 - [Simple Made Easy](https://github.com/matthiasn/talk-transcripts/blob/master/Hickey_Rich/SimpleMadeEasy.md) by Rich Hickey
 - [Functional Core, Imperative Shell](https://www.destroyallsoftware.com/screencasts/catalog/functional-core-imperative-shell) by Gary Bernhardt
+- [Choosing Values for Robust Tests](https://testing.googleblog.com/2026/06/choosing-values-for-robust-tests.html)
+  by Radion Khait
