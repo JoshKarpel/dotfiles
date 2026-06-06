@@ -25,7 +25,7 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 ./install.sh
 
 # Run pre-commit hooks manually
-pre-commit run --all-files
+pre-commit run
 ```
 
 ## Claude Code Hooks
@@ -42,8 +42,7 @@ Active hooks configured in `~/.claude/settings.json`:
   - `claude-shell-comment-check` — Blocks any shell command containing `#`; tells Claude to write to a temp script file instead
   - `claude-git-dash-c-check` — Blocks `git -C <dir>` when the path resolves to the current repository (redundant; just run without `-C`); allows it when targeting a different repo
 - **Stop**:
-  - `claude-git-add` — Stages files
-  - `claude-untracked-warn` — Asks Claude to handle untracked files (stage, gitignore, or delete) before stopping
+  - `claude-precommit-stop` — Checks for untracked files first (exits 2 if any); then runs `git add --update` and if pre-commit is configured runs it twice (auto-fixes + re-stage between runs); exits 2 if still failing
   - `claude-sound stop` — Plays stop sound notification
 - **Notification**: `claude-sound notify` — Plays notification sound
 - **StatusLine**: `claude-statusline` — Custom status line display

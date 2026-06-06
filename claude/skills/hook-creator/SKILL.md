@@ -7,7 +7,8 @@ description: Guide for designing and writing Claude Code hooks. Use when creatin
 
 Hooks are shell scripts (or prompt/agent handlers) that fire at lifecycle events in a Claude Code session. They let you enforce behavior, inject context, play sounds, run side effects, and more.
 
-The full event/schema reference is in [references/hooks-reference.md](references/hooks-reference.md). Read it before writing a new hook.
+**Fetch the full upstream reference before writing or modifying hooks:**
+https://code.claude.com/docs/en/hooks
 
 ## When to Write a Hook
 
@@ -32,13 +33,11 @@ Hooks that apply across all projects — personal workflow preferences, reminder
 Hooks specific to a project's workflow — enforcing project conventions, injecting repo-specific context — belong in the repo so the whole team gets them.
 
 - **Config**: `.claude/settings.json` at the project root (check this into version control)
-- **Scripts**: potentially anywhere in the repo, but reference them via `$CLAUDE_PROJECT_DIR` so the path works regardless of cwd:
+- **Scripts**: reference via `$CLAUDE_PROJECT_DIR` so the path works regardless of cwd:
 
 ```json
 { "type": "command", "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/my-hook.sh" }
 ```
-
-A `.claude/hooks/` directory is a reasonable convention for project-local hook scripts.
 
 **Rule of thumb**: if you'd want the hook on a fresh machine or in a new project, it's global. If it only makes sense inside one repo, it's project-local.
 
@@ -48,46 +47,48 @@ A `.claude/hooks/` directory is a reasonable convention for project-local hook s
 
 | Exit | Meaning |
 |------|---------|
-| `0` | Success. stdout is parsed for JSON output. |
-| `2` | **Blocking**: for events that support it (PreToolUse, Stop, UserPromptSubmit, etc.), blocks the action and feeds **stderr** back to Claude. stdout is ignored. |
-| Other non-zero | Non-blocking error; stderr only shown in verbose mode (Ctrl+O). |
+| `0` | Success. stdout parsed for JSON or used as plain-text context (SessionStart, UserPromptSubmit). |
+| `2` | **Blocking**: prevents the action and feeds **stderr** back to Claude. |
+| Other non-zero | Non-blocking error; first line of stderr shown in verbose mode only. |
 
-### stdout vs stderr
+**Always send exit 2 messages to stderr via heredoc:**
 
-- **stderr** is what Claude (or the user) sees on exit 2. Write human-readable guidance here.
-- **stdout** on exit 0 is parsed for JSON. For `SessionStart` and `UserPromptSubmit`, plain-text stdout is added as context Claude can see.
-- Shell profile startup text can corrupt JSON stdout — scripts must be clean.
+```bash
+cat >&2 <<EOF
+Something is still failing. Fix the issues before proceeding:
+
+$DETAILS
+EOF
+exit 2
+```
 
 ### stop_hook_active — Loop Prevention
 
 `Stop` and `SubagentStop` events include `"stop_hook_active": true/false`. When `true`, Claude is already continuing because a previous Stop hook blocked it. **Always check this field and exit 0 when it's true**, or you'll create an infinite loop.
 
 ```bash
+INPUT=$(cat)
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 [[ "$STOP_HOOK_ACTIVE" == "true" ]] && exit 0
 ```
+
+### Hooks in a Group Run in Parallel
+
+All hooks within a single `hooks: [...]` array fire at the same time — ordering is not guaranteed. If one hook must run before another, combine them into a single script.
 
 ## Patterns
 
 ### 1. Behavior Correction (PreToolUse)
 
-Block a tool call and tell Claude to do it differently. Fires before the tool runs, so you can catch it. Exit 2 sends stderr to Claude; it then reconsiders.
-
-Example: `claude-head-tail-check` — blocks `head`/`tail` usage:
-```bash
-INPUT=$(cat)
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
-if echo "$COMMAND" | grep -qE '\b(head|tail)\b'; then
-  echo "Redirect full output to a file instead of using head/tail." >&2
-  exit 2
-fi
-exit 0
-```
+Block a tool call and tell Claude to do it differently. Exit 2 sends stderr to Claude; it then reconsiders.
 
 Example: `claude-uv-check` — blocks bare `python` in uv projects:
 ```bash
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
+if ! is-uv-project; then
+  exit 0
+fi
 if echo "$COMMAND" | grep -q 'python' && ! echo "$COMMAND" | grep -q 'uv'; then
   echo "Use 'uv run python' instead of 'python' directly." >&2
   exit 2
@@ -95,69 +96,82 @@ fi
 exit 0
 ```
 
-Use the `matcher` field in settings.json to scope to specific tools:
+Use `matcher` to scope to specific tools:
 ```json
 { "matcher": "Bash", "hooks": [{ "type": "command", "command": "my-hook" }] }
 ```
 
-### 2. Pre-Stop Checklist (Stop)
+### 2. Pre-Stop Work (Stop)
 
-Block Claude from stopping and give it a checklist. Must guard against `stop_hook_active`.
+Do work before Claude stops (staging, linting) and optionally block with feedback. Must guard against `stop_hook_active`.
 
-Example: `claude-followup-check`:
+Example: `claude-precommit-stop` — stages tracked changes and runs the pre-commit loop:
 ```bash
 INPUT=$(cat)
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 [[ "$STOP_HOOK_ACTIVE" == "true" ]] && exit 0
 
-cat >&2 <<'EOF'
-Before stopping: run tests, update docs, stage changes.
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+git add --update  # stage tracked modifications only — not untracked files
+
+[[ -f "$REPO_ROOT/.pre-commit-config.yaml" || -f "$REPO_ROOT/.pre-commit-config.yml" ]] || exit 0
+
+if is-uv-project 2>/dev/null; then
+  RUNNER="uv run pre-commit"
+elif command -v pre-commit &>/dev/null; then
+  RUNNER="pre-commit"
+elif command -v uv &>/dev/null; then
+  RUNNER="uvx pre-commit"
+else
+  exit 0
+fi
+
+$RUNNER run > /dev/null 2>&1 || true  # first run: auto-fix
+git add --update                       # re-stage auto-fixes
+
+if OUTPUT=$($RUNNER run 2>&1); then
+  exit 0
+fi
+
+cat >&2 <<EOF
+pre-commit is still failing after auto-fixing. Fix the issues before committing:
+
+$OUTPUT
 EOF
 exit 2
 ```
 
+Key preferences:
+- Use `git add --update` not `git add -A` — handle untracked files separately with a dedicated hook
+- Run pre-commit twice: first run auto-fixes, second run validates
+
 ### 3. Context Injection (SessionStart)
 
-Print text to **stdout** (exit 0) and Claude sees it as context for the session. Plain text works — no JSON needed.
+Print text to stdout (exit 0) and Claude sees it as context. Bail silently when not applicable.
 
-Example: `claude-just-list` — lists available just recipes:
 ```bash
-INPUT=$(cat)
-JUST_OUTPUT=$(just --list --list-prefix='' --no-aliases 2>/dev/null) || exit 0
-cat <<EOF
-This project has a justfile. Prefer using just recipes:
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+[[ -f "$REPO_ROOT/some-config" ]] || exit 0
 
-$JUST_OUTPUT
+cat <<EOF
+Context about this project's tooling...
 EOF
 ```
 
-For context injection, `hookSpecificOutput.additionalContext` is the JSON alternative, but plain stdout works fine for `SessionStart`.
-
 ### 4. Side Effects / Async (Stop, Notification)
 
-For fire-and-forget work (playing sounds, logging, updating displays) use async hooks or just exit 0 after doing the work synchronously. Async hooks won't block Claude:
-
+For fire-and-forget work use `"async": true`:
 ```json
 { "type": "command", "command": "my-hook", "async": true }
 ```
 
-Example: `claude-sound stop` — plays a sound but only when `stop_hook_active` is true (meaning all blocking hooks have already cleared):
-```bash
-INPUT=$(cat)
-STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
-[[ "$STOP_HOOK_ACTIVE" != "true" ]] && exit 0
-paplay /usr/share/sounds/freedesktop/stereo/complete.oga
-```
-
 ### 5. Permission Control (PreToolUse JSON output)
 
-Instead of exit 2, return a JSON decision from stdout to allow/deny/ask:
+Return a JSON decision from stdout to allow/deny/ask:
 ```bash
 echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Use the project makefile instead."}}'
 exit 0
 ```
-
-`permissionDecision` values: `"allow"`, `"deny"`, `"ask"`.
 
 ## settings.json Structure
 
@@ -167,9 +181,7 @@ exit 0
     "PreToolUse": [
       {
         "matcher": "Bash",
-        "hooks": [
-          { "type": "command", "command": "my-hook" }
-        ]
+        "hooks": [{ "type": "command", "command": "my-hook" }]
       }
     ],
     "Stop": [
@@ -184,8 +196,6 @@ exit 0
 }
 ```
 
-All matching hooks in a group run in **parallel**.
-
 ## Hook Script Boilerplate
 
 ```bash
@@ -193,11 +203,11 @@ All matching hooks in a group run in **parallel**.
 set -euo pipefail
 
 INPUT=$(cat)
-# Parse what you need:
 # COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 # CWD=$(echo "$INPUT" | jq -r '.cwd')
-
-# ... logic ...
+# STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 
 exit 0
 ```
+
+Hooks run in **non-interactive** subprocesses — shell functions sourced at startup are not available. Any shared logic must be a standalone executable in `bin/`.

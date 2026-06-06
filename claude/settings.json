@@ -165,11 +165,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "claude-git-add"
-          },
-          {
-            "type": "command",
-            "command": "claude-untracked-warn"
+            "command": "claude-precommit-stop"
           },
           {
             "type": "command",

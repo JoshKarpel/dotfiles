@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Stop hook: warn about untracked files, then stage tracked changes and run pre-commit if configured
+
+set -euo pipefail
+
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+
+UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null)
+if [[ -n "$UNTRACKED" ]]; then
+  cat >&2 <<EOF
+There are untracked files.
+For each file, decide what to do with it: stage it with git add, add it to .gitignore, or delete it. If you're not sure, ask for help.
+Files:
+
+$UNTRACKED
+EOF
+  exit 2
+fi
+
+git add --update
+
+if [[ ! -f "$REPO_ROOT/.pre-commit-config.yaml" && ! -f "$REPO_ROOT/.pre-commit-config.yml" ]]; then
+  exit 0
+fi
+
+if is-uv-project 2>/dev/null; then
+  RUNNER="uv run pre-commit"
+elif command -v pre-commit &>/dev/null; then
+  RUNNER="pre-commit"
+elif command -v uv &>/dev/null; then
+  RUNNER="uvx pre-commit"
+else
+  exit 0
+fi
+
+$RUNNER run > /dev/null 2>&1 || true
+git add --update
+
+if OUTPUT=$($RUNNER run 2>&1); then
+  exit 0
+fi
+
+cat >&2 <<EOF
+pre-commit is still failing after auto-fixing. Fix the issues before committing:
+
+$OUTPUT
+EOF
+exit 2
