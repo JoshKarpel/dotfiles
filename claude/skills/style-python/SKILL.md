@@ -12,7 +12,7 @@ description: >
 
 ## Adopt Project Conventions First
 
-These are defaults — see `style-programming` for the full principle.
+These are defaults. See `style-programming` for the full principle.
 Match what's already in the project before applying anything below.
 
 ## Type Annotations
