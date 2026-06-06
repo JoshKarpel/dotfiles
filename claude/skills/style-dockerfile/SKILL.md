@@ -91,108 +91,12 @@ expanding `$variables` inside the heredoc — essential for config files.
 Always install **and** clean in the same `RUN`/heredoc layer.
 A cleanup in a later layer can't shrink a layer that already committed the cache.
 
-### apt (Debian/Ubuntu)
+For the per-manager recipes (install flags, cache cleanup, version pinning), read
+the file matching the base image:
 
-```dockerfile
-RUN <<EOF
-set -e
-apt-get update
-apt-get install -y --no-install-recommends \
-  curl \
-  ca-certificates
-apt-get clean
-rm -rf /var/lib/apt/lists/*
-EOF
-```
-
-- `--no-install-recommends` — skip weak dependencies Docker images don't need.
-- `apt-get clean` + `rm -rf /var/lib/apt/lists/*` — clears downloaded packages
-  and the package index from the layer.
-
-### dnf / yum (RHEL/Fedora/CentOS/Rocky/Amazon Linux)
-
-```dockerfile
-RUN <<EOF
-set -e
-dnf install -y \
-  --setopt=install_weak_deps=False \
-  --setopt=tsflags=nodocs \
-  curl \
-  ca-certificates
-dnf clean all
-rm -rf /var/cache/dnf
-EOF
-```
-
-- `--setopt=install_weak_deps=False` — equivalent to apt's `--no-install-recommends`.
-- `--setopt=tsflags=nodocs` — skip doc files.
-- `dnf clean all` + `rm -rf /var/cache/dnf` — fully purge the metadata and
-  package cache from the layer.
-
-Replace `dnf` with `yum` and `/var/cache/dnf` with `/var/cache/yum` on older
-RHEL 7/CentOS 7 images.
-
-### uv (Python)
-
-Copy uv from its official image rather than installing it, using an `ARG` to
-pin the version:
-
-```dockerfile
-ARG UV_VERSION=0.7.8
-COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /usr/local/bin/
-```
-
-Set these env vars once in the image:
-
-```dockerfile
-ENV UV_COMPILE_BYTECODE=1
-ENV UV_LINK_MODE=copy
-ENV UV_PYTHON_DOWNLOADS=0
-```
-
-- `UV_COMPILE_BYTECODE=1` — compile `.pyc` files at install time for faster startup.
-- `UV_LINK_MODE=copy` — required with cache mounts; Docker layers can't hardlink
-  across filesystems.
-- `UV_PYTHON_DOWNLOADS=0` — use the image's system Python; don't let uv fetch its own.
-
-If uv is only needed for one `RUN` step and shouldn't exist in the image at
-all, mount it temporarily instead of copying it:
-
-```dockerfile
-RUN --mount=from=ghcr.io/astral-sh/uv:${UV_VERSION},source=/uv,target=/bin/uv \
-    --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-install-project --no-dev
-```
-
-The uv binary is discarded when the step completes — only the installed
-packages remain in the layer.
-
-Use `COPY --from` (above) when uv is needed across multiple steps; use the
-temporary mount when a single step is all you need.
-
-Use bind mounts for the lockfile/pyproject so they don't create a layer, and a cache
-mount so the package cache persists across builds:
-
-```dockerfile
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-install-project --no-dev
-
-COPY . .
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev
-```
-
-Run the app by activating the venv via `PATH` rather than `uv run`:
-
-```dockerfile
-ENV PATH="/app/.venv/bin:$PATH"
-CMD ["my-app"]
-```
+- apt (Debian/Ubuntu) → [references/apt.md](references/apt.md)
+- dnf / yum (RHEL/Fedora/CentOS/Rocky/Amazon Linux) → [references/dnf.md](references/dnf.md)
+- uv (Python) → [references/uv.md](references/uv.md)
 
 ## Layer Caching Order
 

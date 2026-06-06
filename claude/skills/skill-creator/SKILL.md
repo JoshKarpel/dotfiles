@@ -26,6 +26,8 @@ Create well-structured Claude Code skills that are discoverable and effective.
 
 Use the template at [assets/SKILL.template.md](assets/SKILL.template.md) as a starting SKILL.md file.
 
+Load the `style-markdown` skill when writing or editing SKILL.md files — they are markdown and the same formatting rules apply.
+
 Upstream documentation on skills is available [here](https://code.claude.com/docs/en/skills).
 The rest of this document provides guidelines and best practices for creating high-quality skills that are valuable to future Claudes and that have a high likelihood of being used.
 
@@ -35,20 +37,27 @@ The only things Claude sees before using a skill are the name and description in
 
 Don't rely on users saying magic words. Think about what *situations* call for this skill, including ones where Claude should decide to use it on its own, then write a description that captures those scenarios.
 
-Note that the description must be 1024 characters or fewer, and it must be on a single line (Claude Code does not support multiline YAML).
+Note that the description must be 1024 characters or fewer. Use folded YAML (`description: >`) to keep long descriptions readable in the source file — the `>` collapses the wrapped lines into one logical string, which satisfies the single-line requirement while avoiding an unwieldy one-liner:
 
 Here are some good examples of discoverable frontmatters:
 
 ```yaml
 ---
 name: speedreader-web
-description: Handles SpeedReader server lifecycle (build, startup, shutdown) and web page rebuild/refresh. Use when you need to verify a web page works, view it, test UI interactions, or see how a page behaves. Also covers development tasks: creating, modifying, styling, reviewing.
+description: >
+  Handles SpeedReader server lifecycle (build, startup, shutdown) and web page
+  rebuild/refresh. Use when you need to verify a web page works, view it, test
+  UI interactions, or see how a page behaves. Also covers development tasks:
+  creating, modifying, styling, reviewing.
 ---
 ```
 
 ```yaml
 name: pdf
-description: Toolkit for viewing, reading, extracting text, creating, editing, converting, and transforming PDFs. Use whenever you need to work with or interact with PDF files.
+description: >
+  Toolkit for viewing, reading, extracting text, creating, editing, converting,
+  and transforming PDFs. Use whenever you need to work with or interact with
+  PDF files.
 ```
 
 ## Patterns
