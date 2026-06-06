@@ -155,28 +155,13 @@ Use `references/` to store documents. If appropriate, use progressive disclosure
 
 ### Dynamic Context Injection
 
-The `` !`command` `` syntax runs a shell command before the skill content reaches Claude,
-substituting its output inline. Skills can arrive with live data already embedded:
-
-```yaml
----
-name: pr-summary
-description: Summarize the current pull request
----
-
-## PR diff
-!`gh pr diff`
-
-## Instructions
-Summarize the changes above in two or three bullet points...
-```
-
-For multi-line commands, open the fenced block with `!` as the language specifier
-(three backticks immediately followed by `!`) instead of a language name.
-
-This is preprocessing only: Claude sees the rendered result, not the command itself.
-Use `${CLAUDE_SKILL_DIR}` to reference scripts bundled with the skill regardless of
-where it's installed.
+Shell commands can be embedded in a skill file and are executed before the content reaches
+Claude, substituting their output inline so skills arrive with live data already embedded.
+Inline commands use an exclamation mark followed by the command wrapped in backticks. For
+multi-line commands, open a fenced block with `!` as the language specifier (three backticks
+immediately followed by `!`) instead of a language name. This is preprocessing only: Claude
+sees the rendered result, not the command itself. Use `${CLAUDE_SKILL_DIR}` to reference
+scripts bundled with the skill regardless of where it's installed.
 
 ### Parameterized Skills
 
