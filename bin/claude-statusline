@@ -11,6 +11,7 @@ pr_number=$(echo "$data" | jq -r '.pr.number // empty')
 pr_review_state=$(echo "$data" | jq -r '.pr.review_state // empty')
 
 date_str=$(date +%Y-%m-%d\ %H:%M)
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
 
 # Fetch cached usage limits (gracefully skipped if unavailable)
 usage=$(claude-fetch-usage 2>/dev/null)
@@ -54,7 +55,7 @@ colorize() {
 else echo "$text"; fi
 }
 
-status="${date_str} | $model $(colorize "$context_pct" "ctx:${context_pct}%")"
+status="${date_str}${branch:+ | ${branch}} | $model $(colorize "$context_pct" "ctx:${context_pct}%")"
 if [[ -n "${effort:-}" ]]; then
   status+=" | effort:${effort}"
 fi
