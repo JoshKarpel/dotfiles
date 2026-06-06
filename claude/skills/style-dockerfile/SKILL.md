@@ -210,9 +210,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-install-project --no-dev
 ```
 
-- `type=bind` — mounts the build context (or a named stage) read-only; avoids
+- `type=bind`: mounts the build context (or a named stage) read-only; avoids
   a `COPY` that would waste a layer.
-- `type=cache` — persistent cache across builds; safe to use for package
+- `type=cache`: persistent cache across builds; safe to use for package
   manager caches, `~/.cargo`, etc.
 
 ## BuildKit Secrets

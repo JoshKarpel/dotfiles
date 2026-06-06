@@ -13,7 +13,7 @@ Create well-structured Claude Code skills that are discoverable and effective.
 
 ## Skill Setup
 
-```
+```text
 .claude/skills/my-skill-name/
 ├── SKILL.md                    # Required: main definition file
 ├── scripts/                    # Optional: automation scripts
@@ -26,18 +26,34 @@ Create well-structured Claude Code skills that are discoverable and effective.
 
 Use the template at [assets/SKILL.template.md](assets/SKILL.template.md) as a starting SKILL.md file.
 
-Load the `style-markdown` skill when writing or editing SKILL.md files — they are markdown and the same formatting rules apply.
+Load the `style-markdown` skill when writing or editing SKILL.md files — they are markdown
+and the same formatting rules apply.
 
 Upstream documentation on skills is available [here](https://code.claude.com/docs/en/skills).
-The rest of this document provides guidelines and best practices for creating high-quality skills that are valuable to future Claudes and that have a high likelihood of being used.
+The rest of this document provides guidelines and best practices for creating high-quality
+skills that are valuable to future Claudes and that have a high likelihood of being used.
 
 ## Writing Discoverable Descriptions
 
-The only things Claude sees before using a skill are the name and description in the frontmatter. Optimizing the description is key to making it discoverable. In general, Claude is too conservative when deciding whether to use a skill. Maximize the likelihood of Claude using the skill by writing a description that captures the full scope of both **what** the skill does and **when** the skill should be used (and make sure to include *both*!). If Claude loads a skill then decides not to use it, no big deal. If Claude doesn't load a skill and spends time spiralling on an already solved task, the session is ruined. High skill discoverability is *extremely important*.
+The only things Claude sees before using a skill are the name and description in the
+frontmatter. Optimizing the description is key to making it discoverable. In general, Claude
+is too conservative when deciding whether to use a skill. Maximize the likelihood of Claude
+using the skill by writing a description that captures the full scope of both **what** the
+skill does and **when** the skill should be used (and make sure to include *both*!). If Claude
+loads a skill then decides not to use it, no big deal. If Claude doesn't load a skill and
+spends time spiralling on an already solved task, the session is ruined. High skill
+discoverability is *extremely important*.
 
-Don't rely on users saying magic words. Think about what *situations* call for this skill, including ones where Claude should decide to use it on its own, then write a description that captures those scenarios.
+Don't rely on users saying magic words. Think about what *situations* call for this skill,
+including ones where Claude should decide to use it on its own, then write a description that
+captures those scenarios.
 
-Note that the description must be 1024 characters or fewer. Use folded YAML (`description: >`) to keep long descriptions readable in the source file — the `>` collapses the wrapped lines into one logical string, which satisfies the single-line requirement while avoiding an unwieldy one-liner:
+The combined `description` + `when_to_use` text is truncated at 1,536 characters in the skill
+listing. Use `when_to_use` for additional trigger phrases and example requests that would
+clutter the main description — it's appended to `description` and counts toward the same cap.
+Use folded YAML (`description: >`) to keep long descriptions readable in the source file —
+the `>` collapses the wrapped lines into one logical string, which satisfies the single-line
+requirement while avoiding an unwieldy one-liner.
 
 Here are some good examples of discoverable frontmatters:
 
@@ -60,60 +76,188 @@ description: >
   PDF files.
 ```
 
+If Claude isn't picking up a skill despite a good description, run `/doctor` to check whether
+the description budget is overflowing and which skills are affected. The budget scales at 1%
+of the model's context window; skills you invoke least lose their descriptions first.
+
+## Frontmatter Fields
+
+Key fields beyond `description` and `when_to_use`:
+
+- `disable-model-invocation: true`: Only you can invoke the skill; Claude won't trigger it
+  automatically. Use for side-effect workflows like `/deploy` or `/commit`.
+- `user-invocable: false`: Only Claude can invoke. Use for background knowledge skills that
+  aren't meaningful as direct commands.
+- `allowed-tools`: Pre-approves listed tools while the skill is active, skipping per-use
+  permission prompts. E.g. `allowed-tools: Bash(git *) Read`.
+- `paths`: Glob patterns limiting when the skill auto-activates. E.g. `paths: "**/*.py"`
+  to activate only when working with Python files.
+- `context: fork` + `agent`: Runs the skill in an isolated subagent. Set `agent` to
+  `Explore`, `Plan`, or a custom agent name.
+
+## Skill Content Lifecycle
+
+When invoked, rendered `SKILL.md` content enters the conversation and stays for the rest of
+the session. After compaction:
+
+- Each invoked skill is re-attached, keeping its first 5,000 tokens.
+- All re-attached skills share a 25,000-token combined budget.
+- Least-recently-invoked skills are dropped first if the budget overflows.
+
+Keep `SKILL.md` under ~500 lines; move detailed reference material to supporting files in
+the skill directory.
+
 ## Patterns
 
 ### Toolbox
 
-The toolbox pattern is implemented by skills that contain non-trivial automation scripts (AKA "tools") and teach Claude how to use them. SKILL.md provides context and information about how to properly use the tools; the tools themselves are python scripts that encapsulate complexity and run commands without clogging up Claude's context window or making silly mistakes. This helps keeps Claude focused on *when* and *how* to invoke tools rather than repeatedly reimplementing their logic, which over the course of a long session substantially increases reliability.
+The toolbox pattern is implemented by skills that contain non-trivial automation scripts
+(AKA "tools") and teach Claude how to use them. SKILL.md provides context and information
+about how to properly use the tools; the tools themselves are python scripts that encapsulate
+complexity and run commands without clogging up Claude's context window or making silly
+mistakes. This helps keeps Claude focused on *when* and *how* to invoke tools rather than
+repeatedly reimplementing their logic, which over the course of a long session substantially
+increases reliability.
 
-Bash is fine for simple wrappers (a few commands, no parsing). For anything with non-trivial logic — parsing, data transformation, multi-step operations, error handling — prefer python. Run shell commands with `subprocess.run`. Don't use shell commands for operations that could be performed in python (file manipulation, hashing, regex, etc). When done properly, these scripts are trivially portable across platforms.
+Bash is fine for simple wrappers (a few commands, no parsing). For anything with non-trivial
+logic — parsing, data transformation, multi-step operations, error handling — prefer python.
+Run shell commands with `subprocess.run`. Don't use shell commands for operations that could
+be performed in python (file manipulation, hashing, regex, etc). When done properly, these
+scripts are trivially portable across platforms.
 
-Always use `uv` with inline dependencies. In the SKILL.md text, make it clear that the scripts must be invoked with `uv`. If you're not *extremely clear* that Claude should use `uv`, Claude **will** try to run the scripts with `python3` and then be confused when it doesn't work.
+Always use `uv` with inline dependencies. In the SKILL.md text, make it clear that the
+scripts must be invoked with `uv`. If you're not *extremely clear* that Claude should use
+`uv`, Claude **will** try to run the scripts with `python3` and then be confused when it
+doesn't work.
 
-Design the API of scripts with care. Always provide `--help`. Avoid exposing unneeded configuration parameters. Scripts should create clean abstractions for Claude to consume. As Claude works, contents of SKILL.md will fade but the script's API will remain, so make sure it's good.
+Reference bundled scripts with `${CLAUDE_SKILL_DIR}` so the path resolves correctly regardless
+of where the skill is installed (personal, project, or plugin). Example in SKILL.md:
+`uv run ${CLAUDE_SKILL_DIR}/scripts/analyze.py`
+
+Design the API of scripts with care. Always provide `--help`. Avoid exposing unneeded
+configuration parameters. Scripts should create clean abstractions for Claude to consume.
+As Claude works, contents of SKILL.md will fade but the script's API will remain, so make
+sure it's good.
 
 ### Knowledge Injection
 
 To summarize: Neo learns Kung Fu.
 
-A knowledge injection is when you give Claude a batch of valuable knowledge that it didn't have before that lets it do new things. Examples:
+A knowledge injection is when you give Claude a batch of valuable knowledge that it didn't
+have before that lets it do new things. Examples:
 
 1. Teach Claude how to use a command line tool or python package (for ad-hoc scripting)
 2. Give Claude a knowledge dump to make it instantly an expert on a topic
 3. Guide Claude through a complex, nuanced workflow
 
-Use `references/` to store documents. If appropriate, use progressive disclosure (e.g. "Depending on the platform, read docs/gcp.md, docs/azure.md, or docs/aws.md").
+Use `references/` to store documents. If appropriate, use progressive disclosure
+(e.g. "Depending on the platform, read docs/gcp.md, docs/azure.md, or docs/aws.md").
+
+### Dynamic Context Injection
+
+The `` !`command` `` syntax runs a shell command before the skill content reaches Claude,
+substituting its output inline. Skills can arrive with live data already embedded:
+
+```yaml
+---
+name: pr-summary
+description: Summarize the current pull request
+---
+
+## PR diff
+!`gh pr diff`
+
+## Instructions
+Summarize the changes above in two or three bullet points...
+```
+
+For multi-line commands, use a fenced block opened with ` ```! ` as the fence marker.
+
+This is preprocessing only: Claude sees the rendered result, not the command itself.
+Use `${CLAUDE_SKILL_DIR}` to reference scripts bundled with the skill regardless of
+where it's installed.
+
+### Parameterized Skills
+
+Use `$ARGUMENTS` to capture text passed after the skill name when invoked:
+
+```yaml
+---
+name: fix-issue
+disable-model-invocation: true
+---
+
+Fix GitHub issue $ARGUMENTS following our coding standards.
+```
+
+Access individual arguments by position with `$0`, `$1`, etc. (shorthand for
+`$ARGUMENTS[0]`, `$ARGUMENTS[1]`). For named arguments, declare them in frontmatter:
+
+```yaml
+---
+arguments: [component, from_framework, to_framework]
+---
+
+Migrate the $component component from $from_framework to $to_framework.
+```
 
 ## Principles
 
 ### Valuable Knowledge
 
-A common pitfall is for Claude to create skills and fill them up with generated information about how to complete a task. The problem with this is that the generated content is all content that's already inside Claude's probability space. Claude is effectively telling itself information that it *already knows*!
+A common pitfall is for Claude to create skills and fill them up with generated information
+about how to complete a task. The problem with this is that the generated content is all
+content that's already inside Claude's probability space. Claude is effectively telling itself
+information that it *already knows*!
 
 Instead, Claude should strive to document in SKILL.md only information that:
 
-1. Is outside of Claude's training data (information that Claude had to learn through research, experimentation, or experience)
-2. Is context specific (something that Claude knows **now**, but won't know **later** after its context window is cleared)
-3. Aligns future Claude with current Claude (information that will guide future Claude in acting how we want it to act)
+1. Is outside of Claude's training data (information that Claude had to learn through
+   research, experimentation, or experience)
+2. Is context specific (something that Claude knows **now**, but won't know **later** after
+   its context window is cleared)
+3. Aligns future Claude with current Claude (information that will guide future Claude in
+   acting how we want it to act)
 
-Claude should also avoid recording **derived data**. Lead a horse to water, don't teach it how to drink. If there's an easily available source that will tell Claude all it needs to know, point Claude at that source. If the information Claude needs can be trivially derived from information Claude already knows or has already been provided, don't provide the derived data.
+Claude should also avoid recording **derived data**. Lead a horse to water, don't teach it
+how to drink. If there's an easily available source that will tell Claude all it needs to
+know, point Claude at that source. If the information Claude needs can be trivially derived
+from information Claude already knows or has already been provided, don't provide the derived
+data.
 
-Before finalizing a skill, revisit this section. Often cruft will creep in over the course of writing the skill. A strong editing pass at the end is recommended.
+Before finalizing a skill, revisit this section. Often cruft will creep in over the course
+of writing the skill. A strong editing pass at the end is recommended.
 
 ### Automation
 
-Over the course of a long session, Claude **will** screw up even simple tasks. Typos, forgotten flags, wrong directories, skipped steps. By pushing tasks into automation, we substantially improve long-term reliability. The goal is to reduce the surface area for Claude to make mistakes.
+Over the course of a long session, Claude **will** screw up even simple tasks. Typos,
+forgotten flags, wrong directories, skipped steps. By pushing tasks into automation, we
+substantially improve long-term reliability. The goal is to reduce the surface area for
+Claude to make mistakes.
 
 Good automation is:
 
-1. **Single-touch** - Fold setup and teardown into the tool itself. If we can perform a step in python instead of making Claude do it manually, do it in python. Always. One command should do the whole job.
+1. **Single-touch**: Fold setup and teardown into the tool itself. If we can perform a step
+   in python instead of making Claude do it manually, do it in python. Always. One command
+   should do the whole job.
 
-2. **Clean primitives** - Expose composable operations that can be combined. Avoid tools that do too much or have complex interdependencies. The goal is to expose a simple API to Claude that frees up Claude's attention for higher-value activities.
+2. **Clean primitives**: Expose composable operations that can be combined. Avoid tools that
+   do too much or have complex interdependencies. The goal is to expose a simple API to
+   Claude that frees up Claude's attention for higher-value activities.
 
-3. **Repo-specific** - The most powerful automation is usually repo-specific because that's where the low-hanging fruit is. Generic tools already exist; the unique workflows and pain points in your repo are where automation pays off most. Teaching Claude how to use a generic tool in your repo is high-leverage.
+3. **Repo-specific**: The most powerful automation is usually repo-specific because that's
+   where the low-hanging fruit is. Generic tools already exist; the unique workflows and pain
+   points in your repo are where automation pays off most. Teaching Claude how to use a
+   generic tool in your repo is high-leverage.
 
 ### Qualifications
 
-Claude can't create a skill if Claude doesn't already know how to do the skill. Before creating a skill, Claude should experiment with the workflows itself. Research CLIs and libraries, download them, try things out, see what's possible, think of things to try and see if they work. Then write the skill using that research and experience. Make sure not to include speculation!
+Claude can't create a skill if Claude doesn't already know how to do the skill. Before
+creating a skill, Claude should experiment with the workflows itself. Research CLIs and
+libraries, download them, try things out, see what's possible, think of things to try and
+see if they work. Then write the skill using that research and experience. Make sure not to
+include speculation!
 
-This is related to Valuable Knowledge. Skills must add value. The best way to do that is to invest time and effort up front in creating the skill so that when Claude loads it later the skill is a value add rather than a drag on the context window.
+This is related to Valuable Knowledge. Skills must add value. The best way to do that is to
+invest time and effort up front in creating the skill so that when Claude loads it later the
+skill is a value add rather than a drag on the context window.

@@ -33,10 +33,10 @@ Don't use `Any` unless truly unavoidable.
 
 | Use | When |
 |---|---|
-| `@dataclass(frozen=True, slots=True)` | Default — prefer immutable value objects |
+| `@dataclass(frozen=True, slots=True)` | Default: prefer immutable value objects |
 | `@dataclass(slots=True)` | Only when mutation is genuinely required |
 | `NamedTuple` | Only when tuple unpacking is genuinely required (should be rare) |
-| `TypedDict` | Smell — only when an existing API forces a bare dict shape |
+| `TypedDict` | Smell: only when an existing API forces a bare dict shape |
 | Plain `dict` | Truly dynamic keys or quick one-off mappings |
 
 Avoid plain classes. Strongly prefer dataclasses; if you would have put logic in
@@ -46,16 +46,16 @@ reach for `TypedDict` only when you genuinely can't control the shape.
 
 ## Idioms
 
-- **f-strings** for all string formatting — including logging calls. No `.format()` or `%`.
+- **f-strings** for all string formatting, including logging calls. No `.format()` or `%`.
   (The conventional advice to use `%`-style in logging to defer interpolation is rarely
   a meaningful optimization in practice.)
-- **`pathlib.Path`** for all file paths — including in async code. No `os.path`.
+- **`pathlib.Path`** for all file paths, including in async code. No `os.path`.
   If file I/O needs to move off the event loop, wrap it with `asyncio.to_thread`
   rather than reaching for `aiofiles` or `anyio`. Those libraries do the same
   thing internally but with significantly more overhead.
 - **Comprehensions** for transformations. Use a plain `for` loop when there are side
   effects or when the loop's purpose isn't to produce transformed output. If the
-  expression is too long, factor out a helper function — don't switch to a loop.
+  expression is too long, factor out a helper function; don't switch to a loop.
 - **Generators** (`yield`) when the caller doesn't need all values at once
   or when materializing the sequence would waste memory.
 - **Context managers** (`with`) for all resources: files, locks, connections,
@@ -64,7 +64,7 @@ reach for `TypedDict` only when you genuinely can't control the shape.
   remains readable.
 - **Don't look before you leap.** Do the access and handle the miss, rather than
   checking for membership and then accessing again. Prefer `try/except` or `.get()`
-  over `if x in y: use y[x]` — the latter does two lookups and obscures intent.
+  over `if x in y: use y[x]`: the latter does two lookups and obscures intent.
 
 ## Toolchain
 
@@ -79,7 +79,7 @@ reach for `TypedDict` only when you genuinely can't control the shape.
   - [`pytest-asyncio`](https://pytest-asyncio.readthedocs.io/) for async tests
   - [`pytest-xdist`](https://pytest-xdist.readthedocs.io/) for parallel execution
   - [`pytest-randomly`](https://github.com/pytest-dev/pytest-randomly) for random ordering
-  - [`pytest-mock`](https://pytest-mock.readthedocs.io/) for mocking — always use the
+  - [`pytest-mock`](https://pytest-mock.readthedocs.io/) for mocking: always use the
     `mocker` fixture, never `unittest.mock` decorators
   - [`hypothesis`](https://hypothesis.readthedocs.io/) for property-based testing
     (rarely needed, but irreplaceable when you do)

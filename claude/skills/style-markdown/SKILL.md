@@ -17,14 +17,14 @@ Match what's already in the project before applying anything below.
 ## Headings and Structure
 
 - **Don't use `---` horizontal rules between sections.**
-  Headings (`##`, `###`, etc.) already provide clear visual separation —
+  Headings (`##`, `###`, etc.) already provide clear visual separation;
   adding `---` is redundant noise.
 - Don't skip heading levels (e.g. `##` → `####`). Step down one level at a time.
 - One blank line before a heading, one blank line after.
 
 ## Line Length
 
-- Keep lines short — aim for ~80 characters, hard limit ~100.
+- Keep lines short: aim for ~80 characters, hard limit ~100.
 - Wrap bullet list items onto continuation lines (indent 2 spaces) rather than
   letting them run long. Long bullets are hard to read in narrow windows and
   hard to edit in-place.

@@ -10,7 +10,9 @@ description: >
 
 # Handle PR Review Comments
 
-Fetch PR review data and address reviewer feedback locally in the code. **Never write back to GitHub** — no `gh pr comment`, no `gh pr review`, no posting replies. All work happens in local files only.
+Fetch PR review data and address reviewer feedback locally in the code.
+**Never write back to GitHub**: no `gh pr comment`, no `gh pr review`, no posting
+replies. All work happens in local files only.
 
 ## Workflow
 

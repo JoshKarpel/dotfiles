@@ -10,7 +10,7 @@ description: >
 
 ## Adopt Local Conventions
 
-When working in an existing codebase, match what's already there —
+When working in an existing codebase, match what's already there:
 naming conventions, patterns, libraries in use. Consistency within a codebase
 matters more than any external style guide, including this one. Override local
 conventions only where there's a clear and specific reason to diverge.
@@ -30,7 +30,7 @@ type that *proves* the invariant was satisfied, eliminating downstream checks.
   can't express invalid values. If a list must be non-empty, use a `NonEmpty`-style
   type, not a runtime assertion.
 - **Parse at the boundary, once.** Validate and transform external input right where
-  it enters the system. Internal code should work only with already-valid types —
+  it enters the system. Internal code should work only with already-valid types;
   no defensive re-checks.
 - **Distrust functions that return `void`/`None` for error-checking.** If a function's
   job is to verify something, it should return the verified data. A return type of
@@ -42,7 +42,7 @@ type that *proves* the invariant was satisfied, eliminating downstream checks.
 
 Separate pure business logic from code that has side effects.
 
-- **Core:** pure functions — take data in, return data out, no I/O, no mutation,
+- **Core:** pure functions: take data in, return data out, no I/O, no mutation,
   no global state. Easy to test, easy to reason about.
 - **Shell:** orchestrates I/O (reading files, calling APIs, writing to databases),
   then feeds results into the core.
@@ -64,7 +64,7 @@ A construct that's fast to reach for can produce a complected system; a harder
 upfront choice can produce one that's easy to change for years.
 
 **Complecting** is Hickey's term for braiding together things that could be
-independent — state with identity, function with state, timing with logic,
+independent: state with identity, function with state, timing with logic,
 policy with mechanism. It's how complexity accumulates. When something feels
 hard to change or reason about, look for what it's been complected with.
 
@@ -86,11 +86,11 @@ so each new requirement snaps into place rather than requiring bespoke logic.
 
 ## Dependency Injection
 
-Pass dependencies explicitly as arguments — to functions and to class constructors.
+Pass dependencies explicitly as arguments to functions and to class constructors.
 Don't reach for globals, service locators, or DI frameworks.
 
 Benefits of this approach:
-- Dependencies are visible at the call site — no hidden coupling
+- Dependencies are visible at the call site: no hidden coupling
 - No mocking needed in tests; just pass a different argument
 - Lifetime and singleton concerns bubble up naturally to the caller,
   where they can be handled once in a centralized place (e.g., application startup)
@@ -124,7 +124,7 @@ arguments, so tests pass in whatever they need without patching.
   are clearer than specific examples.
 - **Test at the boundary the parser establishes.** Concentrate edge-case tests
   at the point where external input is parsed into internal types. Once data is
-  internal, trust the types — don't re-test the parser in every downstream unit.
+  internal, trust the types: don't re-test the parser in every downstream unit.
 
 ## Comments
 
@@ -154,6 +154,6 @@ not code, and they rot as the codebase evolves (unless it's a forward-looking TO
 
 ## References
 
-- [Parse, Don't Validate](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/) — Alexis King
-- [Simple Made Easy](https://github.com/matthiasn/talk-transcripts/blob/master/Hickey_Rich/SimpleMadeEasy.md) — Rich Hickey
-- [Functional Core, Imperative Shell](https://www.destroyallsoftware.com/screencasts/catalog/functional-core-imperative-shell) — Gary Bernhardt
+- [Parse, Don't Validate](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/) by Alexis King
+- [Simple Made Easy](https://github.com/matthiasn/talk-transcripts/blob/master/Hickey_Rich/SimpleMadeEasy.md) by Rich Hickey
+- [Functional Core, Imperative Shell](https://www.destroyallsoftware.com/screencasts/catalog/functional-core-imperative-shell) by Gary Bernhardt

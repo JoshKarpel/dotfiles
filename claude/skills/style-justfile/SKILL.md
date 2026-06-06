@@ -58,7 +58,7 @@ test:
 
 Callers can then do `just pytest-args="-x"` or `just pytest-args="--lf"`. The
 key advantage: the variable propagates into every recipe that references it,
-even transitively — so a top-level `check` recipe that depends on `test` which
+even transitively, so a top-level `check` recipe that depends on `test` which
 calls `pytest` doesn't need to thread `*args` through every intermediate recipe.
 
 ## Recipe Style
@@ -83,7 +83,7 @@ Place the alias immediately after the recipe it aliases.
 
 ## Recipe Attributes
 
-- **`[doc("...")]`** on every recipe — this is what appears in `just --list`.
+- **`[doc("...")]`** on every recipe: this is what appears in `just --list`.
   Prefer `[doc(...)]` over the `# comment` doc-comment syntax; it's explicit and
   unambiguous.
 - **`[private]`** to hide internal helper recipes from `just --list`.
@@ -101,7 +101,7 @@ check: test lint typecheck
     echo "all done"
 ```
 
-- **`[group('name')]`** to group related recipes — they appear together under a
+- **`[group('name')]`** to group related recipes: they appear together under a
   header in `just --list`. A recipe can belong to multiple groups by stacking
   annotations.
 - **`[linux]`** / **`[macos]`** / **`[windows]`** for platform-specific recipes
@@ -111,10 +111,10 @@ check: test lint typecheck
 
 Sigils are per-line prefixes that modify how a command runs:
 
-- **`@`** — suppress echo of that line. Use when the command's output speaks for
+- **`@`**: suppress echo of that line. Use when the command's output speaks for
   itself and printing the command would be noise. Apply to the whole recipe with
   `@recipe-name:` to flip the default.
-- **`-`** — continue even if the command fails. Useful for cleanup steps where
+- **`-`**: continue even if the command fails. Useful for cleanup steps where
   failure is expected and shouldn't halt the recipe (e.g., `-rm -rf dist/`).
 
 ## Bash Recipes

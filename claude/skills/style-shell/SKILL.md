@@ -23,12 +23,12 @@ Every standalone script starts with a bash shebang and safety flags:
 set -euo pipefail
 ```
 
-- `-e` — exit immediately on any command returning a non-zero status.
-- `-u` — treat unset variables as errors (prevents silent empty-string expansions).
-- `-o pipefail` — a pipeline fails if any stage fails, not just the last one.
+- `-e`: exit immediately on any command returning a non-zero status.
+- `-u`: treat unset variables as errors (prevents silent empty-string expansions).
+- `-o pipefail`: a pipeline fails if any stage fails, not just the last one.
 
 For short scripts where none of those would trigger, the flags are still worth
-including — they're defensive and cheap.
+including; they're defensive and cheap.
 
 ## Indentation
 
@@ -65,7 +65,8 @@ fi
 
 ## Toolchain
 
-- **[`just`](https://just.systems/man/en/)** as the command runner for project tasks, recipes can be inline bash scripts
+- **[`just`](https://just.systems/man/en/)** as the command runner for project tasks;
+  recipes can be inline bash scripts
 
 ## References
 

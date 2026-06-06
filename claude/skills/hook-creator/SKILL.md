@@ -10,12 +10,16 @@ description: >
 
 # Claude Code Hooks
 
-Hooks are shell scripts (or prompt/agent handlers) that fire at lifecycle events in a Claude Code session. They let you enforce behavior, inject context, play sounds, run side effects, and more.
+Hooks are shell scripts (or prompt/agent handlers) that fire at lifecycle events
+in a Claude Code session. They let you enforce behavior, inject context, play
+sounds, run side effects, and more.
 
-**Fetch the upstream reference NOW before writing or modifying any hooks:**
-https://docs.claude.ai/en/docs/claude-code/hooks
+**Fetch the [upstream reference](https://docs.claude.ai/en/docs/claude-code/hooks)
+before writing or modifying any hooks.**
 
-Do not rely on memory for event types, JSON schemas, exit code semantics, `stop_hook_active`, `async`, permission decision format, `$CLAUDE_ENV_FILE`, or `settings.json` structure — always fetch first.
+Do not rely on memory for event types, JSON schemas, exit code semantics,
+`stop_hook_active`, `async`, permission decision format, `$CLAUDE_ENV_FILE`, or
+`settings.json` structure: always fetch first.
 
 ## When to Write a Hook
 
@@ -71,7 +75,10 @@ exit 2
 
 ### stop_hook_active — Loop Prevention
 
-`Stop` and `SubagentStop` events include `"stop_hook_active": true/false`. When `true`, Claude is already continuing because a previous Stop hook blocked it. **Always check this field and exit 0 when it's true**, or you'll create an infinite loop.
+`Stop` and `SubagentStop` events include `"stop_hook_active": true/false`. When
+`true`, Claude is already continuing because a previous Stop hook blocked it.
+**Always check this field and exit 0 when it's true**, or you'll create an
+infinite loop.
 
 ```bash
 INPUT=$(cat)
@@ -81,7 +88,9 @@ STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 
 ### Hooks in a Group Run in Parallel
 
-All hooks within a single `hooks: [...]` array fire at the same time — ordering is not guaranteed. If one hook must run before another, combine them into a single script.
+All hooks within a single `hooks: [...]` array fire at the same time; ordering
+is not guaranteed. If one hook must run before another, combine them into a
+single script.
 
 ## Patterns
 
@@ -110,7 +119,8 @@ Use `matcher` to scope to specific tools:
 
 ### 2. Pre-Stop Work (Stop)
 
-Do work before Claude stops (staging, linting) and optionally block with feedback. Must guard against `stop_hook_active`.
+Do work before Claude stops (staging, linting) and optionally block with
+feedback. Must guard against `stop_hook_active`.
 
 Example: `claude-precommit-stop` — stages tracked changes and runs the pre-commit loop:
 ```bash
@@ -149,7 +159,8 @@ exit 2
 ```
 
 Key preferences:
-- Use `git add --update` not `git add -A` — handle untracked files separately with a dedicated hook
+- Use `git add --update` not `git add -A`: handle untracked files separately
+  with a dedicated hook
 - Run pre-commit twice: first run auto-fixes, second run validates
 
 ### 3. Context Injection (SessionStart)
@@ -217,4 +228,5 @@ INPUT=$(cat)
 exit 0
 ```
 
-Hooks run in **non-interactive** subprocesses — shell functions sourced at startup are not available. Any shared logic must be a standalone executable in `bin/`.
+Hooks run in **non-interactive** subprocesses: shell functions sourced at startup
+are not available. Any shared logic must be a standalone executable in `bin/`.

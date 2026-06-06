@@ -11,13 +11,15 @@ description: >
 
 ## What GitHub Actions Is
 
-GitHub Actions is GitHub's CI/CD platform. Workflows are YAML files in `.github/workflows/`. Each workflow:
+GitHub Actions is GitHub's CI/CD platform. Workflows are YAML files in
+`.github/workflows/`. Each workflow:
 
 - Has **triggers** (`on:`) — push, pull_request, schedule, workflow_dispatch, etc.
 - Defines **jobs** — parallel or sequential units of work, each running on a runner (e.g. `ubuntu-latest`)
 - Each job has **steps** — either shell `run:` commands or reusable `uses:` actions
 
-Conclusion values you'll see: `success`, `failure`, `cancelled`, `skipped`, `timed_out`, `action_required`.
+Conclusion values you'll see: `success`, `failure`, `cancelled`, `skipped`,
+`timed_out`, `action_required`.
 
 Logs are retained for 90 days by default; older runs will return HTTP 410 when fetching logs.
 
@@ -32,7 +34,10 @@ uv run ~/.claude/skills/debug-gha/scripts/debug-run.py [run-id]
 # auto-selects latest failed run if no run-id given
 ```
 
-This prints the run metadata, all jobs with their conclusions, any failed steps, and the failed-step logs. If the user isn't asking about the latest failing run, you may need to discover the right run ID first with `gh run list` (supports `--workflow`, `--branch`, `--status`, `--limit`).
+This prints the run metadata, all jobs with their conclusions, any failed steps,
+and the failed-step logs. If the user isn't asking about the latest failing run,
+you may need to discover the right run ID first with `gh run list` (supports
+`--workflow`, `--branch`, `--status`, `--limit`).
 
 **Step 2 — Read the failed step logs.** Look for:
 - The actual error message (usually near the bottom of the failing step's output)
@@ -76,11 +81,14 @@ gh api repos/{owner}/{repo}/check-runs/<job-id>/annotations
 
 ## Reference Documentation
 
-- [GitHub Actions docs](https://docs.github.com/en/actions) — authoritative reference
-- [Workflow syntax reference](https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions) — all YAML keys explained
-- [Contexts and expressions](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/accessing-contextual-information-about-workflow-runs) — `${{ github.* }}`, `env.*`, `secrets.*`, etc.
-- [GitHub-hosted runners](https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners) — what's installed on ubuntu-latest, etc.
-- [gh run commands](https://cli.github.com/manual/gh_run) — full `gh run` CLI reference
+- [GitHub Actions docs](https://docs.github.com/en/actions): authoritative reference
+- [Workflow syntax reference](https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions):
+  all YAML keys explained
+- [Contexts and expressions](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/accessing-contextual-information-about-workflow-runs):
+  `${{ github.* }}`, `env.*`, `secrets.*`, etc.
+- [GitHub-hosted runners](https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners):
+  what's installed on `ubuntu-latest`, etc.
+- [gh run commands](https://cli.github.com/manual/gh_run): full `gh run` CLI reference
 
 ## Fixes
 

@@ -18,14 +18,14 @@ description: >
    scalene when you also need memory,
    line_profiler when you've found the hot function and want line-level detail,
    `PYTHONASYNCIODEBUG=1` for event loop blocking.
-2. **Profile** a realistic workload —
+2. **Profile** a realistic workload,
    not a toy input if the real bottleneck only appears at scale.
 3. **Read the output** (using the helper scripts if necessary)
    to get a ranked summary. Focus on self-time (where CPU actually burns),
    not inclusive time.
-4. **Pick a few things** to fix — don't try to fix everything at once.
+4. **Pick a few things** to fix: don't try to fix everything at once.
    Start with the highest self-time hotspot that looks addressable.
-5. **Fix and measure again** — profile with the same workload to confirm the improvement.
+5. **Fix and measure again**: profile with the same workload to confirm the improvement.
    Speedups that don't show up in the profiler didn't happen.
    That said, it's fine to rework something into the clearly correct shape,
    even if it doesn't move the benchmark.
@@ -98,7 +98,7 @@ austin -i 100 -o austin.collapsed python myscript.py
 uvx --from austin-python austin2speedscope austin.collapsed austin.json
 ```
 
-Then open `austin.json` in speedscope: go to https://www.speedscope.app and load the file,
+Then open `austin.json` in [speedscope](https://www.speedscope.app): load the file,
 or run `npx speedscope austin.json`.
 
 Key austin flags:
