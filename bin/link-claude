@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+BASEDIR="$(dirname "$(dirname "$(realpath "$0")")")"
+CLAUDE="$BASEDIR/claude"
+BACKUPS=~/.dotfiles-backups
+
+mkdir -p ~/.claude
+
+while IFS= read -r -d '' file; do
+  rel="${file#"$CLAUDE"/}"
+  target=~/.claude/"$rel"
+
+  mkdir -p "$(dirname "$target")"
+
+  if [[ -e "$target" && ! -L "$target" ]]; then
+    mkdir -p "$BACKUPS"
+    backup="$BACKUPS/$(basename "$target")"
+    echo "mv $target -> $backup"
+    mv "$target" "$backup"
+  fi
+
+  echo "link $target -> $file"
+  ln -sf "$file" "$target"
+done < <(find "$CLAUDE" -type f -print0)
