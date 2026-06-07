@@ -2,6 +2,7 @@
   "env": {
     "CLAUDE_CODE_NO_FLICKER": "1"
   },
+  "includeGitInstructions": false,
   "permissions": {
     "allow": [
       "WebFetch(domain:api.github.com)",
