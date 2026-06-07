@@ -398,7 +398,3 @@ results = await asyncio.gather(*[bounded_fetch(item) for item in items])
   use `orjson` when the structure is unknown or freeform.
   Both are substantially faster than stdlib `json`
   and should be the default choice rather than a late optimization.
-
-## Fixes
-
-<!-- Document observed failures and their fixes here as they arise -->

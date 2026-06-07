@@ -9,6 +9,16 @@ description: >
 
 # Debug GitHub Actions Runs
 
+## Goal
+
+The objective is to **fix** the failing run. Once you've diagnosed the cause, make
+the edits that fix it, and validate them locally where you can — pre-commit, tests,
+re-running the failing command — rather than relying on a fresh CI run to tell you
+whether it worked.
+
+Leave the change in the working tree for the user to review. Don't commit or push
+to trigger a fresh run and "see if it's fixed" — that's the user's call to make.
+
 ## What GitHub Actions Is
 
 GitHub Actions is GitHub's CI/CD platform. Workflows are YAML files in
@@ -23,9 +33,10 @@ Conclusion values you'll see: `success`, `failure`, `cancelled`, `skipped`,
 
 Logs are retained for 90 days by default; older runs will return HTTP 410 when fetching logs.
 
-## Debugging Workflow
+## Investigating
 
-**Step 1 — Run the debug script** (always use `uv` to invoke it):
+A good starting point is the debug script — one command surfaces most of what you
+need (always invoke it with `uv`):
 
 ```bash
 uv run ~/.claude/skills/debug-gha/scripts/debug-run.py [run-id]
@@ -34,24 +45,18 @@ uv run ~/.claude/skills/debug-gha/scripts/debug-run.py [run-id]
 # auto-selects latest failed run if no run-id given
 ```
 
-This prints the run metadata, all jobs with their conclusions, any failed steps,
-and the failed-step logs. If the user isn't asking about the latest failing run,
-you may need to discover the right run ID first with `gh run list` (supports
-`--workflow`, `--branch`, `--status`, `--limit`).
+It prints the run metadata, all jobs with their conclusions, any failed steps, and
+the failed-step logs. If the user isn't asking about the latest failing run, find
+the right run ID first with `gh run list` (supports `--workflow`, `--branch`,
+`--status`, `--limit`).
 
-**Step 2 — Read the failed step logs.** Look for:
-- The actual error message (usually near the bottom of the failing step's output)
-- Which step number failed and what it was doing
-- Whether it's a flaky network issue, a real code failure, or a misconfigured action
+From the failed-step logs, look for the actual error message (usually near the
+bottom of the output), which step failed and what it was doing, and whether this
+looks like a flaky network blip, a real code failure, or a misconfigured action.
+If something points at a configuration problem, the workflow YAML lives in
+`.github/workflows/`.
 
-**Step 3 — Look at the workflow YAML** if the logs suggest a configuration issue:
-
-```bash
-ls .github/workflows/
-# then read the relevant file
-```
-
-**Step 4 — Additional targeted commands** when you need more:
+Other commands worth reaching for as the situation calls for them:
 
 ```bash
 # Full log for one specific job (job ID from the script output)
@@ -89,7 +94,3 @@ gh api repos/{owner}/{repo}/check-runs/<job-id>/annotations
 - [GitHub-hosted runners](https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners):
   what's installed on `ubuntu-latest`, etc.
 - [gh run commands](https://cli.github.com/manual/gh_run): full `gh run` CLI reference
-
-## Fixes
-
-*(Document fixes here when specific failure patterns and solutions are found.)*
