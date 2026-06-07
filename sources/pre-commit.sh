@@ -14,6 +14,9 @@ alias pcaa="_pre_commit autoupdate"
 function pcr() {
   local rc
   git add --update
+  _pre_commit run --show-diff-on-failure "$@" && return 0
+
+  git add --update
   _pre_commit run --show-diff-on-failure "$@"
   rc=$?
   if [[ $rc -ne 0 ]]; then

@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Stop hook: nudge to update docs/tests/CLAUDE.md when the session changed something new
+
+set -euo pipefail
+
+INPUT=$(cat)
+STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
+[[ "$STOP_HOOK_ACTIVE" == "true" ]] && exit 0
+
+git rev-parse --show-toplevel >/dev/null 2>&1 || exit 0
+
+GIT_DIR=$(git rev-parse --git-dir)
+FP_DIR="$GIT_DIR/claude-followup"
+
+# Key the fingerprint by branch (or commit sha when detached) so switching branches compares
+# against that branch's own last-seen change-set instead of mixing them together. Branch
+# names can contain `/` and other characters that aren't safe in filenames, so hash them.
+BRANCH=$(git branch --show-current)
+[[ -z "$BRANCH" ]] && BRANCH=$(git rev-parse HEAD)
+BRANCH_KEY=$(printf '%s' "$BRANCH" | sha1sum | cut -d' ' -f1)
+FP_FILE="$FP_DIR/$BRANCH_KEY"
+
+# Only nudge when the session actually changed something (staged, unstaged, or untracked)
+PORCELAIN=$(git status --porcelain 2>/dev/null)
+if [[ -z "$PORCELAIN" ]]; then
+  # Clean tree: drop this branch's stored fingerprint so a future change always nudges, and
+  # garbage-collect fingerprint files for branches that no longer exist (this also clears out
+  # stale detached-HEAD entries, which are keyed by commit sha rather than branch name).
+  rm -f "$FP_FILE"
+  if [[ -d "$FP_DIR" ]]; then
+    LIVE_KEYS=$(git for-each-ref --format='%(refname:short)' refs/heads | while IFS= read -r b; do
+        printf '%s\n' "$b" | sha1sum | cut -d' ' -f1
+    done)
+    for f in "$FP_DIR"/*; do
+      [[ -e "$f" ]] || continue
+      if ! grep -qx "$(basename "$f")" <<<"$LIVE_KEYS"; then
+        rm -f "$f"
+      fi
+    done
+  fi
+  exit 0
+fi
+
+# Fingerprint the current change-set: tracked diffs against HEAD (stable across staged vs.
+# unstaged, since it ignores the index) plus the untracked file list.
+FP=$(
+  {
+    git diff HEAD
+    git ls-files --others --exclude-standard
+  } | sha1sum | cut -d' ' -f1
+)
+
+PREV=""
+[[ -f "$FP_FILE" ]] && PREV=$(cat "$FP_FILE")
+
+mkdir -p "$FP_DIR"
+printf '%s' "$FP" >"$FP_FILE"
+
+# Same change-set we already nudged about: nothing new happened this turn, stay quiet.
+[[ "$FP" == "$PREV" ]] && exit 0
+
+# Skip if Claude's last message contains a `?` — likely awaiting a reply, not done yet.
+# Simple and a bit broad (catches rhetorical questions too); tighten later if needed.
+LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // ""')
+[[ "$LAST_MESSAGE" == *"?"* ]] && exit 0
+
+cat >&2 <<EOF
+You made these changes this session:
+
+$PORCELAIN
+
+Before stopping, look for any additional followup work needed to keep things consistent,
+e.g. CLAUDE.md, documentation, changelogs, tests, justfile recipes, or code comments.
+These are examples, not a checklist: use your knowledge of this repo, what you've already
+done this session, and what you just changed to judge what (if anything) still needs to
+follow. If nothing does, stop.
+EOF
+exit 2

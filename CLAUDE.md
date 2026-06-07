@@ -46,12 +46,15 @@ Active hooks configured in `~/.claude/settings.json`:
   a group otherwise run in parallel and order isn't guaranteed) and only plays the stop
   sound if none of them blocked, so the sound means Claude is actually stopping rather
   than retrying after a block:
-  - `claude-precommit-stop` — Checks for untracked files first (exits 2 if any); then runs `git add --update` and if pre-commit is configured runs it twice (auto-fixes + re-stage between runs); exits 2 if still failing
-  - `claude-followup-check` — If the working tree has any changes (staged, unstaged, or
-    untracked) and Claude's last message wasn't a question awaiting a reply, nudges once
-    (guarded by `stop_hook_active`) to look for followup work (CLAUDE.md, docs,
-    changelogs, tests, justfile recipes, code comments, etc., framed as non-exhaustive
-    examples); silent on clean sessions or mid-task questions
+  - `claude-stop-precommit` — Checks for untracked files first (exits 2 if any); then runs `git add --update` and if pre-commit is configured runs it, exiting early on success; on failure, re-stages auto-fixes (`git add --update`) and runs it once more, exiting 2 if still failing
+  - `claude-stop-followup` — Nudges (guarded by `stop_hook_active`, skipped if Claude's
+    last message looks like a question awaiting a reply) to look for followup work
+    (CLAUDE.md, docs, changelogs, tests, justfile recipes, code comments, etc., framed as
+    non-exhaustive examples) when the working tree's change-set (diff vs HEAD plus
+    untracked files) differs from the one it last nudged about. A per-branch fingerprint
+    in the git dir (pruned for deleted branches on each clean-tree run) makes this
+    idempotent: it won't repeat the nudge turn after turn for the same uncommitted
+    changes, only when something new actually changed
   - `claude-sound stop` — Plays stop sound notification
 - **Notification**: `claude-sound notify` — Plays notification sound
 - **StatusLine**: `claude-statusline` — Custom status line display

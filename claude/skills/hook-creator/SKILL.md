@@ -122,7 +122,7 @@ Use `matcher` to scope to specific tools:
 Do work before Claude stops (staging, linting) and optionally block with
 feedback. Must guard against `stop_hook_active`.
 
-Example: `claude-precommit-stop` — stages tracked changes and runs the pre-commit loop:
+Example: `claude-stop-precommit` — stages tracked changes and runs the pre-commit loop:
 ```bash
 INPUT=$(cat)
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
