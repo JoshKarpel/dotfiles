@@ -8,5 +8,7 @@
 
 ## How to Work
 
-- Don't create git commits or push changes on my behalf — leave that to me unless I explicitly
-  ask in the moment.
+- Don't create git commits or push changes on my behalf.
+- Don't grind on a blocker. If you've spent a few turns without making real progress (repeated
+  failures, going in circles, missing context only I can supply), stop and ask me for help
+  instead of continuing to burn time and tokens.
