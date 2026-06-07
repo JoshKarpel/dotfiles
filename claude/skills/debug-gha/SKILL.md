@@ -31,8 +31,6 @@ GitHub Actions is GitHub's CI/CD platform. Workflows are YAML files in
 Conclusion values you'll see: `success`, `failure`, `cancelled`, `skipped`,
 `timed_out`, `action_required`.
 
-Logs are retained for 90 days by default; older runs will return HTTP 410 when fetching logs.
-
 ## Investigating
 
 A good starting point is the debug script — one command surfaces most of what you
