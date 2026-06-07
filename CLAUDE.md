@@ -10,6 +10,7 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 
 - **`dotrc/`** — Files symlinked as `~/.<filename>` (bashrc, zshrc, commonrc, gitconfig, etc.)
 - **`config/`** — Directories symlinked into `~/.config/` (alacritty, git, bottom, procs, starship)
+- **`claude/`** — Source files symlinked into `~/.claude/` via `bin/link-claude`: the global `CLAUDE.md`, `settings.json`, and `skills/`. Edit these here, not the symlinks in `~/.claude/`.
 - **`sources/`** — Shell scripts sourced by `commonrc` at shell startup (aliases, git helpers, path management, etc.)
 - **`targets/`** — Package lists for apt, brew, and cargo (one package per line, kept sorted by pre-commit)
 - **`bin/`** — Scripts added to PATH via `dotfiles/bin`; add any executable scripts here and they will be available in the shell (e.g., for Claude Code hooks)
@@ -53,7 +54,7 @@ Hooks run in non-interactive shell subprocesses, so functions defined in `source
 
 ## Claude Code Skills
 
-When asked to write a skill, place it in `claude/skills/` in this dotfiles repo (not in `~/.claude/`). The install process symlinks that directory into place.
+When asked to write a skill, place it in `claude/skills/` in this dotfiles repo (not in `~/.claude/`); `bin/link-claude` symlinks it into place. Use the `skill-creator` skill for structure and best practices, and `style-curator` when the skill belongs to the `style-*` family of language/tool style guides.
 
 ## Conventions
 
