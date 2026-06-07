@@ -140,7 +140,7 @@ don't fit neatly into any of them, and that's fine:
    hard-to-reverse operations.
 
 If a recurring task in this repo seems to fit one of these shapes, that's a hint it might be
-worth turning into a skill — not a rule that it must be.
+worth turning into a skill, not a rule that it must be.
 
 ## Patterns
 
