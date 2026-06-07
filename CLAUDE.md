@@ -42,8 +42,16 @@ Active hooks configured in `~/.claude/settings.json`:
   - `claude-read-check` — Blocks `sed -n X,Yp`, `head -n N file`, and `tail -n N file` used just to read files; tells Claude to use the Read tool with `offset`/`limit` instead
   - `claude-shell-comment-check` — Blocks any shell command containing `#`; tells Claude to write to a temp script file instead
   - `claude-git-dash-c-check` — Blocks `git -C <dir>` when the path resolves to the current repository (redundant; just run without `-C`); allows it when targeting a different repo
-- **Stop**:
+- **Stop**: `claude-stop` runs the checks below in sequence (not parallel, since hooks in
+  a group otherwise run in parallel and order isn't guaranteed) and only plays the stop
+  sound if none of them blocked, so the sound means Claude is actually stopping rather
+  than retrying after a block:
   - `claude-precommit-stop` — Checks for untracked files first (exits 2 if any); then runs `git add --update` and if pre-commit is configured runs it twice (auto-fixes + re-stage between runs); exits 2 if still failing
+  - `claude-followup-check` — If the working tree has any changes (staged, unstaged, or
+    untracked) and Claude's last message wasn't a question awaiting a reply, nudges once
+    (guarded by `stop_hook_active`) to look for followup work (CLAUDE.md, docs,
+    changelogs, tests, justfile recipes, code comments, etc., framed as non-exhaustive
+    examples); silent on clean sessions or mid-task questions
   - `claude-sound stop` — Plays stop sound notification
 - **Notification**: `claude-sound notify` — Plays notification sound
 - **StatusLine**: `claude-statusline` — Custom status line display

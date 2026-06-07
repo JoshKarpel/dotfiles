@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Stop hook orchestrator: run the blocking checks in sequence, then play the stop sound
+# only if neither blocked — so the sound means Claude is actually stopping, not retrying
+# after a block. (Hooks within a single Stop group run in parallel, so a separate sound
+# hook can't know whether a sibling is about to block this same attempt.)
+
+set -uo pipefail
+
+INPUT=$(cat)
+
+for check in claude-precommit-stop claude-followup-check; do
+  OUTPUT=$(echo "$INPUT" | "$check" 2>&1)
+  STATUS=$?
+  if [[ $STATUS -ne 0 ]]; then
+    echo "$OUTPUT" >&2
+    exit "$STATUS"
+  fi
+done
+
+claude-sound stop || true
+exit 0

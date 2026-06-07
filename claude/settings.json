@@ -117,6 +117,11 @@
     "ask": [],
     "defaultMode": "auto"
   },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "feedbackSurveyRate": 0,
   "model": "opusplan",
   "hooks": {
     "SessionStart": [
@@ -165,11 +170,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "claude-precommit-stop"
-          },
-          {
-            "type": "command",
-            "command": "claude-sound stop"
+            "command": "claude-stop"
           }
         ]
       }
