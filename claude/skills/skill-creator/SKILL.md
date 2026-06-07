@@ -94,6 +94,12 @@ Key fields beyond `description` and `when_to_use`:
   to activate only when working with Python files.
 - `context: fork` + `agent`: Runs the skill in an isolated subagent. Set `agent` to
   `Explore`, `Plan`, or a custom agent name.
+- `hooks`: Scopes hooks to the skill's own lifecycle instead of registering them globally in
+  `settings.json`. Useful for guardrails that should only bite while a specific workflow is
+  active — e.g. a skill that blocks destructive commands (`rm -rf`, `DROP TABLE`) only while
+  it's debugging, or restricts edits to a subset of directories only while it's running. This
+  avoids the friction of a permanent, always-on hook while still providing guardrails when
+  they matter.
 
 ## Skill Content Lifecycle
 
@@ -106,6 +112,35 @@ the session. After compaction:
 
 Keep `SKILL.md` under ~500 lines; move detailed reference material to supporting files in
 the skill directory.
+
+## Skill Categories
+
+When you're hunting for the next skill worth writing, here are a few shapes that skills tend
+to take in practice (loosely drawn from how Anthropic's own team uses them). Treat these as
+food for thought rather than a taxonomy to satisfy — most real skills blend categories or
+don't fit neatly into any of them, and that's fine:
+
+1. **Library & API reference** — usage guides, gotchas, and code snippets for a tool,
+   library, or API the model would otherwise have to rediscover each session (e.g.
+   `hook-creator`, `python-profiling`).
+2. **Product verification** — testing workflows, browser drivers, and assertion patterns for
+   confirming that a change actually works.
+3. **Data fetching & analysis** — connection libraries, query patterns, and dashboard/field
+   mappings for pulling and interpreting data.
+4. **Business process automation** — repetitive multi-step workflows with state tracked
+   across runs (e.g. `handle-pr-review`).
+5. **Code scaffolding** — generating framework boilerplate that follows your project's
+   conventions.
+6. **Code quality & review** — style enforcement, testing practices, and review guidance
+   (e.g. the `style-*` family).
+7. **CI/CD & deployment** — build, test, rollout, and rollback orchestration.
+8. **Runbooks** — symptom-to-investigation mappings with structured reporting, for
+   diagnosing recurring problems (e.g. `debug-gha`).
+9. **Infrastructure operations** — maintenance procedures with safety guardrails for risky,
+   hard-to-reverse operations.
+
+If a recurring task in this repo seems to fit one of these shapes, that's a hint it might be
+worth turning into a skill — not a rule that it must be.
 
 ## Patterns
 
@@ -152,6 +187,15 @@ have before that lets it do new things. Examples:
 
 Use `references/` to store documents. If appropriate, use progressive disclosure
 (e.g. "Depending on the platform, read docs/gcp.md, docs/azure.md, or docs/aws.md").
+
+### Gotchas
+
+The highest-signal content in a skill is often a running list of the specific ways Claude has
+gone wrong while using it: field names that differ between two systems it has to bridge,
+data that's append-only where Claude expected to be able to mutate it, an API that behaves
+unintuitively, a step that's easy to skip and breaks everything downstream. Keep this list —
+inline in SKILL.md or as a dedicated `gotchas.md` referenced from it — and add to it whenever
+Claude trips over something new.
 
 ### Dynamic Context Injection
 
@@ -235,6 +279,16 @@ Good automation is:
    where the low-hanging fruit is. Generic tools already exist; the unique workflows and pain
    points in your repo are where automation pays off most. Teaching Claude how to use a
    generic tool in your repo is high-leverage.
+
+### Avoid Railroading
+
+Automation (above) is for the mechanical, order-dependent parts of a workflow — the parts
+where judgment doesn't help and slip-ups are costly. Don't extend that same rigidity into
+prose instructions for the parts of the task that benefit from Claude reading the situation.
+An overly prescriptive skill — rigid step-by-step scripts for things that actually call for
+judgment — fights the model instead of informing it. Give Claude the information,
+constraints, and context it needs, then trust it to figure out how to apply them; it adapts
+to the specifics of a situation better than a procedure written in advance can.
 
 ### Qualifications
 
