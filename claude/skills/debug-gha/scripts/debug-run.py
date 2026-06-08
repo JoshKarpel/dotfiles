@@ -35,6 +35,7 @@ def main():
     parser.add_argument("-R", "--repo", help="Repo in OWNER/REPO format (default: current repo)")
     parser.add_argument("--log", action="store_true", help="Show full logs instead of failed-only")
     parser.add_argument("--workflow", help="Filter by workflow name when auto-selecting run")
+    parser.add_argument("--branch", help="Branch to filter runs by (default: current branch)")
     args = parser.parse_args()
 
     repo = args.repo
@@ -42,8 +43,19 @@ def main():
     if args.run_id:
         run_id = args.run_id
     else:
+        if args.branch:
+            branch = args.branch
+        else:
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True, text=True,
+            )
+            branch = result.stdout.strip() if result.returncode == 0 else None
+
         list_args = ["run", "list", "--status", "failure", "--limit", "1",
                      "--json", "databaseId,workflowName,displayTitle,headBranch,createdAt"]
+        if branch:
+            list_args += ["--branch", branch]
         if args.workflow:
             list_args += ["--workflow", args.workflow]
         runs = gh_json(*list_args, repo=repo)

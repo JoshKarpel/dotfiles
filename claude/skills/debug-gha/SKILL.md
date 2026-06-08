@@ -40,7 +40,8 @@ need (always invoke it with `uv`):
 uv run ~/.claude/skills/debug-gha/scripts/debug-run.py [run-id]
 # for a different repo: -R OWNER/REPO
 # for full logs:        --log
-# auto-selects latest failed run if no run-id given
+# for a specific branch: --branch BRANCH (default: current branch)
+# auto-selects latest failed run on current branch if no run-id given
 ```
 
 It prints the run metadata, all jobs with their conclusions, any failed steps, and
