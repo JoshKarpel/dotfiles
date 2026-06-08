@@ -4,9 +4,10 @@ description: >
   Python performance profiling and optimization. Use when investigating CPU
   hotspots, memory usage, I/O slowness, async event loop blocking, or when
   optimizing slow Python code. Covers tools (cProfile, line_profiler,
-  austin/speedscope, scalene), flamegraph generation, and common optimization
+  austin/speedscope, scalene), flamegraph generation, common optimization
   patterns (concurrent awaits, regex combining, recursive memoization,
-  eliminating duplicate work, moving blocking I/O off the event loop).
+  eliminating duplicate work, moving blocking I/O off the event loop), and
+  profiling Python processes in Kubernetes pods.
 ---
 
 # Python Performance Profiling
@@ -127,6 +128,16 @@ scalene --json --outfile profile.json myscript.py
 
 Scalene distinguishes Python time vs. native/C time per line —
 useful for finding where numpy/pandas/etc. are spending time.
+
+## Profiling in Kubernetes
+
+To profile a Python process running in a k8s pod, read
+`references/k8s-pod-profiling.md` for the full workflow: finding the pod,
+process discovery, running austin with `kubectl exec`, and retrieving the
+trace. The file transfer step has important gotchas (`kubectl exec` stdout
+has documented binary corruption; `kubectl cp` times out on larger files);
+the reference covers the recommended Python HTTP server approach and a
+text-only fallback.
 
 ## Analyzing Profile Output Programmatically
 
