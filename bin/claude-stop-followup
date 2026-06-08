@@ -10,6 +10,12 @@ STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 git rev-parse --show-toplevel >/dev/null 2>&1 || exit 0
 
 GIT_DIR=$(git rev-parse --git-dir)
+
+# During a merge or rebase the working tree is dominated by the operation itself,
+# not session work — skip the nudge entirely.
+[[ -f "$GIT_DIR/MERGE_HEAD" ]] && exit 0
+[[ -d "$GIT_DIR/rebase-merge" ]] && exit 0
+[[ -d "$GIT_DIR/rebase-apply" ]] && exit 0
 FP_DIR="$GIT_DIR/claude-followup"
 
 # Key the fingerprint by branch (or commit sha when detached) so switching branches compares
