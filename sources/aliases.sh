@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 
 # auto color on everything
-alias ls="ls --color=auto"
-alias ll="ls -lh --color=auto"
-alias la="ls -lha --color=auto"
+if exists eza; then
+  alias ls="eza"
+  alias ll="eza -lh"
+  alias la="eza -lha"
+else
+  alias ls="ls --color=auto"
+  alias ll="ls -lh --color=auto"
+  alias la="ls -lha --color=auto"
+fi
 alias dir="dir --color=auto"
 alias vdir="vdir --color=auto"
 alias grep="grep --color=auto"

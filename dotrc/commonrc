@@ -35,6 +35,7 @@ d="$HOME/.dircolors"
 DOTFILES="$HOME/dotfiles"
 
 . "$DOTFILES/sources/shell.sh"
+. "$DOTFILES/sources/exists.sh"
 
 # source everything in dotfiles/sources
 for file in "$DOTFILES/sources/"*; do

@@ -1,10 +1,8 @@
 bat
 bottom
-cargo-cache
 cargo-edit
 cargo-expand
 cargo-insta
-cargo-update
 du-dust
 eza
 fd-find
