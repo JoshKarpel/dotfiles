@@ -1,7 +1,7 @@
 ---
 name: style-shell
 description: >
-  Shell/Bash style guide. Use when writing or editing any .sh file, bin/
+  Shell/Bash style guide. MUST be invoked when writing or editing any .sh file, bin/
   script, hook script, or sourced shell helper. Covers file headers, safety
   flags, indentation, functions, quoting, and toolchain.
 ---

@@ -2,7 +2,7 @@
 name: style-curator
 description: >
   Ingest new style material (articles, docs, snippets, reference links, code
-  review feedback) and fold it into the `style-*` skill family. Use when the
+  review feedback) and fold it into the `style-*` skill family. MUST be invoked when the
   user shares a new convention, style guide, blog post, library doc, or
   reference and wants it captured, when deciding whether guidance belongs in
   an existing `style-*` skill or needs a new one, or when auditing or

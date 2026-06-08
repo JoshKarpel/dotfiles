@@ -1,7 +1,7 @@
 ---
 name: style-python
 description: >
-  Python-specific style guide. Use whenever writing or editing Python code.
+  Python-specific style guide. MUST be invoked whenever writing or editing Python code.
   Covers type annotation conventions (modern syntax, full coverage), data
   container choices (dataclass vs TypedDict vs NamedTuple vs dict), idioms
   (f-strings, pathlib, comprehensions, generators), and preferred toolchain

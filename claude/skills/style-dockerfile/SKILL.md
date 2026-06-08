@@ -1,7 +1,7 @@
 ---
 name: style-dockerfile
 description: >
-  Dockerfile style guide. Use when writing or editing any Dockerfile,
+  Dockerfile style guide. MUST be invoked when writing or editing any Dockerfile,
   Containerfile, or .dockerfile. Covers base image pinning, the heredoc RUN
   pattern, package-manager hygiene (apt, dnf/yum, uv), multi-stage
   builds, layer-caching order, ENV grouping, BuildKit mounts, non-root USER,

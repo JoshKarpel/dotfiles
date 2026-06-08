@@ -1,7 +1,7 @@
 ---
 name: skill-creator
 description: >
-  Create, improve, and troubleshoot Claude Code agent skills. Use when asked
+  Create, improve, and troubleshoot Claude Code agent skills. MUST be invoked when asked
   to make a new skill, write a SKILL.md file, improve skill discoverability,
   debug why a skill isn't activating, answer questions about skills, or review
   skill best practices.
@@ -47,6 +47,11 @@ discoverability is *extremely important*.
 Don't rely on users saying magic words. Think about what *situations* call for this skill,
 including ones where Claude should decide to use it on its own, then write a description that
 captures those scenarios.
+
+Use RFC 2119 keywords in descriptions to eliminate rationalization. "Use when X" gives Claude
+room to argue "this seems simple enough to skip." Replace it with "MUST be invoked when X" to
+make the trigger mandatory. Use MUST for non-negotiable triggers, SHOULD for strong-but-optional
+ones.
 
 The combined `description` + `when_to_use` text is truncated at 1,536 characters in the skill
 listing. Use `when_to_use` for additional trigger phrases and example requests that would

@@ -1,7 +1,7 @@
 ---
 name: python-profiling
 description: >
-  Python performance profiling and optimization. Use when investigating CPU
+  Python performance profiling and optimization. MUST be invoked when investigating CPU
   hotspots, memory usage, I/O slowness, async event loop blocking, or when
   optimizing slow Python code. Covers tools (cProfile, line_profiler,
   austin/speedscope, scalene), flamegraph generation, common optimization

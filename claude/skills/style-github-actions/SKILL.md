@@ -1,7 +1,7 @@
 ---
 name: style-github-actions
 description: >
-  GitHub Actions workflow style guide. Use when writing or editing any
+  GitHub Actions workflow style guide. MUST be invoked when writing or editing any
   .github/workflows/* file. Covers trigger patterns, action version pinning,
   matrix structure, step naming, PyPI trusted publishing, and docs deployment.
   Read references/python.md for Python/uv-specific examples.

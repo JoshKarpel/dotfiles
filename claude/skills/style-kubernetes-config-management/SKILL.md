@@ -1,7 +1,7 @@
 ---
 name: style-kubernetes-config-management
 description: >
-  Style guide for Kubernetes config management tools. Use when writing or
+  Style guide for Kubernetes config management tools. MUST be invoked when writing or
   editing Helm charts, templates, values files, Chart.yaml, templates/*.yaml,
   values.yaml, helpers/_helpers.tpl, Crossplane compositions, or Crossplane
   XRD specs. Covers values/spec design, template patterns, anti-patterns, and

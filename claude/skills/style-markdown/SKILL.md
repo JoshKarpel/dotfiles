@@ -1,7 +1,7 @@
 ---
 name: style-markdown
 description: >
-  Markdown style guide and preferences. Use when writing or editing any .md
+  Markdown style guide and preferences. MUST be invoked when writing or editing any .md
   file, including skill files, documentation, READMEs, or any markdown content.
   Covers formatting rules, heading usage, horizontal rules, code blocks, and
   common mistakes to avoid.

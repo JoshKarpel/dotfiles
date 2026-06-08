@@ -1,7 +1,7 @@
 ---
 name: hook-creator
 description: >
-  Guide for designing and writing Claude Code hooks. Use when creating a new
+  Guide for designing and writing Claude Code hooks. MUST be invoked when creating a new
   hook, adding hooks to settings.json, debugging hook behavior, understanding
   what hook events are available and what JSON they receive, or implementing
   patterns like behavior correction, pre-stop checklists, context injection,
