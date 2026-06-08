@@ -400,6 +400,21 @@ results = await asyncio.gather(*[bounded_fetch(item) for item in items])
 
 ### Library-specific footguns
 
+- **stdlib logging does per-record file I/O**: `FileHandler` and its subclasses
+  (`RotatingFileHandler`, `TimedRotatingFileHandler`) call `flush()`, and check for
+  rotation (`stat`/`tell` the file) on *every single* `emit()` — no batching across records.
+  Locally these syscalls are cheap, but over network filesystems (NFS, EFS, GCS FUSE,
+  mounted volumes in cloud environments) each one can cost milliseconds, and log-heavy
+  code can spend most of its time in logging rather than real work.
+  Quick fix: get the actual file I/O off the calling thread with
+  `logging.handlers.QueueHandler` / `QueueListener` (see the
+  [logging cookbook's "Dealing with handlers that block"](https://docs.python.org/3/howto/logging-cookbook.html#dealing-with-handlers-that-block)) —
+  the calling code just enqueues records (fast, non-blocking), and a separate listener
+  thread performs the (still per-record) writes. This matters most for event-loop-driven
+  code, where the calling thread *is* the loop and blocking it on slow syscalls stalls
+  every other coroutine; it's also a win for the hot path more generally. For more
+  throughput, pair the queue with a custom listener/handler that drains multiple queued
+  records at once and batches them into a single write, rather than writing one-by-one.
 - **Pydantic re-validation of trusted data**: constructing a model from already-valid
   internal data runs full validation unnecessarily.
   Use `Model.model_construct(**data)` to skip validation for trusted/internal data.
