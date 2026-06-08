@@ -73,6 +73,8 @@ EOF
 exit 2
 ```
 
+Write prose as long unbroken lines in the heredoc rather than hard-wrapping at 80 chars. The TUI reflows text at its own width; hard wraps baked into the source wrap awkwardly when the TUI width doesn't match.
+
 ### stop_hook_active — Loop Prevention
 
 `Stop` and `SubagentStop` events include `"stop_hook_active": true/false`. When

@@ -69,10 +69,6 @@ You made these changes this session:
 
 $PORCELAIN
 
-Before stopping, look for any additional followup work needed to keep things consistent,
-e.g. CLAUDE.md, documentation, changelogs, tests, justfile recipes, or code comments.
-These are examples, not a checklist: use your knowledge of this repo, what you've already
-done this session, and what you just changed to judge what (if anything) still needs to
-follow. If nothing does, stop.
+Before stopping, look for any additional followup work needed to keep things consistent, e.g. CLAUDE.md, documentation, changelogs, tests, justfile recipes, or code comments. These are examples, not a checklist: use your knowledge of this repo, what you've already done this session, and what you just changed to judge what (if anything) still needs to follow. If nothing does, stop.
 EOF
 exit 2
