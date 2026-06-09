@@ -142,33 +142,33 @@ text-only fallback.
 ## Analyzing Profile Output Programmatically
 
 Speedscope JSON and scalene JSON are large and dense — don't try to read them directly.
-Use the helper scripts in `scripts/` to extract actionable summaries.
+Use the helper scripts in `~/.claude/skills/python-profiling/scripts/` to extract actionable summaries.
 Always invoke them with `uv run`.
 
-### Speedscope summary (`scripts/profile_speedscope.py`)
+### Speedscope summary (`~/.claude/skills/python-profiling/scripts/profile_speedscope.py`)
 
 Parses a speedscope JSON and reports self-time and inclusive-time per function,
 filtered to user code by default (stdlib/frozen frames hidden unless `--all`).
 
 ```bash
-uv run scripts/profile_speedscope.py austin.json
-uv run scripts/profile_speedscope.py austin.json --all        # include stdlib
-uv run scripts/profile_speedscope.py austin.json --top 20     # more entries
-uv run scripts/profile_speedscope.py austin.json --chains     # show top call chains
+uv run ~/.claude/skills/python-profiling/scripts/profile_speedscope.py austin.json
+uv run ~/.claude/skills/python-profiling/scripts/profile_speedscope.py austin.json --all        # include stdlib
+uv run ~/.claude/skills/python-profiling/scripts/profile_speedscope.py austin.json --top 20     # more entries
+uv run ~/.claude/skills/python-profiling/scripts/profile_speedscope.py austin.json --chains     # show top call chains
 ```
 
 Output: ranked tables of self-time (where CPU actually burns)
 and inclusive-time (what called the hot code), with file:line references.
 
-### Scalene summary (`scripts/profile_scalene.py`)
+### Scalene summary (`~/.claude/skills/python-profiling/scripts/profile_scalene.py`)
 
 Parses a scalene JSON and reports CPU breakdown (Python vs native/C)
 and memory per function and per line.
 
 ```bash
-uv run scripts/profile_scalene.py scalene-profile.json
-uv run scripts/profile_scalene.py scalene-profile.json --top 20
-uv run scripts/profile_scalene.py scalene-profile.json --memory  # sort by memory
+uv run ~/.claude/skills/python-profiling/scripts/profile_scalene.py scalene-profile.json
+uv run ~/.claude/skills/python-profiling/scripts/profile_scalene.py scalene-profile.json --top 20
+uv run ~/.claude/skills/python-profiling/scripts/profile_scalene.py scalene-profile.json --memory  # sort by memory
 ```
 
 Output: function-level and line-level tables with `P`/`C` bars (Python vs native CPU %),
