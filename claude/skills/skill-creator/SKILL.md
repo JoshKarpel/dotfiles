@@ -26,8 +26,7 @@ Create well-structured Claude Code skills that are discoverable and effective.
 
 Use the template at [assets/SKILL.template.md](assets/SKILL.template.md) as a starting SKILL.md file.
 
-Load the `style-markdown` skill when writing or editing SKILL.md files — they are markdown
-and the same formatting rules apply.
+SKILL.md files are markdown; the `style-markdown` rule applies automatically.
 
 Upstream documentation on skills is available [here](https://code.claude.com/docs/en/skills).
 The rest of this document provides guidelines and best practices for creating high-quality
@@ -136,8 +135,8 @@ don't fit neatly into any of them, and that's fine:
    across runs (e.g. `handle-pr-review`).
 5. **Code scaffolding** — generating framework boilerplate that follows your project's
    conventions.
-6. **Code quality & review** — style enforcement, testing practices, and review guidance
-   (e.g. the `style-*` family).
+6. **Code quality & review** — testing practices and review guidance (e.g. `code-review`).
+   Note: language/tool style guides live in `claude/rules/` as path-scoped rules, not skills.
 7. **CI/CD & deployment** — build, test, rollout, and rollback orchestration.
 8. **Runbooks** — symptom-to-investigation mappings with structured reporting, for
    diagnosing recurring problems (e.g. `debug-gha`).

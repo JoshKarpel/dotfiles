@@ -1,16 +1,15 @@
 ---
-name: style-justfile
-description: >
-  Justfile style guide. MUST be invoked when writing or editing a justfile or Justfile.
-  Covers file structure, settings, the default list recipe, doc attributes,
-  aliases, variadic arguments, and command echo suppression.
+paths:
+  - "justfile"
+  - "Justfile"
+  - "**/*.justfile"
 ---
 
 # Justfile Style Guide
 
 ## Adopt Project Conventions First
 
-These are defaults. See `style-programming` for the full principle.
+These are defaults. See the general programming style guide for the full principle.
 Match what's already in the project before applying anything below.
 
 ## File Header
@@ -120,7 +119,7 @@ Sigils are per-line prefixes that modify how a command runs:
 ## Bash Recipes
 
 When writing a multi-line recipe that uses a bash shebang (i.e., `#!/usr/bin/env bash`),
-load the `style-shell` skill for shell scripting conventions.
+follow the shell style guide for shell scripting conventions.
 
 ## References
 

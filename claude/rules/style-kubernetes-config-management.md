@@ -1,19 +1,18 @@
 ---
-name: style-kubernetes-config-management
-description: >
-  Style guide for Kubernetes config management tools. MUST be invoked when writing or
-  editing Helm charts, templates, values files, Chart.yaml, templates/*.yaml,
-  values.yaml, helpers/_helpers.tpl, Crossplane compositions, or Crossplane
-  XRD specs. Covers values/spec design, template patterns, anti-patterns, and
-  conventions for writing portable, CI-safe Helm charts and Crossplane
-  compositions.
+paths:
+  - "**/templates/**/*.yaml"
+  - "**/templates/**/*.yml"
+  - "**/values*.yaml"
+  - "**/values*.yml"
+  - "**/Chart.yaml"
+  - "**/_helpers.tpl"
 ---
 
 # Kubernetes Config Management Style Guide
 
 ## Adopt Project Conventions First
 
-These are defaults. See `style-programming` for the full principle.
+These are defaults. See the general programming style guide for the full principle.
 Match what's already in the project before applying anything below.
 
 ## Helm and Crossplane

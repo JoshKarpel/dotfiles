@@ -1,17 +1,13 @@
 ---
-name: style-markdown
-description: >
-  Markdown style guide and preferences. MUST be invoked when writing or editing any .md
-  file, including skill files, documentation, READMEs, or any markdown content.
-  Covers formatting rules, heading usage, horizontal rules, code blocks, and
-  common mistakes to avoid.
+paths:
+  - "**/*.md"
 ---
 
 # Markdown Style Guide
 
 ## Adopt Project Conventions First
 
-These are defaults. See `style-programming` for the full principle.
+These are defaults. See the general programming style guide for the full principle.
 Match what's already in the project before applying anything below.
 
 ## Headings and Structure

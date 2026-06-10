@@ -1,11 +1,3 @@
----
-name: style-programming
-description: >
-  General programming style guide. MUST be invoked whenever writing or significantly
-  editing code in any language. Covers parse-don't-validate, functional core/imperative
-  shell, comment policy, naming, error handling, and function design.
----
-
 # General Programming Style
 
 ## Adopt Local Conventions

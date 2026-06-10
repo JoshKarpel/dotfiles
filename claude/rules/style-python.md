@@ -1,18 +1,14 @@
 ---
-name: style-python
-description: >
-  Python-specific style guide. MUST be invoked whenever writing or editing Python code.
-  Covers type annotation conventions (modern syntax, full coverage), data
-  container choices (dataclass vs TypedDict vs NamedTuple vs dict), idioms
-  (f-strings, pathlib, comprehensions, generators), and preferred toolchain
-  (pydantic, mypy, uv) with a note to defer to project conventions.
+paths:
+  - "**/*.py"
+  - "**/pyproject.toml"
 ---
 
 # Python Style Guide
 
 ## Adopt Project Conventions First
 
-These are defaults. See `style-programming` for the full principle.
+These are defaults. See the general programming style guide for the full principle.
 Match what's already in the project before applying anything below.
 
 ## Type Annotations

@@ -1,16 +1,14 @@
 ---
-name: style-shell
-description: >
-  Shell/Bash style guide. MUST be invoked when writing or editing any .sh file, bin/
-  script, hook script, or sourced shell helper. Covers file headers, safety
-  flags, indentation, functions, quoting, and toolchain.
+paths:
+  - "**/*.sh"
+  - "bin/**"
 ---
 
 # Shell / Bash Style Guide
 
 ## Adopt Project Conventions First
 
-These are defaults. See `style-programming` for the full principle.
+These are defaults. See the general programming style guide for the full principle.
 Match what's already in the project before applying anything below.
 
 ## File Header
