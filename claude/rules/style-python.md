@@ -40,27 +40,63 @@ Avoid plain classes. Strongly prefer dataclasses; if you would have put logic in
 Prefer Pydantic over `TypedDict` for any validated or serialized data;
 reach for `TypedDict` only when you genuinely can't control the shape.
 
-## Idioms
+## Strings
 
 - **f-strings** for all string formatting, including logging calls. No `.format()` or `%`.
   (The conventional advice to use `%`-style in logging to defer interpolation is rarely
   a meaningful optimization in practice.)
-- **`pathlib.Path`** for all file paths, including in async code. No `os.path`.
-  If file I/O needs to move off the event loop, wrap it with `asyncio.to_thread`
-  rather than reaching for `aiofiles` or `anyio`. Those libraries do the same
-  thing internally but with significantly more overhead.
+
+## Collections and Iteration
+
 - **Comprehensions** for transformations. Use a plain `for` loop when there are side
   effects or when the loop's purpose isn't to produce transformed output. If the
   expression is too long, factor out a helper function; don't switch to a loop.
 - **Generators** (`yield`) when the caller doesn't need all values at once
   or when materializing the sequence would waste memory.
+
+## Resources
+
+- **`pathlib.Path`** for all file paths, including in async code. No `os.path`.
+  If file I/O needs to move off the event loop, wrap it with `asyncio.to_thread`
+  rather than reaching for `aiofiles` or `anyio`. Those libraries do the same
+  thing internally but with significantly more overhead.
 - **Context managers** (`with`) for all resources: files, locks, connections,
   temporary directories.
+
+## Control Flow
+
 - **Walrus operator** (`:=`) when it eliminates a repeated expression and
   remains readable.
 - **Don't look before you leap.** Do the access and handle the miss, rather than
   checking for membership and then accessing again. Prefer `try/except` or `.get()`
   over `if x in y: use y[x]`: the latter does two lookups and obscures intent.
+  Exception: when the "miss" is the *common* path, raising is expensive in CPython.
+  If the exception fires on nearly every call, a pre-check may be faster.
+
+## Async
+
+- **Concurrent independent awaits.** When coroutines don't depend on each
+  other's results, run them with `asyncio.gather` or `asyncio.TaskGroup`
+  instead of sequential `await` calls.
+- **Background tasks for periodic work.** TTL sweeps, cache eviction, and
+  similar maintenance don't belong inline on the critical path; start them with
+  `asyncio.create_task` at app startup.
+
+## Performance
+
+These are proactive design decisions, not micro-optimizations to apply after
+the fact. See the `python-profiling` skill for measurement tools.
+
+- **Construct expensive objects once.** Objects like parsed configs, compiled
+  schemas, HTTP clients, and connection pools should be built at startup and
+  injected as dependencies, not reconstructed per-request. Use the app
+  framework's lifespan hook (e.g., FastAPI's `lifespan` parameter) to run
+  expensive setup before serving traffic.
+- **Cache pure function results** with `@functools.cache` / `@functools.lru_cache`
+  (no expiry) or `cachetools.TTLCache` (time-bounded). Set explicit TTLs when
+  the underlying data can change.
+- **Parse once.** If a deserialized result is needed in two places (e.g., a
+  debug log and actual processing), parse once and pass the result to both.
 
 ## Toolchain
 

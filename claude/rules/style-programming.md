@@ -43,6 +43,29 @@ The goal is to push side effects to the outermost layer so the interesting logic
 can be tested without mocking. Prefer making a function pure over making it easier
 to mock.
 
+## Values over Places (Rich Hickey)
+
+A *value* is immutable and always means the same thing. A *place* is a
+mutable location that holds a value at a point in time, and may hold a
+different value tomorrow.
+
+Prefer values. Pass values around; return new values from functions; avoid
+holding references to shared mutable state. The payoffs:
+
+- **Free sharing.** Values need no locks or coordination. You can pass them
+  across threads, cache them, log them, and hand them to multiple callers
+  without any of those callers affecting each other.
+- **Reproducibility.** A function given the same value always sees the same
+  input. A function given a reference to a place sees whatever someone else
+  put there since you last looked.
+- **Testability.** Transformations are pure functions: in, out, assert. No
+  setup to establish prior state, no teardown to undo mutation.
+
+Mutation has its place: building up a local result before returning it is
+fine. The concern is mutation that *escapes*: modifying a caller's data,
+writing to a shared reference, changing what a place holds in ways other
+holders can observe.
+
 ## Simple vs. Easy (Rich Hickey)
 
 **Simple** means unentangled: one concern, no interleaving with other things.
@@ -184,3 +207,4 @@ not code, and they rot as the codebase evolves (unless it's a forward-looking TO
 - [Simple Made Easy](https://github.com/matthiasn/talk-transcripts/blob/master/Hickey_Rich/SimpleMadeEasy.md) by Rich Hickey
 - [Functional Core, Imperative Shell](https://www.destroyallsoftware.com/screencasts/catalog/functional-core-imperative-shell) by Gary Bernhardt
 - [Choosing Values for Robust Tests](https://testing.googleblog.com/2026/06/choosing-values-for-robust-tests.html) by Radion Khait
+- [The Value of Values](https://www.infoq.com/presentations/Value-Values/) by Rich Hickey
