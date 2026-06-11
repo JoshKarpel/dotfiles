@@ -11,14 +11,14 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 # Extract the path argument from the first "git -C <dir>" in the command
 DIR=$(echo "$COMMAND" | grep -oE '(^|[|;&[:space:]])git\s+-C\s+\S+' | head -1 | awk '{print $NF}') || DIR=""
 
-if [ -z "$DIR" ]; then
+if [[ -z "$DIR" ]]; then
   exit 0
 fi
 
 GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 TARGET=$(realpath "$DIR" 2>/dev/null) || TARGET=""
 
-if [ -n "$TARGET" ] && [ "$TARGET" = "$GIT_ROOT" ]; then
+if [[ -n "$TARGET" && "$TARGET" == "$GIT_ROOT" ]]; then
   echo "Do not use 'git -C $DIR' when targeting the current repository. Just run the git command without -C." >&2
   exit 2
 fi

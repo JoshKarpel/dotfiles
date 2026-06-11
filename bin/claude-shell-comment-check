@@ -8,8 +8,12 @@ set -euo pipefail
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 
-if echo "$COMMAND" | grep -q '#'; then
-  echo "Do not use # in shell commands. If you need inline comments or a multi-line script, write it to a temporary file (e.g. /tmp/script_$$.sh or /tmp/script_$$.py) and run that instead." >&2
+# In bash, # only starts a comment when it begins a word (preceded by whitespace or at the
+# start of the command). Quoted # (e.g. in URLs or grep patterns) is technically still
+# flagged here since detecting quote context via grep isn't practical; this is an acceptable
+# trade-off because those cases are rare and can use a temp file or variable instead.
+if echo "$COMMAND" | grep -qE '(^|[[:space:]])#'; then
+  echo "Do not use # in shell commands. The permission harness treats an unquoted # as a comment and truncates everything after it, causing the command to fail pattern matching. If you need inline comments or a multi-line script, write it to a temporary file (e.g. /tmp/script_\$\$.sh or /tmp/script_\$\$.py) and run that instead." >&2
   exit 2
 fi
 

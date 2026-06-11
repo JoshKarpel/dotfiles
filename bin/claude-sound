@@ -8,12 +8,14 @@ role="${1:-stop}"
 
 case "$(uname -s)" in
   Darwin)
+    command -v afplay >/dev/null 2>&1 || exit 0
     case "$role" in
       stop)   afplay -v 0.40 /System/Library/Sounds/Morse.aiff ;;
       notify) afplay -v 0.35 /System/Library/Sounds/Ping.aiff ;;
     esac
     ;;
   Linux)
+    command -v paplay >/dev/null 2>&1 || exit 0
     case "$role" in
       stop)   paplay /usr/share/sounds/freedesktop/stereo/complete.oga ;;
       notify) paplay /usr/share/sounds/freedesktop/stereo/message.oga ;;
