@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Stop hook: nudge Claude to verify its changes still work before stopping
+
+set -euo pipefail
+
+INPUT=$(cat)
+PORCELAIN=$(echo "$INPUT" | claude-changeset-guard verify) || exit 0
+
+cat >&2 <<EOF
+You made these changes this session:
+
+$PORCELAIN
+
+Before stopping, verify your changes actually work: run the project's tests and
+type checker as appropriate for what you touched, and confirm they pass. Keep it
+scoped to verifying this change-set — don't add new tests or tooling beyond what's
+needed to confirm it works. If verification passes (or nothing applies to what you
+changed), stop.
+EOF
+exit 2

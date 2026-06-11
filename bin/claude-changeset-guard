@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Per-change-set Stop guard: exit 0 (printing the porcelain change-set) when a nudge for
+# <namespace> should fire, else exit 1. Records the change-set fingerprint only when it
+# nudges, so a namespace nudges once per never-before-seen diff and goes quiet once the diff
+# stops changing. Shared by claude-stop-{followup,review,verify}.
+
+set -euo pipefail
+
+NAMESPACE="$1"
+INPUT=$(cat)
+
+git rev-parse --show-toplevel >/dev/null 2>&1 || exit 1
+GIT_DIR=$(git rev-parse --git-dir)
+
+# During a merge or rebase the working tree is dominated by the operation, not session work.
+[[ -f "$GIT_DIR/MERGE_HEAD" ]] && exit 1
+[[ -d "$GIT_DIR/rebase-merge" ]] && exit 1
+[[ -d "$GIT_DIR/rebase-apply" ]] && exit 1
+
+# Key the fingerprint by branch (or commit sha when detached) so switching branches compares
+# against that branch's own last-nudged change-set. Branch names can contain `/`, so hash them.
+FP_DIR="$GIT_DIR/claude-$NAMESPACE"
+BRANCH=$(git branch --show-current)
+[[ -z "$BRANCH" ]] && BRANCH=$(git rev-parse HEAD)
+BRANCH_KEY=$(printf '%s' "$BRANCH" | sha1sum | cut -d' ' -f1)
+FP_FILE="$FP_DIR/$BRANCH_KEY"
+
+PORCELAIN=$(git status --porcelain 2>/dev/null)
+if [[ -z "$PORCELAIN" ]]; then
+  # Clean tree: drop this branch's fingerprint so a future change always nudges, and
+  # garbage-collect fingerprints for branches that no longer exist.
+  rm -f "$FP_FILE"
+  if [[ -d "$FP_DIR" ]]; then
+    LIVE_KEYS=$(git for-each-ref --format='%(refname:short)' refs/heads | while IFS= read -r b; do
+        printf '%s\n' "$b" | sha1sum | cut -d' ' -f1
+    done)
+    for f in "$FP_DIR"/*; do
+      [[ -e "$f" ]] || continue
+      if ! grep -qx "$(basename "$f")" <<<"$LIVE_KEYS"; then
+        rm -f "$f"
+      fi
+    done
+  fi
+  exit 1
+fi
+
+# Fingerprint the change-set: tracked diff against HEAD (stable across staged vs. unstaged)
+# plus the untracked file list.
+FP=$(
+  {
+    git diff HEAD
+    git ls-files --others --exclude-standard
+  } | sha1sum | cut -d' ' -f1
+)
+
+PREV=""
+[[ -f "$FP_FILE" ]] && PREV=$(cat "$FP_FILE")
+
+# Already nudged about this exact change-set: nothing new to say, let it stabilize.
+[[ "$FP" == "$PREV" ]] && exit 1
+
+# Skip if Claude's last message contains a `?` — likely awaiting a reply, not done yet.
+# Don't write the fingerprint here: if we skipped for a question, the next non-question
+# stop should still nudge about the same diff.
+LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // ""')
+[[ "$LAST_MESSAGE" == *"?"* ]] && exit 1
+
+# Record that we nudged about this change-set (only here, never on the skip paths above).
+mkdir -p "$FP_DIR"
+printf '%s' "$FP" >"$FP_FILE"
+
+printf '%s' "$PORCELAIN"
+exit 0
