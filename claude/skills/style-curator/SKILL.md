@@ -57,9 +57,6 @@ Match on both axes:
   `style-yaml.md`), placed in `claude/rules/`.
 - Add YAML frontmatter with `paths:` globs that match the relevant file types
   so the rule loads automatically when Claude works with those files.
-- Open with the same "Adopt Project Conventions First" section every other
-  `style-*` rule carries (every one but `style-programming`, which *is* that
-  section).
 - Per `CLAUDE.md`, new rules live in `claude/rules/` in this repo, never
   directly under `~/.claude/`, so they travel with the dotfiles and get
   symlinked into place by `bin/link-claude`.
