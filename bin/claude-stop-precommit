@@ -7,14 +7,12 @@ REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 
 UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null)
 if [[ -n "$UNTRACKED" ]]; then
-  cat >&2 <<EOF
-There are untracked files.
+  jq -n --arg ctx "There are untracked files.
 For each file, decide what to do with it: stage it with git add, add it to .gitignore, or delete it. If you're not sure, ask for help.
 Files:
 
-$UNTRACKED
-EOF
-  exit 2
+$UNTRACKED" '{"systemMessage":"[claude-stop-precommit] untracked files","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$ctx}}'
+  exit 0
 fi
 
 git add --update
@@ -43,9 +41,7 @@ if OUTPUT=$($RUNNER run 2>&1); then
   exit 0
 fi
 
-cat >&2 <<EOF
-pre-commit is still failing after auto-fixing. Fix the issues before committing:
+jq -n --arg ctx "pre-commit is still failing after auto-fixing. Fix the issues before committing:
 
-$OUTPUT
-EOF
-exit 2
+$OUTPUT" '{"systemMessage":"[claude-stop-precommit] pre-commit failing","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$ctx}}'
+exit 0

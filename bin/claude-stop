@@ -8,12 +8,15 @@ set -uo pipefail
 
 INPUT=$(cat)
 
-for check in claude-stop-precommit claude-stop-followup claude-stop-review claude-stop-verify; do
-  OUTPUT=$(echo "$INPUT" | "$check" 2>&1)
+for check in claude-stop-precommit claude-stop-finish; do
+  STDOUT=$(echo "$INPUT" | "$check")
   STATUS=$?
   if [[ $STATUS -ne 0 ]]; then
-    echo "$OUTPUT" >&2
     exit "$STATUS"
+  fi
+  if [[ "${STDOUT:0:1}" == "{" ]]; then
+    echo "$STDOUT"
+    exit 0
   fi
 done
 

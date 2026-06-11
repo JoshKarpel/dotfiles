@@ -46,26 +46,23 @@ Active hooks configured in `~/.claude/settings.json`:
   a group otherwise run in parallel and order isn't guaranteed) and only plays the stop
   sound if none of them blocked, so the sound means Claude is actually stopping rather
   than retrying after a block:
-  - `claude-stop-precommit` — Checks for untracked files first (exits 2 if any); then
-    runs `git add --update` and if pre-commit is configured runs it, exiting early on
+  - `claude-stop-precommit` — Checks for untracked files first; then runs
+    `git add --update` and if pre-commit is configured runs it, exiting early on
     success; on failure, re-stages auto-fixes (`git add --update`) and runs it once more,
-    exiting 2 if still failing
-  - `claude-stop-followup` — Nudges Claude to look for consistency followup work
-    (CLAUDE.md, docs, changelogs, tests, justfile recipes, code comments, etc.)
-  - `claude-stop-review` — Nudges Claude to review its own diff like a pull request
-    (bugs, edge cases, leftover scaffolding, unclear names, convention violations) and
-    fix what it finds or explicitly decide it's fine
-  - `claude-stop-verify` — Nudges Claude to run the project's tests and type checker
-    for the files it touched and confirm they pass
-  - `claude-sound stop` — Plays stop sound notification
+    blocking if still failing
+  - `claude-stop-finish` — Once per change-set, nudges Claude through a structured
+    finishing pass: (1) consistency updates (CLAUDE.md, docs, changelogs, etc.),
+    (2) PR-style review of the diff in the context of the branch since its merge-base,
+    (3) verify the changes work (e.g. build, type-checking, tests).
+    Uses the shared `claude-changeset-guard` helper: fires once per never-before-seen
+    change-set (fingerprinted via `git diff HEAD` + untracked files, keyed per branch,
+    stored in `.git/claude-finish/`), re-fires only when Claude changes the diff, and
+    goes quiet once a pass produces no changes. Skips during merge/rebase and when
+    Claude's last message looks like a question.
 
-  `claude-stop-review`, `claude-stop-verify`, and `claude-stop-followup` all use the
-  shared `claude-changeset-guard` helper: each fires at most once per never-before-seen
-  change-set (fingerprinted via `git diff HEAD` + untracked files, keyed per branch,
-  stored in `.git/claude-<namespace>/`) and goes quiet once the diff stops changing.
-  The system self-stabilizes: a hook re-fires only when Claude actually changed the
-  diff; when Claude makes a no-op pass the fingerprint matches and the hook stays silent.
-  Skips during merge/rebase and when Claude's last message looks like a question.
+  All Stop hooks output JSON: `additionalContext` carries the message to Claude
+  without displaying it in the TUI; `systemMessage` shows a brief visible indicator.
+  - `claude-sound stop` — Plays stop sound notification
 - **Notification**: `claude-sound notify` — Plays notification sound
 - **StatusLine**: `claude-statusline` — Custom status line display
 

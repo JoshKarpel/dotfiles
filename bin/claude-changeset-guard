@@ -2,7 +2,7 @@
 # Per-change-set Stop guard: exit 0 (printing the porcelain change-set) when a nudge for
 # <namespace> should fire, else exit 1. Records the change-set fingerprint only when it
 # nudges, so a namespace nudges once per never-before-seen diff and goes quiet once the diff
-# stops changing. Shared by claude-stop-{followup,review,verify}.
+# stops changing.
 
 set -euo pipefail
 
