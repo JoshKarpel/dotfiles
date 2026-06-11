@@ -6,11 +6,6 @@ paths:
 
 # Python Style Guide
 
-## Adopt Project Conventions First
-
-These are defaults. See the general programming style guide for the full principle.
-Match what's already in the project before applying anything below.
-
 ## Type Annotations
 
 Always annotate functions. Use modern syntax (Python 3.10+):

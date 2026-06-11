@@ -2,14 +2,11 @@
 paths:
   - ".github/workflows/*.yml"
   - ".github/workflows/*.yaml"
+  - ".github/actions/**/*.yml"
+  - ".github/actions/**/*.yaml"
 ---
 
 # GitHub Actions Style Guide
-
-## Adopt Project Conventions First
-
-These are defaults. See the general programming style guide for the full principle.
-Match what's already in the project before applying anything below.
 
 ## Workflow File Naming
 

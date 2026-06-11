@@ -7,11 +7,6 @@ paths:
 
 # Justfile Style Guide
 
-## Adopt Project Conventions First
-
-These are defaults. See the general programming style guide for the full principle.
-Match what's already in the project before applying anything below.
-
 ## File Header
 
 Always start with the shebang and common settings:

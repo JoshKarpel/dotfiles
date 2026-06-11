@@ -6,14 +6,15 @@ paths:
   - "**/values*.yml"
   - "**/Chart.yaml"
   - "**/_helpers.tpl"
+  - "**/compositions/**/*.yaml"
+  - "**/compositions/**/*.yml"
+  - "**/xrds/**/*.yaml"
+  - "**/xrds/**/*.yml"
+  - "**/functions/**/*.yaml"
+  - "**/functions/**/*.yml"
 ---
 
 # Kubernetes Config Management Style Guide
-
-## Adopt Project Conventions First
-
-These are defaults. See the general programming style guide for the full principle.
-Match what's already in the project before applying anything below.
 
 ## Helm and Crossplane
 

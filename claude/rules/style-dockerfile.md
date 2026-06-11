@@ -3,14 +3,10 @@ paths:
   - "Dockerfile"
   - "Containerfile"
   - "**/*.dockerfile"
+  - "**/*.Dockerfile"
 ---
 
 # Dockerfile Style Guide
-
-## Adopt Project Conventions First
-
-These are defaults. See the general programming style guide for the full principle.
-Match what's already in the project before applying anything below.
 
 ## BuildKit
 
