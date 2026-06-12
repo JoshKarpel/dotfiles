@@ -2,6 +2,10 @@
   "env": {
     "CLAUDE_CODE_NO_FLICKER": "1"
   },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
   "includeGitInstructions": false,
   "permissions": {
     "allow": [
@@ -34,6 +38,7 @@
       "WebFetch(domain:www.structlog.org)",
       "WebFetch(domain:www.w3.org)",
       "WebFetch(domain:docs.langchain.com)",
+      "WebFetch(domain:support.langchain.com)",
       "Edit(//tmp/**)",
       "Read(//tmp/**)",
       "Bash(~/.claude/skills/handle-pr-review/scripts/fetch-pr-comments.py *)",
@@ -120,11 +125,6 @@
     "ask": [],
     "defaultMode": "auto"
   },
-  "attribution": {
-    "commit": "",
-    "pr": ""
-  },
-  "feedbackSurveyRate": 0,
   "model": "opusplan",
   "hooks": {
     "SessionStart": [
@@ -194,6 +194,8 @@
     "command": "claude-statusline",
     "refreshInterval": 10
   },
+  "feedbackSurveyRate": 0,
+  "effortLevel": "high",
   "voice": {
     "enabled": true,
     "mode": "hold",
@@ -201,6 +203,5 @@
   },
   "theme": "dark",
   "skipAutoPermissionPrompt": true,
-  "defaultMode": "acceptEdits",
-  "effortLevel": "xhigh"
+  "defaultMode": "acceptEdits"
 }
