@@ -14,7 +14,7 @@ Hooks are shell scripts (or prompt/agent handlers) that fire at lifecycle events
 in a Claude Code session. They let you enforce behavior, inject context, play
 sounds, run side effects, and more.
 
-**Fetch the [upstream reference](https://docs.claude.ai/en/docs/claude-code/hooks)
+**Fetch the [upstream reference](https://code.claude.com/docs/en/hooks)
 before writing or modifying any hooks.**
 
 Do not rely on memory for event types, JSON schemas, exit code semantics,
@@ -34,14 +34,14 @@ Do not rely on memory for event types, JSON schemas, exit code semantics,
 
 ### Global (Personal) Hooks
 
-Hooks that apply across all projects — personal workflow preferences, reminders, sounds — belong in the global config and should travel with your dotfiles.
+Hooks that apply across all projects (personal workflow preferences, reminders, sounds) belong in the global config and should travel with your dotfiles.
 
 - **Config**: `~/.claude/settings.json` (in this repo: `dotfiles/claude/settings.json`, synced by `install.sh`)
-- **Scripts**: `dotfiles/bin/` — already on PATH, available everywhere, shared across machines, write in bash for maximum portability
+- **Scripts**: `dotfiles/bin/` (already on PATH, available everywhere, shared across machines); write in bash for maximum portability
 
 ### Project-Local Hooks
 
-Hooks specific to a project's workflow — enforcing project conventions, injecting repo-specific context — belong in the repo so the whole team gets them.
+Hooks specific to a project's workflow (enforcing project conventions, injecting repo-specific context) belong in the repo so the whole team gets them.
 
 - **Config**: `.claude/settings.json` at the project root (check this into version control)
 - **Scripts**: reference via `$CLAUDE_PROJECT_DIR` so the path works regardless of cwd:
@@ -54,7 +54,7 @@ Hooks specific to a project's workflow — enforcing project conventions, inject
 
 ## Hook Mechanics
 
-### Exit Codes — the Core API
+### Exit Codes: the Core API
 
 | Exit | Meaning |
 |------|---------|
@@ -75,7 +75,7 @@ exit 2
 
 Write prose as long unbroken lines in the heredoc rather than hard-wrapping at 80 chars. The TUI reflows text at its own width; hard wraps baked into the source wrap awkwardly when the TUI width doesn't match.
 
-### stop_hook_active — Loop Prevention
+### stop_hook_active: Loop Prevention
 
 `Stop` and `SubagentStop` events include `"stop_hook_active": true/false`. When
 `true`, Claude is already continuing because a previous Stop hook blocked it.
@@ -100,7 +100,7 @@ single script.
 
 Block a tool call and tell Claude to do it differently. Exit 2 sends stderr to Claude; it then reconsiders.
 
-Example: `claude-uv-check` — blocks bare `python` in uv projects:
+Example: `claude-uv-check`, which blocks bare `python` in uv projects:
 ```bash
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
@@ -124,14 +124,14 @@ Use `matcher` to scope to specific tools:
 Do work before Claude stops (staging, linting) and optionally block with
 feedback. Must guard against `stop_hook_active`.
 
-Example: `claude-stop-precommit` — stages tracked changes and runs the pre-commit loop:
+Example: `claude-stop-precommit`, which stages tracked changes and runs the pre-commit loop:
 ```bash
 INPUT=$(cat)
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 [[ "$STOP_HOOK_ACTIVE" == "true" ]] && exit 0
 
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
-git add --update  # stage tracked modifications only — not untracked files
+git add --update  # stage tracked modifications only, not untracked files
 
 [[ -f "$REPO_ROOT/.pre-commit-config.yaml" || -f "$REPO_ROOT/.pre-commit-config.yml" ]] || exit 0
 

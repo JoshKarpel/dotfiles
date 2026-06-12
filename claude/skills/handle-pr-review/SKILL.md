@@ -16,14 +16,14 @@ replies. All work happens in local files only.
 
 ## Workflow
 
-File reads during fixing are the main source of context growth — keep those in subagents. Fetch and triage happen here in the main context.
+File reads during fixing are the main source of context growth, so keep those in subagents. Fetch and triage happen here in the main context.
 
 ### Step 1: Fetch
 
-Run the fetch script directly:
+Run the fetch script (always via `uv`):
 
 ```bash
-~/.claude/skills/handle-pr-review/scripts/fetch-pr-comments.py --no-diff --unresolved-only
+uv run ${CLAUDE_SKILL_DIR}/scripts/fetch-pr-comments.py --no-diff --unresolved-only
 # common additions:
 #   --no-outdated   skip threads marked as outdated (code changed since the comment was made)
 #   --number 42     specify a PR instead of auto-detecting from the current branch
@@ -34,8 +34,8 @@ If diff context is needed to understand a specific thread, fetch it in a subagen
 ### Step 2: Triage
 
 With the compact list in hand:
-- Group threads that share a pattern (e.g. "add type annotations everywhere", "consistent naming") — they'll be handled in one fix subagent
-- Flag any threads where the reviewer's intent is unclear — **ask the user** before proceeding, don't guess
+- Group threads that share a pattern (e.g. "add type annotations everywhere", "consistent naming"); they'll be handled in one fix subagent
+- Flag any threads where the reviewer's intent is unclear: **ask the user** before proceeding, don't guess
 - For ≤3 simple, independent threads you may work inline instead of spawning fix subagents
 
 ### Step 3: Fix subagents

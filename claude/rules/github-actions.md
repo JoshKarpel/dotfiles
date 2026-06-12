@@ -74,7 +74,7 @@ Always include `name:` on every step and job.
 Structural conventions for matrix CI jobs:
 
 - Matrix key is `platform`, not `os`
-- `fail-fast: false` — don't stop other matrix legs on a single failure
+- `fail-fast: false`, so a single failure doesn't stop other matrix legs
 - `defaults.run.shell: bash` for cross-platform consistency
 - `timeout-minutes: 15` on the job
 

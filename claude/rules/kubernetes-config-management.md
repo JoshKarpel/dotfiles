@@ -189,7 +189,7 @@ into readable pieces.
 In Helm, use [named templates](https://helm.sh/docs/chart_template_guide/named_templates)
 defined in `_helpers.tpl`. In Crossplane, use
 [`function-go-templating`](https://github.com/crossplane-contrib/function-go-templating)
-to get Helm-like Go template behavior directly in compositions — the same
+to get Helm-like Go template behavior directly in compositions: the same
 `range`, `if`, `define`/`include`, and `tpl` patterns all work. This makes the
 map-based patterns in this guide directly applicable to Crossplane compositions
 without translation.

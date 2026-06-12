@@ -10,7 +10,8 @@ paths:
 
 ## Edition
 
-Use `edition = "2021"` in `Cargo.toml`.
+Use the latest stable edition in `Cargo.toml` for new projects; don't change
+the edition of an existing project as a side effect of other work.
 
 ## Formatting
 
@@ -45,7 +46,7 @@ Add `#[allow(...)]` only when a lint is genuinely inapplicable; always include a
 
 Derive aggressively rather than implementing by hand:
 
-- `#[derive(Debug, Clone, PartialEq, Eq, Hash)]` — add what's applicable, in this order.
+- `#[derive(Debug, Clone, PartialEq, Eq, Hash)]`: add what's applicable, in this order.
 - **Serde**: `#[derive(Serialize, Deserialize)]`. Field names in `snake_case`; use `#[serde(rename_all = "camelCase")]` when the wire format differs.
 - **Clap**: `#[derive(Parser)]` for top-level, `#[derive(Subcommand)]` for subcommand enums, `#[derive(Args)]` for argument groups.
 
@@ -54,7 +55,7 @@ Derive aggressively rather than implementing by hand:
 - Propagate with `?` throughout.
 - Use `thiserror` for library errors: named error types with `#[derive(thiserror::Error)]`.
 - Use `anyhow` for application-level propagation where the specific type doesn't matter at the call site.
-- Avoid `.unwrap()` in library code. In application code, `.expect("reason")` is acceptable where a panic signals a programmer error — include a message that explains the invariant.
+- Avoid `.unwrap()` in library code. In application code, `.expect("reason")` is acceptable where a panic signals a programmer error; include a message that explains the invariant.
 
 ## Async
 

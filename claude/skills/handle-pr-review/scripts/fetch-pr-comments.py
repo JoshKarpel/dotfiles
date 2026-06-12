@@ -183,7 +183,7 @@ def format_output(pr: dict, diff: str | None, unresolved_only: bool, no_outdated
             author = review["author"]["login"]
             state = review["state"]
             submitted = review.get("submittedAt", "")
-            lines.append(f"### {author} — {state} ({submitted})")
+            lines.append(f"### {author}: {state} ({submitted})")
             lines.append("")
             lines.append(review["body"].strip())
             lines.append("")

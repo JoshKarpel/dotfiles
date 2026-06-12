@@ -136,10 +136,10 @@ Common `ignore` entries with rationale:
 
 ```toml
 ignore = [
-  "E501",  # line length — formatter owns this
-  "E741",  # ambiguous variable name — occasionally fine (e.g. l in math)
-  "T201",  # print — allowed in CLIs and scripts
-  "T203",  # pprint — same
+  "E501",  # line length: formatter owns this
+  "E741",  # ambiguous variable name: occasionally fine (e.g. l in math)
+  "T201",  # print: allowed in CLIs and scripts
+  "T203",  # pprint: same
 ]
 ```
 

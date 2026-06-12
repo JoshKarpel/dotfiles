@@ -1,7 +1,7 @@
 # Parse, Don't Validate (Alexis King)
 
 At system boundaries, *parse* input into a richer type that encodes the
-invariant — don't just check a condition and discard the result.
+invariant; don't just check a condition and discard the result.
 
 The difference: a validator returns nothing useful (or just a boolean), so
 callers must still handle the possibility of bad data downstream. A parser

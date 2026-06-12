@@ -78,7 +78,7 @@ uv add --dev austin-python  # installs austin-python converter tools
 
 **Profile a script and produce a flamegraph:**
 
-The pipeline depends on the austin version — check first:
+The pipeline depends on the austin version, so check first:
 
 ```bash
 austin --version
@@ -126,8 +126,8 @@ uv add --dev scalene
 scalene --json --outfile profile.json myscript.py
 ```
 
-Scalene distinguishes Python time vs. native/C time per line —
-useful for finding where numpy/pandas/etc. are spending time.
+Scalene distinguishes Python time vs. native/C time per line,
+which is useful for finding where numpy/pandas/etc. are spending time.
 
 ## Profiling in Kubernetes
 
@@ -141,34 +141,34 @@ text-only fallback.
 
 ## Analyzing Profile Output Programmatically
 
-Speedscope JSON and scalene JSON are large and dense — don't try to read them directly.
-Use the helper scripts in `~/.claude/skills/python-profiling/scripts/` to extract actionable summaries.
+Speedscope JSON and scalene JSON are large and dense: don't try to read them directly.
+Use the helper scripts in `${CLAUDE_SKILL_DIR}/scripts/` to extract actionable summaries.
 Always invoke them with `uv run`.
 
-### Speedscope summary (`~/.claude/skills/python-profiling/scripts/profile_speedscope.py`)
+### Speedscope summary (`profile_speedscope.py`)
 
 Parses a speedscope JSON and reports self-time and inclusive-time per function,
 filtered to user code by default (stdlib/frozen frames hidden unless `--all`).
 
 ```bash
-uv run ~/.claude/skills/python-profiling/scripts/profile_speedscope.py austin.json
-uv run ~/.claude/skills/python-profiling/scripts/profile_speedscope.py austin.json --all        # include stdlib
-uv run ~/.claude/skills/python-profiling/scripts/profile_speedscope.py austin.json --top 20     # more entries
-uv run ~/.claude/skills/python-profiling/scripts/profile_speedscope.py austin.json --chains     # show top call chains
+uv run ${CLAUDE_SKILL_DIR}/scripts/profile_speedscope.py austin.json
+uv run ${CLAUDE_SKILL_DIR}/scripts/profile_speedscope.py austin.json --all        # include stdlib
+uv run ${CLAUDE_SKILL_DIR}/scripts/profile_speedscope.py austin.json --top 20     # more entries
+uv run ${CLAUDE_SKILL_DIR}/scripts/profile_speedscope.py austin.json --chains     # show top call chains
 ```
 
 Output: ranked tables of self-time (where CPU actually burns)
 and inclusive-time (what called the hot code), with file:line references.
 
-### Scalene summary (`~/.claude/skills/python-profiling/scripts/profile_scalene.py`)
+### Scalene summary (`profile_scalene.py`)
 
 Parses a scalene JSON and reports CPU breakdown (Python vs native/C)
 and memory per function and per line.
 
 ```bash
-uv run ~/.claude/skills/python-profiling/scripts/profile_scalene.py scalene-profile.json
-uv run ~/.claude/skills/python-profiling/scripts/profile_scalene.py scalene-profile.json --top 20
-uv run ~/.claude/skills/python-profiling/scripts/profile_scalene.py scalene-profile.json --memory  # sort by memory
+uv run ${CLAUDE_SKILL_DIR}/scripts/profile_scalene.py scalene-profile.json
+uv run ${CLAUDE_SKILL_DIR}/scripts/profile_scalene.py scalene-profile.json --top 20
+uv run ${CLAUDE_SKILL_DIR}/scripts/profile_scalene.py scalene-profile.json --memory  # sort by memory
 ```
 
 Output: function-level and line-level tables with `P`/`C` bars (Python vs native CPU %),
@@ -185,13 +185,13 @@ This is often invisible in local dev and only surfaces in production.
 
 This matters most in **servers**, where blocking the event loop delays all other requests
 (responsiveness + throughput both suffer). In **scripts**, the event loop usually isn't
-handling concurrent requests, so blocking I/O hurts throughput but not responsiveness —
+handling concurrent requests, so blocking I/O hurts throughput but not responsiveness;
 it's still worth fixing, but the priority is different.
 
 **Detection options:**
 
-- Set `PYTHONASYNCIODEBUG=1` before running —
-  logs a warning for any coroutine that blocks the loop for more than 100ms.
+- Set `PYTHONASYNCIODEBUG=1` before running;
+  it logs a warning for any coroutine that blocks the loop for more than 100ms.
   Makes asyncio significantly slower, so only use it for debugging,
   not production or benchmarks.
   Equivalent in code: `asyncio.get_event_loop().set_debug(True)`.
@@ -216,199 +216,76 @@ async def read_file_async(path):
 `asyncio.to_thread` helps when the blocking work can drop the GIL internally
 (file I/O, network calls via C extensions, etc.).
 It won't improve raw throughput if the work is CPU-bound Python,
-but it keeps the event loop responsive — which is the main win in servers.
+but it keeps the event loop responsive, which is the main win in servers.
 In scripts, prefer fixing throughput directly (concurrent awaits, batching)
 rather than reaching for `asyncio.to_thread`.
 
 ## Common Optimization Patterns
 
-### Awaits in a loop → concurrent execution
+A checklist of things to actively look for during a profiling pass. The fixes
+are standard; the value of this list is making sure each one gets *checked*.
 
-Sequential awaits that are independent are a frequent bottleneck.
-Replace with `asyncio.gather` or `asyncio.TaskGroup`:
+### General patterns
 
-```python
-# Slow: sequential, each waits for the previous
-results = []
-for item in items:
-    results.append(await fetch(item))
-
-# Fast: all launched concurrently
-results = await asyncio.gather(*[fetch(item) for item in items])
-
-# Or with TaskGroup (Python 3.11+, better error handling):
-async with asyncio.TaskGroup() as tg:
-    tasks = [tg.create_task(fetch(item)) for item in items]
-results = [t.result() for t in tasks]
-```
-
-Look for any `await` inside a `for` loop where iterations don't depend on each other.
-
-### Combining regex patterns
-
-Multiple `re.sub` or `re.search` calls with the same replacement can often be combined with `|`:
-
-```python
-# Before
-s = re.sub(r'foo', '', s)
-s = re.sub(r'bar', '', s)
-s = re.sub(r'baz', '', s)
-
-# After (same replacement)
-s = re.sub(r'foo|bar|baz', '', s)
-
-# When replacements differ, use a dict + function:
-replacements = {'foo': 'FOO', 'bar': 'BAR', 'baz': 'BAZ'}
-pattern = re.compile('|'.join(re.escape(k) for k in replacements))
-s = pattern.sub(lambda m: replacements[m.group(0)], s)
-```
-
-### Recursive functions: hoist repeated work
-
-Look for calculations inside a recursive function that produce the same result at every level,
-or that duplicate work already done by the caller.
-Move them outside the recursion or pass them down as parameters:
-
-```python
-# Before: recomputes config/constants at every level
-def walk(node, depth=0):
-    config = load_config()       # same every call!
-    threshold = compute_threshold(node.root)  # same every call!
-    ...
-    for child in node.children:
-        walk(child, depth + 1)
-
-# After: public wrapper does shared work once, then calls the real recursion
-def walk(node):
-    config = load_config()
-    threshold = compute_threshold(node.root)
-    _walk(node, depth=0, config=config, threshold=threshold)
-
-def _walk(node, depth, config, threshold):
-    ...
-    for child in node.children:
-        _walk(child, depth + 1, config, threshold)
-```
-
-Also look for work that a parent already did that a child re-does
-(e.g., re-parsing a value that was already parsed one level up).
-
-### Eliminate unnecessary or duplicated work
-
-- **Re-parsing HTTP responses**: parse once, pass the parsed object.
-  Don't call `response.json()` or `response.text` multiple times
-  (some HTTP clients re-decode on each access).
-- **Look before you leap**: `if x in y and y[x] is not None` does two lookups;
-  replace with `if y.get(x) is not None` or just `if y.get(x)`.
-  More generally, avoid checking for membership and then immediately accessing —
-  do the access once and handle the miss.
-- **Repeated expensive calls with the same args**:
-  consider `functools.lru_cache` or `functools.cache` for pure functions.
-- **Reinitializing objects that don't change per-request**:
-  some objects are expensive to construct but are reconstructed on every request.
-  Common culprits: `pydantic-settings` `BaseSettings` subclasses
-  (reads env vars, validates, coerces types on every instantiation),
-  HTTP clients, database connection pools, compiled regex patterns.
-  The preferred fix is **manual dependency injection** —
-  functions that need `Settings` (or any expensive object) should take it as an argument,
-  and the caller passes a single long-lived instance.
-  This bubbles construction up to application startup (e.g., a FastAPI lifespan),
-  where it naturally happens once.
-  If refactoring to DI isn't practical, `@cache` on a no-arg factory is a reasonable fallback:
-
-```python
-from functools import cache
-from myapp.config import Settings
-
-@cache
-def get_settings() -> Settings:
-    return Settings()
-```
+- **Sequential awaits of independent coroutines**: look for `await` inside a
+  `for` loop where iterations don't depend on each other; run them
+  concurrently with `asyncio.gather` or `asyncio.TaskGroup` instead.
+- **Multiple regex passes over the same string**: combine patterns with `|`;
+  when replacements differ, use one compiled pattern plus a dict-driven
+  replacement function.
+- **Repeated work in recursion**: hoist computations that are the same at
+  every level into a public wrapper and pass results down as parameters; also
+  watch for children re-doing work a parent already did (e.g. re-parsing a
+  value parsed one level up).
+- **Re-parsing the same data**: parse once and pass the parsed object around.
+  Don't call `response.json()` or `response.text` repeatedly; some HTTP
+  clients re-decode on every access.
+- **Look-before-you-leap double lookups**: membership check followed by
+  access does the lookup twice; do the access once and handle the miss
+  (`.get()`, `try/except`).
+- **Repeated expensive calls with the same args**: `functools.cache` /
+  `functools.lru_cache` for pure functions.
+- **Reconstructing expensive objects per-request**: common culprits are
+  `pydantic-settings` `BaseSettings` subclasses (env var reads + validation on
+  every instantiation), HTTP clients, connection pools, and compiled regexes.
+  Preferred fix is manual dependency injection: take the object as an
+  argument and construct it once at application startup (e.g. a FastAPI
+  lifespan). If DI isn't practical, `@cache` on a no-arg factory is a
+  reasonable fallback.
 
 ### Hot-loop micro-optimizations
 
-These matter only in genuinely hot inner loops — don't apply them indiscriminately.
+These matter only in genuinely hot inner loops; don't apply them indiscriminately.
 
-- **Membership tests on lists are O(n)**: `if x in big_list` inside a loop is quadratic overall.
-  Build a `set` or `dict` once before the loop and test against that (O(1) per test).
-
-```python
-# Slow: O(n) per iteration
-for item in items:
-    if item in allowed_list:  # allowed_list is a list
-        ...
-
-# Fast: build set once, O(1) per test
-allowed = set(allowed_list)
-for item in items:
-    if item in allowed:
-        ...
-```
-
-- **String building with `+=`**: repeated concatenation is quadratic for large outputs.
-  Accumulate parts in a list and join once.
-
-```python
-# Slow
-result = ""
-for part in parts:
-    result += part
-
-# Fast
-result = "".join(parts)
-```
-
-- **Hoist repeated attribute/global lookups**: in a tight inner loop, Python resolves
-  `obj.method` or a global name on every iteration. Bind it to a local variable before the loop.
-
-```python
-# Before: attribute looked up every iteration
-for x in data:
-    result.append(process(x))
-
-# After: hoist to local
-append = result.append
-for x in data:
-    append(process(x))
-```
-
-- **Exceptions for control flow in hot paths**: `try/except` with no exception is cheap,
-  but *raising* is expensive.
-  Avoid designs where a frequent/expected branch is signaled by raising an exception in a hot loop.
+- **Membership tests on lists** are O(n) per test; build a `set` once before
+  the loop.
+- **String building with `+=`** is quadratic for large outputs; accumulate
+  parts in a list and `"".join` once.
+- **Repeated attribute/global lookups** resolve on every iteration; bind to a
+  local before the loop.
+- **Raising exceptions is expensive** (a no-exception `try/except` is cheap);
+  don't signal a frequent/expected branch by raising in a hot loop.
 
 ### Concurrency footguns
 
-- **Threads don't help CPU-bound Python (GIL)**:
-  `ThreadPoolExecutor` over pure-Python CPU work yields no speedup —
-  the GIL serializes Python bytecode execution across threads.
-  Use `ProcessPoolExecutor` or `multiprocessing` instead.
-  (Note: this is *why* `asyncio.to_thread` works for I/O —
-  file/network calls release the GIL, so threads genuinely run in parallel there.)
-- **Unbounded `asyncio.gather` fan-out**: launching thousands of tasks at once
-  can exhaust connection pools, overwhelm downstream services, or spike memory.
-  Bound concurrency with a semaphore:
-
-```python
-sem = asyncio.Semaphore(50)
-
-async def bounded_fetch(item):
-    async with sem:
-        return await fetch(item)
-
-results = await asyncio.gather(*[bounded_fetch(item) for item in items])
-```
+- **Threads don't help CPU-bound Python (GIL)**: use `ProcessPoolExecutor` or
+  `multiprocessing`. (I/O releases the GIL, which is exactly why
+  `asyncio.to_thread` works for blocking I/O.)
+- **Unbounded `asyncio.gather` fan-out** can exhaust connection pools,
+  overwhelm downstream services, or spike memory; bound concurrency with an
+  `asyncio.Semaphore`.
 
 ### Library-specific footguns
 
 - **stdlib logging does per-record file I/O**: `FileHandler` and its subclasses
   (`RotatingFileHandler`, `TimedRotatingFileHandler`) call `flush()`, and check for
-  rotation (`stat`/`tell` the file) on *every single* `emit()` — no batching across records.
+  rotation (`stat`/`tell` the file) on *every single* `emit()`, with no batching across records.
   Locally these syscalls are cheap, but over network filesystems (NFS, EFS, GCS FUSE,
   mounted volumes in cloud environments) each one can cost milliseconds, and log-heavy
   code can spend most of its time in logging rather than real work.
   Quick fix: get the actual file I/O off the calling thread with
   `logging.handlers.QueueHandler` / `QueueListener` (see the
-  [logging cookbook's "Dealing with handlers that block"](https://docs.python.org/3/howto/logging-cookbook.html#dealing-with-handlers-that-block)) —
+  [logging cookbook's "Dealing with handlers that block"](https://docs.python.org/3/howto/logging-cookbook.html#dealing-with-handlers-that-block));
   the calling code just enqueues records (fast, non-blocking), and a separate listener
   thread performs the (still per-record) writes. This matters most for event-loop-driven
   code, where the calling thread *is* the loop and blocking it on slow syscalls stalls
@@ -418,7 +295,7 @@ results = await asyncio.gather(*[bounded_fetch(item) for item in items])
 - **Pydantic re-validation of trusted data**: constructing a model from already-valid
   internal data runs full validation unnecessarily.
   Use `Model.model_construct(**data)` to skip validation for trusted/internal data.
-  Also avoid repeated `model_dump()` calls on the same instance — compute and reuse the dict.
+  Also avoid repeated `model_dump()` calls on the same instance: compute and reuse the dict.
 - **Prefer pydantic or orjson over stdlib `json`**:
   use pydantic when you know the structure (parse into a model, serialize with `model_dump_json()`);
   use `orjson` when the structure is unknown or freeform.

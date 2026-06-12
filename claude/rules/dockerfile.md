@@ -25,7 +25,7 @@ FROM ghcr.io/joshkarpel/spiel:v0.6.0
 
 Prefer a specific version tag over `:latest` for reproducibility.
 
-## RUN Pattern — Heredocs (preferred)
+## RUN Pattern: Heredocs (preferred)
 
 Use heredoc syntax for any multi-command `RUN` step. One heredoc equals one
 layer; `set -e` makes failures abort the build:
@@ -77,7 +77,7 @@ EOF
 ```
 
 Quote the delimiter (`<<"EOF"`) to prevent the Dockerfile frontend from
-expanding `$variables` inside the heredoc — essential for config files.
+expanding `$variables` inside the heredoc; this is essential for config files.
 
 ## Package Manager Hygiene
 
@@ -98,8 +98,8 @@ rm -rf /var/lib/apt/lists/*
 EOF
 ```
 
-- `--no-install-recommends` — skip weak dependencies Docker images don't need.
-- `apt-get clean` + `rm -rf /var/lib/apt/lists/*` — clears downloaded packages
+- `--no-install-recommends`: skip weak dependencies Docker images don't need.
+- `apt-get clean` + `rm -rf /var/lib/apt/lists/*`: clears downloaded packages
   and the package index from the layer.
 
 ### dnf / yum (RHEL/Fedora/CentOS/Rocky/Amazon Linux)
@@ -117,9 +117,9 @@ rm -rf /var/cache/dnf
 EOF
 ```
 
-- `--setopt=install_weak_deps=False` — equivalent to apt's `--no-install-recommends`.
-- `--setopt=tsflags=nodocs` — skip doc files.
-- `dnf clean all` + `rm -rf /var/cache/dnf` — fully purge the metadata and
+- `--setopt=install_weak_deps=False`: equivalent to apt's `--no-install-recommends`.
+- `--setopt=tsflags=nodocs`: skip doc files.
+- `dnf clean all` + `rm -rf /var/cache/dnf`: fully purge the metadata and
   package cache from the layer.
 
 Replace `dnf` with `yum` and `/var/cache/dnf` with `/var/cache/yum` on older
@@ -143,10 +143,10 @@ ENV UV_LINK_MODE=copy
 ENV UV_PYTHON_DOWNLOADS=0
 ```
 
-- `UV_COMPILE_BYTECODE=1` — compile `.pyc` files at install time for faster startup.
-- `UV_LINK_MODE=copy` — required with cache mounts; Docker layers can't hardlink
+- `UV_COMPILE_BYTECODE=1`: compile `.pyc` files at install time for faster startup.
+- `UV_LINK_MODE=copy`: required with cache mounts; Docker layers can't hardlink
   across filesystems.
-- `UV_PYTHON_DOWNLOADS=0` — use the image's system Python; don't let uv fetch its own.
+- `UV_PYTHON_DOWNLOADS=0`: use the image's system Python; don't let uv fetch its own.
 
 If uv is only needed for one `RUN` step and shouldn't exist in the image at
 all, mount it temporarily instead of copying it:
@@ -159,26 +159,16 @@ RUN --mount=from=ghcr.io/astral-sh/uv:${UV_VERSION},source=/uv,target=/bin/uv \
     uv sync --locked --no-install-project --no-dev
 ```
 
-The uv binary is discarded when the step completes — only the installed
+The uv binary is discarded when the step completes; only the installed
 packages remain in the layer.
 
 Use `COPY --from` (above) when uv is needed across multiple steps; use the
 temporary mount when a single step is all you need.
 
-Use bind mounts for the lockfile/pyproject so they don't create a layer, and a cache
-mount so the package cache persists across builds:
-
-```dockerfile
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-install-project --no-dev
-
-COPY . .
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev
-```
+Install dependencies with the two-phase `uv sync` pattern shown in
+[Layer Caching Order](#layer-caching-order): bind mounts for the
+lockfile/`pyproject.toml` so they don't create a layer, and a cache mount so
+the package cache persists across builds.
 
 Run the app by activating the venv via `PATH` rather than `uv run`:
 
@@ -248,11 +238,11 @@ CMD ["my-app"]
 ```
 
 The build stage installs dependencies; the slim runtime stage copies only the
-venv across — no uv, no build tools, no source.
+venv across: no uv, no build tools, no source.
 
 ## ENV
 
-One variable per `ENV` instruction — easier to move, reorder, or delete:
+One variable per `ENV` instruction, so each is easy to move, reorder, or delete:
 
 ```dockerfile
 ENV UV_COMPILE_BYTECODE=1
@@ -262,7 +252,7 @@ ENV UV_PYTHON_DOWNLOADS=0
 
 ## Capturing Versions with ARG
 
-Use `ARG` to parameterize tool and dependency versions — define once, override
+Use `ARG` to parameterize tool and dependency versions: define once, override
 at build time with `--build-arg`:
 
 ```dockerfile
@@ -290,14 +280,7 @@ docker build --build-arg APP_VERSION=1.2.3 .
 ## BuildKit Mounts
 
 Use `--mount` to bind source trees or cache directories without copying them
-into the layer:
-
-```dockerfile
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-install-project --no-dev
-```
+into the layer (the `uv sync` examples above show both kinds in use):
 
 - `type=bind`: mounts the build context (or a named stage) read-only; avoids
   a `COPY` that would waste a layer.
@@ -306,7 +289,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 ## BuildKit Secrets
 
-Never `COPY` a secret file into the image — it lands in the layer history even
+Never `COPY` a secret file into the image: it lands in the layer history even
 if deleted in a later `RUN`. Use `--mount=type=secret` instead: the secret is
 available only during that `RUN` step and never written to any layer.
 
@@ -338,8 +321,8 @@ secrets:
     environment: PYPI_TOKEN
 ```
 
-Antipatterns to avoid — all three bake the secret into the image history or
-metadata, where `docker history` or `docker inspect` will expose it:
+Antipatterns to avoid, all of which bake the secret into the image history or
+metadata where `docker history` or `docker inspect` will expose it:
 
 ```dockerfile
 # bad: visible in `docker history`
@@ -379,7 +362,7 @@ COPY --chown=app:app . /app/
 
 ## CMD / ENTRYPOINT
 
-Always use exec (JSON-array) form — shell form wraps the process in `/bin/sh -c`
+Always use exec (JSON-array) form: shell form wraps the process in `/bin/sh -c`
 and breaks signal handling:
 
 ```dockerfile

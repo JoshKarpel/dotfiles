@@ -20,9 +20,11 @@
       "WebFetch(domain:docs.temporal.io)",
       "WebFetch(domain:python.temporal.io)",
       "WebFetch(domain:en.wikipedia.org)",
+      "WebFetch(domain:docs.github.com)",
       "WebFetch(domain:gist.github.com)",
       "WebFetch(domain:gist.githubusercontent.com)",
       "WebFetch(domain:github.com)",
+      "WebFetch(domain:helm.sh)",
       "WebFetch(domain:istio.io)",
       "WebFetch(domain:joshkarpel.github.io)",
       "WebFetch(domain:just.systems)",
@@ -41,7 +43,6 @@
       "WebFetch(domain:support.langchain.com)",
       "Edit(//tmp/**)",
       "Read(//tmp/**)",
-      "Bash(~/.claude/skills/handle-pr-review/scripts/fetch-pr-comments.py *)",
       "Bash(ls *)",
       "Bash(find *)",
       "Bash(which *)",
@@ -103,20 +104,20 @@
       "Bash(helm show *)",
       "Bash(helm lint *)",
       "Bash(dyff *)",
-      "Bash(docker system df *)",
-      "Bash(* --version*)",
-      "Bash(* --help*)"
+      "Bash(docker system df *)"
     ],
     "deny": [
-      "Bash(git commit *)",
-      "Bash(git push *)",
+      "Bash(git commit*)",
+      "Bash(git push*)",
       "Bash(git reset --hard*)",
       "Bash(git checkout .)",
       "Bash(git clean -f*)",
       "Bash(git restore .)",
-      "Bash(git branch -D *)",
+      "Bash(git branch -D*)",
+      "Bash(git branch -d*)",
       "Bash(git remote set*)",
-      "Bash(rm -rf *)",
+      "Bash(rm -rf*)",
+      "Bash(rm -fr*)",
       "Bash(sudo *)",
       "Read(**/.env*)",
       "Edit(**/.env*)",
@@ -203,6 +204,5 @@
     "autoSubmit": false
   },
   "theme": "dark",
-  "skipAutoPermissionPrompt": true,
-  "defaultMode": "acceptEdits"
+  "skipAutoPermissionPrompt": true
 }

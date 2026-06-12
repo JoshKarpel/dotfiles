@@ -24,3 +24,14 @@ while IFS= read -r -d '' file; do
   echo "link $target -> $file"
   ln -sf "$file" "$target"
 done < <(find "$CLAUDE" -type f -print0)
+
+# prune symlinks that point into $CLAUDE but whose target no longer exists
+while IFS= read -r -d '' link; do
+  if [[ "$(readlink "$link")" == "$CLAUDE"/* && ! -e "$link" ]]; then
+    echo "prune $link"
+    rm "$link"
+  fi
+done < <(find ~/.claude -maxdepth 1 -type l -print0; find ~/.claude/rules ~/.claude/skills -type l -print0 2>/dev/null)
+
+# remove skill directories emptied by pruning
+find ~/.claude/skills -type d -empty -delete 2>/dev/null || true

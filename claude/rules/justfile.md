@@ -34,7 +34,7 @@ list:
 
 The `@` suppresses the echo of the `just --list` command itself, so only the
 output is shown. Use `@` on any line where the command speaking for itself is
-enough — the output is the feedback.
+enough: the output is the feedback.
 
 ## Overridable Variables
 

@@ -37,7 +37,7 @@ Avoid `any`. Use `unknown` when a type is genuinely unknown and narrow it before
 
 ## Imports
 
-Use `import type { Foo }` for type-only imports — required by `isolatedModules` and lets bundlers tree-shake more aggressively.
+Use `import type { Foo }` for type-only imports: required by `isolatedModules`, and lets bundlers tree-shake more aggressively.
 
 Use `simple-import-sort` (via ESLint) to enforce import ordering automatically.
 

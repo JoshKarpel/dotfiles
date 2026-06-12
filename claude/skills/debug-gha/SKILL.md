@@ -12,32 +12,32 @@ description: >
 ## Goal
 
 The objective is to **fix** the failing run. Once you've diagnosed the cause, make
-the edits that fix it, and validate them locally where you can — pre-commit, tests,
-re-running the failing command — rather than relying on a fresh CI run to tell you
+the edits that fix it, and validate them locally where you can (pre-commit, tests,
+re-running the failing command) rather than relying on a fresh CI run to tell you
 whether it worked.
 
 Leave the change in the working tree for the user to review. Don't commit or push
-to trigger a fresh run and "see if it's fixed" — that's the user's call to make.
+to trigger a fresh run and "see if it's fixed": that's the user's call to make.
 
 ## What GitHub Actions Is
 
 GitHub Actions is GitHub's CI/CD platform. Workflows are YAML files in
 `.github/workflows/`. Each workflow:
 
-- Has **triggers** (`on:`) — push, pull_request, schedule, workflow_dispatch, etc.
-- Defines **jobs** — parallel or sequential units of work, each running on a runner (e.g. `ubuntu-latest`)
-- Each job has **steps** — either shell `run:` commands or reusable `uses:` actions
+- Has **triggers** (`on:`): push, pull_request, schedule, workflow_dispatch, etc.
+- Defines **jobs**: parallel or sequential units of work, each running on a runner (e.g. `ubuntu-latest`)
+- Each job has **steps**: either shell `run:` commands or reusable `uses:` actions
 
 Conclusion values you'll see: `success`, `failure`, `cancelled`, `skipped`,
 `timed_out`, `action_required`.
 
 ## Investigating
 
-A good starting point is the debug script — one command surfaces most of what you
+A good starting point is the debug script; one command surfaces most of what you
 need (always invoke it with `uv`):
 
 ```bash
-uv run ~/.claude/skills/debug-gha/scripts/debug-run.py [run-id]
+uv run ${CLAUDE_SKILL_DIR}/scripts/debug-run.py [run-id]
 # for a different repo: -R OWNER/REPO
 # for full logs:        --log
 # for a specific branch: --branch BRANCH (default: current branch)

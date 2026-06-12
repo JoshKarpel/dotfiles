@@ -26,7 +26,7 @@ Create well-structured Claude Code skills that are discoverable and effective.
 
 Use the template at [assets/SKILL.template.md](assets/SKILL.template.md) as a starting SKILL.md file.
 
-SKILL.md files are markdown; the `style-markdown` rule applies automatically.
+SKILL.md files are markdown; the `markdown` rule applies automatically.
 
 Upstream documentation on skills is available [here](https://code.claude.com/docs/en/skills).
 The rest of this document provides guidelines and best practices for creating high-quality
@@ -54,8 +54,8 @@ ones.
 
 The combined `description` + `when_to_use` text is truncated at 1,536 characters in the skill
 listing. Use `when_to_use` for additional trigger phrases and example requests that would
-clutter the main description — it's appended to `description` and counts toward the same cap.
-Use folded YAML (`description: >`) to keep long descriptions readable in the source file —
+clutter the main description; it's appended to `description` and counts toward the same cap.
+Use folded YAML (`description: >`) to keep long descriptions readable in the source file:
 the `>` collapses the wrapped lines into one logical string, which satisfies the single-line
 requirement while avoiding an unwieldy one-liner.
 
@@ -100,7 +100,7 @@ Key fields beyond `description` and `when_to_use`:
   `Explore`, `Plan`, or a custom agent name.
 - `hooks`: Scopes hooks to the skill's own lifecycle instead of registering them globally in
   `settings.json`. Useful for guardrails that should only bite while a specific workflow is
-  active — e.g. a skill that blocks destructive commands (`rm -rf`, `DROP TABLE`) only while
+  active, e.g. a skill that blocks destructive commands (`rm -rf`, `DROP TABLE`) only while
   it's debugging, or restricts edits to a subset of directories only while it's running. This
   avoids the friction of a permanent, always-on hook while still providing guardrails when
   they matter.
@@ -121,26 +121,26 @@ the skill directory.
 
 When you're hunting for the next skill worth writing, here are a few shapes that skills tend
 to take in practice (loosely drawn from how Anthropic's own team uses them). Treat these as
-food for thought rather than a taxonomy to satisfy — most real skills blend categories or
+food for thought rather than a taxonomy to satisfy: most real skills blend categories or
 don't fit neatly into any of them, and that's fine:
 
-1. **Library & API reference** — usage guides, gotchas, and code snippets for a tool,
+1. **Library & API reference**: usage guides, gotchas, and code snippets for a tool,
    library, or API the model would otherwise have to rediscover each session (e.g.
    `hook-creator`, `python-profiling`).
-2. **Product verification** — testing workflows, browser drivers, and assertion patterns for
+2. **Product verification**: testing workflows, browser drivers, and assertion patterns for
    confirming that a change actually works.
-3. **Data fetching & analysis** — connection libraries, query patterns, and dashboard/field
+3. **Data fetching & analysis**: connection libraries, query patterns, and dashboard/field
    mappings for pulling and interpreting data.
-4. **Business process automation** — repetitive multi-step workflows with state tracked
+4. **Business process automation**: repetitive multi-step workflows with state tracked
    across runs (e.g. `handle-pr-review`).
-5. **Code scaffolding** — generating framework boilerplate that follows your project's
+5. **Code scaffolding**: generating framework boilerplate that follows your project's
    conventions.
-6. **Code quality & review** — testing practices and review guidance (e.g. `code-review`).
+6. **Code quality & review**: testing practices and review guidance (e.g. `code-review`).
    Note: language/tool style guides live in `claude/rules/` as path-scoped rules, not skills.
-7. **CI/CD & deployment** — build, test, rollout, and rollback orchestration.
-8. **Runbooks** — symptom-to-investigation mappings with structured reporting, for
+7. **CI/CD & deployment**: build, test, rollout, and rollback orchestration.
+8. **Runbooks**: symptom-to-investigation mappings with structured reporting, for
    diagnosing recurring problems (e.g. `debug-gha`).
-9. **Infrastructure operations** — maintenance procedures with safety guardrails for risky,
+9. **Infrastructure operations**: maintenance procedures with safety guardrails for risky,
    hard-to-reverse operations.
 
 If a recurring task in this repo seems to fit one of these shapes, that's a hint it might be
@@ -159,7 +159,7 @@ repeatedly reimplementing their logic, which over the course of a long session s
 increases reliability.
 
 Bash is fine for simple wrappers (a few commands, no parsing). For anything with non-trivial
-logic — parsing, data transformation, multi-step operations, error handling — prefer python.
+logic (parsing, data transformation, multi-step operations, error handling), prefer python.
 Run shell commands with `subprocess.run`. Don't use shell commands for operations that could
 be performed in python (file manipulation, hashing, regex, etc). When done properly, these
 scripts are trivially portable across platforms.
@@ -197,8 +197,8 @@ Use `references/` to store documents. If appropriate, use progressive disclosure
 The highest-signal content in a skill is often a running list of the specific ways Claude has
 gone wrong while using it: field names that differ between two systems it has to bridge,
 data that's append-only where Claude expected to be able to mutate it, an API that behaves
-unintuitively, a step that's easy to skip and breaks everything downstream. Keep this list —
-inline in SKILL.md or as a dedicated `gotchas.md` referenced from it — and add to it whenever
+unintuitively, a step that's easy to skip and breaks everything downstream. Keep this list
+(inline in SKILL.md or as a dedicated `gotchas.md` referenced from it) and add to it whenever
 Claude trips over something new.
 
 ### Dynamic Context Injection
@@ -286,11 +286,11 @@ Good automation is:
 
 ### Avoid Railroading
 
-Automation (above) is for the mechanical, order-dependent parts of a workflow — the parts
+Automation (above) is for the mechanical, order-dependent parts of a workflow: the parts
 where judgment doesn't help and slip-ups are costly. Don't extend that same rigidity into
 prose instructions for the parts of the task that benefit from Claude reading the situation.
-An overly prescriptive skill — rigid step-by-step scripts for things that actually call for
-judgment — fights the model instead of informing it. Give Claude the information,
+An overly prescriptive skill (rigid step-by-step scripts for things that actually call for
+judgment) fights the model instead of informing it. Give Claude the information,
 constraints, and context it needs, then trust it to figure out how to apply them; it adapts
 to the specifics of a situation better than a procedure written in advance can.
 

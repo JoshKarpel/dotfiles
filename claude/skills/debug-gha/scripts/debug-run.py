@@ -64,7 +64,7 @@ def main():
             sys.exit(0)
         r = runs[0]
         run_id = str(r["databaseId"])
-        print(f"Latest failed run: {run_id} — {r['displayTitle']} ({r['workflowName']})\n")
+        print(f"Latest failed run: {run_id} - {r['displayTitle']} ({r['workflowName']})\n")
 
     run = gh_json(
         "run", "view", run_id,
@@ -83,10 +83,10 @@ def main():
     print("Jobs:")
     for job in run.get("jobs", []):
         icon = ICON.get(job["conclusion"], "✗")
-        print(f"  {icon} {job['name']} (ID {job['databaseId']}) — {job['conclusion']}")
+        print(f"  {icon} {job['name']} (ID {job['databaseId']}) - {job['conclusion']}")
         for step in job.get("steps", []):
             if step["conclusion"] not in ("success", "skipped"):
-                print(f"      ✗ step {step['number']}: {step['name']} — {step['conclusion']}")
+                print(f"      ✗ step {step['number']}: {step['name']} - {step['conclusion']}")
     print()
 
     if args.log:
@@ -98,7 +98,7 @@ def main():
         if logs.strip():
             print(logs)
         else:
-            print("(no failed step logs — run may have been cancelled or timed out without step failures)")
+            print("(no failed step logs; run may have been cancelled or timed out without step failures)")
         print()
         print("Tips:")
         print("  --log                        full logs for this run")
