@@ -67,6 +67,7 @@
       "Bash(git fetch*)",
       "Bash(git add *)",
       "Bash(git mv *)",
+      "Bash(git rm *)",
       "Bash(gh repo list *)",
       "Bash(gh repo view *)",
       "Bash(gh repo clone *)",
