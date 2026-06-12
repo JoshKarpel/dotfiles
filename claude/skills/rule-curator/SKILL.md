@@ -1,18 +1,18 @@
 ---
-name: style-curator
+name: rule-curator
 description: >
-  Ingest new style material (articles, docs, snippets, reference links, code
-  review feedback) and fold it into the `style-*` rule family. MUST be invoked when the
-  user shares a new convention, style guide, blog post, library doc, or
-  reference and wants it captured, when deciding whether guidance belongs in
-  an existing `style-*` rule or needs a new one, or when auditing or
-  refreshing `style-*` rules with fresh material.
+  Ingest new material (articles, docs, snippets, reference links, code review
+  feedback) and fold it into the rules in `claude/rules/`. MUST be invoked
+  when the user shares a new convention, style guide, blog post, library doc,
+  or reference and wants it captured, when deciding whether guidance belongs
+  in an existing rule or needs a new one, or when auditing or refreshing rules
+  with fresh material.
 ---
 
-# Style Curator
+# Rule Curator
 
-Takes in new style-relevant material, researches it, and decides whether it
-belongs in an existing `style-*` rule or needs a new one.
+Takes in new material, researches it, and decides whether it belongs in an
+existing rule in `claude/rules/` or needs a new one.
 
 ## Workflow
 
@@ -29,10 +29,10 @@ tool behaves a certain way or a pattern works, try it or cross-check current
 docs. Blog posts and forum answers drift out of date faster than official
 references do.
 
-### 3. Survey the existing `style-*` rules
+### 3. Survey the existing rules
 
 ```bash
-ls claude/rules/ | grep '^style-'
+ls claude/rules/
 ```
 
 Read each candidate's `paths` frontmatter and skim its body to judge fit.
@@ -53,8 +53,7 @@ Match on both axes:
 
 ### 4b. If it doesn't fit any existing rule, propose a new one
 
-- Name it `style-<topic>.md` to stay in the family (`style-rust.md`,
-  `style-yaml.md`), placed in `claude/rules/`.
+- Name it `<topic>.md` and place it in `claude/rules/`.
 - Add YAML frontmatter with `paths:` globs that match the relevant file types
   so the rule loads automatically when Claude works with those files.
 - Per `CLAUDE.md`, new rules live in `claude/rules/` in this repo, never
@@ -65,6 +64,6 @@ Match on both axes:
 
 ### 5. Prune as you go
 
-Keep only what's non-obvious, durable, and actionable. A style rule that
-restates what any competent engineer already knows is a tax on every future
-session that loads it, not an asset.
+Keep only what's non-obvious, durable, and actionable. A rule that restates
+what any competent engineer already knows is a tax on every future session
+that loads it, not an asset.

@@ -76,7 +76,7 @@ When asked to write a skill, place it in `claude/skills/` in this dotfiles repo 
 
 ## Claude Code Rules
 
-Language and tool style guides live in `claude/rules/` as path-scoped rules (not skills). They load automatically when Claude works with matching file types. Use the `style-curator` skill to add or update style guidance; new style guides go in `claude/rules/`, not `claude/skills/`.
+Rules live in `claude/rules/` and load automatically when Claude works with matching file types (if `paths:` frontmatter is set) or globally (if not). Use the `rule-curator` skill to add or update rules; new rules go in `claude/rules/`, not `claude/skills/`.
 
 ## Conventions
 
