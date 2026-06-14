@@ -14,9 +14,9 @@ paths:
   - "**/functions/**/*.yml"
 ---
 
-# Kubernetes Config Management Style Guide
+# Helm and Crossplane Style Guide
 
-## Helm and Crossplane
+## Shared Patterns
 
 This guide covers both Helm and Crossplane. They share the same underlying
 patterns: a caller-facing interface (values or XRD spec), a rendering layer
@@ -54,6 +54,41 @@ selectors, internal service names, fixed mount paths), or fine-grained knobs
 added speculatively before anyone has asked for them. A chart or composition
 that exposes everything is harder to use and harder to maintain than one with
 a narrow, stable interface.
+
+## Mount ConfigMaps and Secrets as Directories
+
+Consume `ConfigMap`s and `Secret`s as whole-volume directory mounts, not as
+env vars and not as individual files via `subPath`. Only directory mounts pick
+up changes to the source object.
+
+When a `ConfigMap` or `Secret` is mounted as a directory volume, the kubelet
+refreshes the projected files in place after the source object changes
+(eventually consistent, on the order of the kubelet sync period plus cache
+delay). Both env vars (`valueFrom.configMapKeyRef` / `secretKeyRef` and
+`envFrom`) and `subPath` file mounts are resolved once at pod creation and never
+updated, so a change to the source requires a pod restart to take effect.
+`subPath` specifically opts out of the live-update behavior even though it looks
+like a file mount.
+
+This makes directory mounts the only consumption method that supports rotating
+a `Secret` or refreshing a `ConfigMap` without a restart. The mount only updates
+the files, though: picking up the new value is the app's responsibility, so it
+must watch the mount and refresh rather than holding the value it read at
+startup. See the configuration style guide (and the secrets style guide for
+credentials specifically).
+
+```yaml
+# template / composition: mount the whole Secret as a directory
+volumes:
+  - name: credentials
+    secret:
+      secretName: my-secret
+volumeMounts:
+  - name: credentials
+    mountPath: /etc/secrets
+    readOnly: true
+    # no subPath: the directory updates when my-secret changes
+```
 
 ## Use Helm Built-in Objects
 
@@ -110,18 +145,13 @@ args:
 
 For a list of objects, key by a stable identifier (usually the `name` field).
 Split by shape rather than combining everything into one map: simpler values
-stay simple. For `env` specifically, use two maps:
+stay simple. For non-secret env vars, a single map suffices:
 
 ```yaml
 # values.yaml / XRD spec
 envs:
   MY_VAR: "hello"
   PORT: "8080"
-
-envsFromSecrets:
-  SECRET_VAR:
-    name: my-secret
-    key: secret-key
 ```
 
 ```yaml
@@ -131,12 +161,33 @@ env:
   - name: {{ $name }}
     value: {{ $value | quote }}
   {{- end }}
-  {{- range $name, $ref := .Values.envsFromSecrets }}
+```
+
+Secrets are not env vars: consume them as mounted directory volumes instead
+(see the section above). Key a map by volume name so callers can add `Secret`s
+additively:
+
+```yaml
+# values.yaml / XRD spec
+secretMounts:
+  credentials:
+    secretName: my-secret
+    mountPath: /etc/secrets
+```
+
+```yaml
+# template / composition
+volumes:
+  {{- range $name, $mount := .Values.secretMounts }}
   - name: {{ $name }}
-    valueFrom:
-      secretKeyRef:
-        name: {{ $ref.name }}
-        key: {{ $ref.key }}
+    secret:
+      secretName: {{ $mount.secretName }}
+  {{- end }}
+volumeMounts:
+  {{- range $name, $mount := .Values.secretMounts }}
+  - name: {{ $name }}
+    mountPath: {{ $mount.mountPath }}
+    readOnly: true
   {{- end }}
 ```
 

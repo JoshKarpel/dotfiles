@@ -5,9 +5,8 @@ paths:
 
 # Starship Prompt
 
-[starship](https://starship.rs/) config is global at `~/.config/starship.toml`.
-The full module reference is the [config docs](https://starship.rs/config/):
-consult it before adding or tuning a module rather than guessing at field names.
+Consult the [starship config docs](https://starship.rs/config/) before adding
+or tuning a module rather than guessing at field names.
 
 ## Modules
 

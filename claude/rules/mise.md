@@ -8,10 +8,6 @@ paths:
 
 # Mise Style Guide
 
-[mise](https://mise.jdx.dev/) config is global at `~/.config/mise/config.toml`
-or a repo-local `mise.toml` / `.tool-versions`. Sections: `[tools]` (runtimes
-and CLI tools), `[env]` (directory-scoped env vars), `[tasks]` (a task runner).
-
 ## [tools]
 
 - Keep entries sorted alphabetically.

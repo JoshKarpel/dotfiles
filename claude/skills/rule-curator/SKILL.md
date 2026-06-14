@@ -67,3 +67,11 @@ Match on both axes:
 Keep only what's non-obvious, durable, and actionable. A rule that restates
 what any competent engineer already knows is a tax on every future session
 that loads it, not an asset.
+
+Rules are read by Claude, which already knows what the language, tool, or
+concept *is*. Don't open a rule with a definition or general background (no
+"A secret is any value that grants access", no explaining what configuration
+is). Capture only the user's preferences and suggested approaches, and start
+at the first real convention rather than a scene-setting intro. A short scoping
+or cross-reference line is fine when it marks a genuine boundary (what the rule
+deliberately excludes, or where a related concern lives), not background.

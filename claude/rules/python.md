@@ -67,6 +67,19 @@ reach for `TypedDict` only when you genuinely can't control the shape.
 - **Context managers** (`with`) for all resources: files, locks, connections,
   temporary directories.
 
+## Secrets
+
+Wrap secret values (API keys, passwords, tokens) in Pydantic's
+[`SecretStr`](https://docs.pydantic.dev/latest/api/types/#pydantic.types.SecretStr)
+rather than passing them around as plain `str`. `SecretStr` redacts the value
+from `repr()`, logs, tracebacks, and model dumps, so a stray log line or error
+report can't leak it; call `.get_secret_value()` only at the point of use. Load
+secrets and config together with
+[`pydantic-settings`](https://docs.pydantic.dev/latest/concepts/pydantic_settings/)
+(`BaseSettings`), which reads from env vars or files and types the fields as
+`SecretStr` directly. See the secrets style guide for where those values should
+come from.
+
 ## Control Flow
 
 - **Walrus operator** (`:=`) when it eliminates a repeated expression and
