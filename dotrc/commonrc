@@ -45,12 +45,6 @@ done
 # add dotfiles/bin to path so we can use the functions there
 path_prefix "$DOTFILES/bin"
 
-export NVM_DIR="$HOME/.nvm"
-if [[ -d "$NVM_DIR" ]]; then
-  . "$NVM_DIR/nvm.sh"
-  . "$NVM_DIR/bash_completion"
-fi
-
 # rust environment
 path_postfix "$HOME/.cargo/bin"
 
@@ -59,7 +53,7 @@ export PATH="$PATH:./node_modules/.bin"
 
 # override some BSD utils with GNU utils from the brew findutils package
 if [[ $(uname) == "Darwin" ]]; then
-  path_prefix "/opt/homebrew/opt/findutils/libexec/gnubin"
+  path_prefix "$(brew --prefix)/opt/findutils/libexec/gnubin"
 fi
 
 # add any local config, letting it overwrite if necessary

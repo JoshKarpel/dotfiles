@@ -29,6 +29,7 @@
       "WebFetch(domain:joshkarpel.github.io)",
       "WebFetch(domain:just.systems)",
       "WebFetch(domain:keepachangelog.com)",
+      "WebFetch(domain:mise.jdx.dev)",
       "WebFetch(domain:more-itertools.readthedocs.io)",
       "WebFetch(domain:packaging.python.org)",
       "WebFetch(domain:pre-commit.com)",
@@ -127,7 +128,7 @@
     "ask": [],
     "defaultMode": "auto"
   },
-  "model": "opusplan",
+  "model": "opus",
   "hooks": {
     "SessionStart": [
       {

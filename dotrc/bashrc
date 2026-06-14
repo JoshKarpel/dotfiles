@@ -37,8 +37,8 @@ complete -d cd
 
 . "$HOME/.commonrc"
 
-eval "$(starship init bash)"
-
-eval "$(gh completion -s bash)"
+activate_if_available mise mise activate bash
+activate_if_available starship starship init bash
+activate_if_available gh gh completion -s bash
 
 . "$HOME/.cargo/env"

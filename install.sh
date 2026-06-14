@@ -46,24 +46,6 @@ function do_config() {
   "$BASEDIR/bin/link-claude"
 }
 
-function do_gh() {
-  if ! exists apt-get; then
-    return 0
-  fi
-
-  if [[ -f /etc/apt/sources.list.d/github-cli.list ]]; then
-    echo "GitHub CLI apt repository already configured"
-    return 0
-  fi
-
-  log "Setting up GitHub CLI apt repository..."
-
-  sudo mkdir -p -m 755 /etc/apt/keyrings
-  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
-  sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-}
-
 function do_apt() {
   if ! exists apt-get; then
     return 0
@@ -110,7 +92,7 @@ function do_brew() {
   brew update
 
   brew install --display-times findutils  # BSD xargs doesn't have -a
-  path_prefix "/usr/local/opt/findutils/libexec/gnubin"
+  path_prefix "$(brew --prefix)/opt/findutils/libexec/gnubin"
 
   xargs -r -a "$BASEDIR/targets/brew.txt" -- brew install --display-times
 
@@ -121,58 +103,23 @@ function do_brew() {
   "$(brew --prefix)"/opt/fzf/install --completion --key-bindings --no-update-rc
 }
 
-function do_uv() {
-  log "Installing uv..."
-
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-}
-
-function do_nvm() {
-  NVM_DIR="$HOME/.nvm"
-
-  if ! exists nvm; then
-    log "Installing nvm..."
-    git clone https://github.com/nvm-sh/nvm.git "$NVM_DIR"
+function do_mise() {
+  if ! exists mise; then
+    log "Installing mise..."
+    curl https://mise.run | sh
   fi
 
-  log "Updating nvm..."
+  log "Updating mise tools..."
 
-  cd "$NVM_DIR" || return 1
-  git fetch --tags origin
-  git checkout "$(git describe --abbrev=0 --tags --match "v[0-9]*" "$(git rev-list --tags --max-count=1)")"
-
-  nvm install --lts
-  npm install --location=global npm@latest
-  npm install --location=global yarn@latest
-}
-
-function do_rust() {
-  if ! exists rustup; then
-    log "Installing rust..."
-
-    curl https://sh.rustup.rs -fsSL | bash -s -- -y --no-modify-path
-    . $HOME/.cargo/env
-
-    rustup install nightly
-  fi
-
-  log "Updating rust..."
-
-  rustup update
-
-  log "Updating rust targets..."
-
-  xargs -r -a "$BASEDIR/targets/cargo.txt" -- cargo install --locked
+  "$HOME/.local/bin/mise" install
+  "$HOME/.local/bin/mise" upgrade
 }
 
 do_config
 
 . "$HOME/.commonrc"
 
-do_gh
 do_apt
 do_locale
 do_brew
-do_uv
-do_nvm
-do_rust
+do_mise

@@ -1,0 +1,38 @@
+# Global mise config. Symlinked to ~/.config/mise/config.toml by install.sh.
+# Per-project versions live in each repo's mise.toml / .tool-versions.
+# node replaces nvm; rust wraps rustup; uv installs the binary (uv owns venvs).
+
+[settings]
+# Supply-chain cooldown: ignore releases newer than this for fuzzy resolution.
+minimum_release_age = "7d"
+
+[tools]
+aws-cli = "latest"
+bat = "latest"
+bottom = "latest"
+"cargo:cargo-edit" = "latest"
+"cargo:cargo-expand" = "latest"
+"cargo:cargo-insta" = "latest"
+conftest = "latest"
+dust = "latest"
+dyff = "latest"
+elixir = "latest"
+erlang = "latest"
+eza = "latest"
+fd = "latest"
+gh = "latest"
+helm = "latest"
+hyperfine = "latest"
+jq = "latest"
+just = "latest"
+k9s = "latest"
+kubectl = "latest"
+node = "lts"
+ripgrep = "latest"
+rust = ["stable", "nightly"]
+sd = "latest"
+starship = "latest"
+terraform = "latest"
+tokei = "latest"
+uv = "latest"
+yq = "latest"

@@ -1,3 +1,4 @@
+autoconf
 bash-completion
 build-essential
 ca-certificates
@@ -5,13 +6,10 @@ clang
 cmake
 curl
 dos2unix
-elixir
-erlang-dev
 ffmpeg
 findutils
 fswatch
 fzf
-gh
 git
 gnome-keyring
 gnupg
@@ -19,10 +17,10 @@ graphviz
 gzip
 imagemagick
 inotify-tools
-jq
 libasound2-dev
 libfontconfig1-dev
 libfreetype6-dev
+libncurses-dev
 libsox-fmt-pulse
 libsqlite3-dev
 libssl-dev
@@ -30,6 +28,7 @@ libxcb-xfixes0-dev
 libxkbcommon-dev
 locales
 lsb-release
+m4
 ncdu
 net-tools
 parallel

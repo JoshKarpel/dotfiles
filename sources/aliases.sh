@@ -31,9 +31,6 @@ alias ~="cd ~"
 alias ..="cd .."
 alias cd..="cd .." # typos...
 
-# procs
-alias pt="procs -t"
-
 # tar
 alias mktar="tar -cvf"
 alias untar="tar -xvf"

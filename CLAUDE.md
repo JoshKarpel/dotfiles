@@ -4,20 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Personal dotfiles repository. The `install.sh` script symlinks configs into place and installs toolchain dependencies (apt, brew, uv, nvm, rust/cargo).
+Personal dotfiles repository. The `install.sh` script symlinks configs into place and installs toolchain dependencies (apt, brew, mise). mise manages node, rust (wrapping rustup), uv, cargo plugins (via the `cargo:` backend), and most standalone CLI tools; see `config/mise/config.toml`.
 
 ## Repository Structure
 
 - **`dotrc/`** — Files symlinked as `~/.<filename>` (bashrc, zshrc, commonrc, gitconfig, etc.)
-- **`config/`** — Directories symlinked into `~/.config/` (alacritty, git, bottom, procs, starship)
+- **`config/`** — Directories symlinked into `~/.config/` (git, bottom, starship, mise)
 - **`claude/`** — Source files symlinked into `~/.claude/` via `bin/link-claude`: the global `CLAUDE.md`, `settings.json`, `skills/`, and `rules/`. Edit these here, not the symlinks in `~/.claude/`.
 - **`sources/`** — Shell scripts sourced by `commonrc` at shell startup (aliases, git helpers, path management, etc.)
-- **`targets/`** — Package lists for apt, brew, and cargo (one package per line, kept sorted by pre-commit)
+- **`targets/`** — Package lists for apt and brew (one package per line, kept sorted by pre-commit)
 - **`bin/`** — Scripts added to PATH via `dotfiles/bin`; add any executable scripts here and they will be available in the shell (e.g., for Claude Code hooks)
 
 ## Shell Startup Chain
 
-`bashrc`/`zshrc` → sources `~/.commonrc` → sources every file in `sources/` → adds `bin/` to PATH → loads nvm/cargo/yarn
+`bashrc`/`zshrc` → sources `~/.commonrc` → sources every file in `sources/` → adds `bin/` to PATH → activates mise (node + CLI tools), starship, gh, and cargo
 
 ## Key Commands
 

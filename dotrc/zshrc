@@ -34,8 +34,8 @@ bindkey "^[[B" down-line-or-beginning-search # Down
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
-eval "$(starship init zsh)"
-
-eval "$(gh completion -s zsh)"
+activate_if_available mise mise activate zsh
+activate_if_available starship starship init zsh
+activate_if_available gh gh completion -s zsh
 
 . "$HOME/.cargo/env"
