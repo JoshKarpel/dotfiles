@@ -6,6 +6,12 @@ processing path. The *control plane* manages system state; the *data plane*
 handles individual requests. Entangling them is a form of complecting
 (see Simple vs. Easy).
 
+The separation is worth pursuing at any scale, not only across services: even
+within a single process, keep management work on a background thread or
+scheduled task rather than in request handlers. Reach for this in-process
+separation even when achieving it at the system or architecture layer isn't
+feasible or worth the effort.
+
 - **Keep management off the hot path.** Expiring a cache entry or refreshing
   a config during request handling couples an administrative concern to
   latency-sensitive code. The request now bears the cost of the management
