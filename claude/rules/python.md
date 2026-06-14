@@ -19,10 +19,9 @@ Always annotate functions. Use modern syntax (Python 3.10+):
 Annotate instance variables as class-level fields on dataclasses,
 or in `__init__` for plain classes. Return type is always required.
 
-Never use `Any`. Use `object` for a genuinely unknown value: it accepts
-anything, but forces callers to narrow with `isinstance` before use, so the
-type checker keeps working for you. `Any` silently disables checking wherever
-it spreads.
+Never use `Any`. When the type isn't known, use `object`: it accepts anything,
+but forces callers to narrow with `isinstance` before use, so the type checker
+keeps working for you. `Any` silently disables checking wherever it spreads.
 
 ## Data Containers
 
