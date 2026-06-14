@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Stage tracked changes and run pre-commit; on failure, re-stage any auto-fixes
+# and run once more, then stage again. Exit 0 if pre-commit passes (possibly
+# after auto-fixing), non-zero if it still fails. Arguments forward to
+# `pre-commit run`.
+#
+# No `-e`: a failing pre-commit run is expected and handled, not fatal.
+set -uo pipefail
+
+git add --update
+pre-commit-run run "$@" && exit 0
+
+git add --update
+pre-commit-run run "$@"
+rc=$?
+git add --update
+exit "$rc"

@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+git rev-parse --show-toplevel &>/dev/null || exit 0
 
 UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null)
 if [[ -n "$UNTRACKED" ]]; then
@@ -15,29 +15,12 @@ $UNTRACKED" '{"systemMessage":"[claude-stop-precommit] untracked files","hookSpe
   exit 0
 fi
 
-git add --update
-
-if [[ ! -f "$REPO_ROOT/.pre-commit-config.yaml" && ! -f "$REPO_ROOT/.pre-commit-config.yml" ]]; then
+if ! is-pre-commit-project; then
+  git add --update
   exit 0
 fi
 
-if is-uv-project 2>/dev/null; then
-  RUNNER="uv run pre-commit"
-elif command -v pre-commit &>/dev/null; then
-  RUNNER="pre-commit"
-elif command -v uv &>/dev/null; then
-  RUNNER="uvx pre-commit"
-else
-  exit 0
-fi
-
-if OUTPUT=$($RUNNER run 2>&1); then
-  exit 0
-fi
-
-git add --update
-
-if OUTPUT=$($RUNNER run 2>&1); then
+if OUTPUT=$(pre-commit-autofix 2>&1); then
   exit 0
 fi
 

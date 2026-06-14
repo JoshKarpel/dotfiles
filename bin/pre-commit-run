@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Run pre-commit through whichever runner is available, forwarding all arguments.
+
+set -euo pipefail
+
+if is-uv-project 2>/dev/null; then
+  exec uv run pre-commit "$@"
+elif command -v uvx &>/dev/null; then
+  exec uvx pre-commit "$@"
+elif command -v pre-commit &>/dev/null; then
+  exec pre-commit "$@"
+fi
+
+echo "pre-commit-run: no runner found (need uv or pre-commit on PATH)" >&2
+exit 127

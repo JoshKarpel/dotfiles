@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Check if the current directory is inside a project with pre-commit configured (has a config at repo root)
+
+set -euo pipefail
+
+root="$(git root)"
+[[ -f "$root/.pre-commit-config.yaml" || -f "$root/.pre-commit-config.yml" ]]
