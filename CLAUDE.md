@@ -27,6 +27,10 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 
 # Run pre-commit hooks manually
 pre-commit run
+
+# Count Claude tokens in files/dirs via the Anthropic count_tokens API
+# (needs ANTHROPIC_API_KEY). Run with --help for usage and flags.
+count-claude-tokens --help
 ```
 
 ## Claude Code Hooks

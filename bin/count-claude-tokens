@@ -1,0 +1,139 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["anthropic", "typer"]
+# ///
+"""Count Claude tokens in files via Anthropic's count_tokens API."""
+
+from __future__ import annotations
+
+import enum
+import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from pathlib import Path
+from typing import get_args
+
+import anthropic
+import typer
+from anthropic.types import Model
+
+# anthropic.types.Model is Union[Literal[...ids...], str]; lift the literal ids
+# into a StrEnum so typer renders the choices in --help and tracks the SDK.
+_model_ids = get_args(get_args(Model)[0])
+ModelChoice = enum.StrEnum("ModelChoice", {mid.replace("-", "_"): mid for mid in _model_ids})
+
+
+@dataclass(frozen=True, slots=True)
+class FileCount:
+    path: Path
+    tokens: int
+
+
+def display_name(path: Path) -> str:
+    try:
+        return str(path.relative_to(Path.cwd()))
+    except ValueError:
+        return str(path)
+
+
+def list_git_files(directory: Path) -> list[Path] | None:
+    result = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        capture_output=True,
+        cwd=directory,
+    )
+    if result.returncode != 0:
+        return None
+    names = result.stdout.decode().split("\0")
+    return sorted(p for name in names if name and (p := directory / name).is_file())
+
+
+def expand_dir(directory: Path, use_git: bool) -> list[Path]:
+    if use_git and (tracked := list_git_files(directory)) is not None:
+        return tracked
+    return sorted(f for f in directory.rglob("*") if f.is_file())
+
+
+def gather_files(paths: list[Path], use_git: bool) -> list[Path]:
+    files: list[Path] = []
+    for path in paths:
+        if path.is_dir():
+            files.extend(expand_dir(path, use_git))
+        elif path.is_file():
+            files.append(path)
+        else:
+            typer.echo(f"skipping (not found): {path}", err=True)
+    return files
+
+
+def count_file(client: anthropic.Anthropic, model: str, path: Path) -> FileCount | None:
+    try:
+        text = path.read_text()
+    except UnicodeDecodeError:
+        typer.echo(f"skipping (not text): {display_name(path)}", err=True)
+        return None
+    if not text.strip():
+        return FileCount(path=path, tokens=0)
+    response = client.messages.count_tokens(
+        model=model,
+        messages=[{"role": "user", "content": text}],
+    )
+    return FileCount(path=path, tokens=response.input_tokens)
+
+
+def format_report(counts: list[FileCount], model: str, context_window: int) -> str:
+    labels = {c.path: display_name(c.path) for c in counts}
+    width = max((len(label) for label in labels.values()), default=len("TOTAL"))
+    ordered = sorted(counts, key=lambda c: c.tokens, reverse=True)
+
+    def fraction(tokens: int) -> str:
+        return f"{tokens / context_window * 100:>5.1f}%"
+
+    lines = [f"{labels[c.path]:<{width}}  {c.tokens:>8,}  {fraction(c.tokens)}" for c in ordered]
+    total = sum(c.tokens for c in counts)
+    lines.append(f"{'TOTAL':<{width}}  {total:>8,}  {fraction(total)}  ({model}, {context_window:,} ctx)")
+    return "\n".join(lines)
+
+
+def main(
+    paths: list[Path] = typer.Argument(..., help="Files or directories to count (dirs recurse)."),
+    model: ModelChoice = typer.Option(..., "--model", "-m", help="Model to tokenize for."),
+    use_git: bool = typer.Option(
+        True,
+        "--git/--no-git",
+        help="In a git repo, expand directories via git ls-files (respects .gitignore); --no-git walks all files.",
+    ),
+    show_zeros: bool = typer.Option(False, "--show-zeros", help="Include files that count as zero tokens."),
+) -> None:
+    """Count Claude tokens in the given files and directories.
+
+    Each file's count is shown with its share of the model's context window,
+    sorted largest first. In a git repo, directories are listed via git
+    ls-files (respecting .gitignore); binary files are skipped. Requires
+    ANTHROPIC_API_KEY.
+    """
+    targets = gather_files(paths, use_git)
+    if not targets:
+        typer.echo("No files to count.", err=True)
+        raise typer.Exit(1)
+
+    # The 429 carries retry-after; the SDK honors it, so retries are
+    # header-guided backoff. count_tokens 200s expose no ratelimit headers,
+    # so proactive pacing isn't possible here.
+    client = anthropic.Anthropic(max_retries=8)
+    try:
+        context_window = client.models.retrieve(model.value).max_input_tokens
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = pool.map(lambda path: count_file(client, model.value, path), targets)
+            counts = [c for c in results if c is not None]
+    except anthropic.AuthenticationError:
+        typer.echo("ANTHROPIC_API_KEY is missing or invalid.", err=True)
+        raise typer.Exit(1)
+
+    shown = counts if show_zeros else [c for c in counts if c.tokens > 0]
+    typer.echo(format_report(shown, model.value, context_window))
+
+
+if __name__ == "__main__":
+    typer.run(main)
