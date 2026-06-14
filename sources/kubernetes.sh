@@ -61,5 +61,9 @@ function kfg() {
 function kns() {
   local target=$1
 
-  kubectl config set-context --current --namespace="${target}"
+  if [[ -z $target ]]; then
+    kubectl get namespaces
+  else
+    kubectl config set-context --current --namespace="${target}"
+  fi
 }
