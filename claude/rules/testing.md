@@ -30,4 +30,7 @@ just arguments, so tests pass in whatever they need without patching.
   at the point where external input is parsed into internal types. Once data is
   internal, trust the types: don't re-test the parser in every downstream unit.
 
-Reference: [Choosing Values for Robust Tests](https://testing.googleblog.com/2026/06/choosing-values-for-robust-tests.html) by Radion Khait
+## References
+
+- [Choosing Values for Robust Tests](https://testing.googleblog.com/2026/06/choosing-values-for-robust-tests.html)
+  by Radion Khait
