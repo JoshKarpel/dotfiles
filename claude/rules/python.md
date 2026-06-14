@@ -48,6 +48,12 @@ reach for `TypedDict` only when you genuinely can't control the shape.
   expression is too long, factor out a helper function; don't switch to a loop.
 - **Generators** (`yield`) when the caller doesn't need all values at once
   or when materializing the sequence would waste memory.
+- **Reach for `collections` and [`more-itertools`](https://more-itertools.readthedocs.io/)
+  before hand-rolling loops.** A named building block usually expresses the intent more
+  clearly than an accumulator and a `for` loop: `Counter`, `defaultdict`, and `deque`
+  from `collections`; `chunked`, `partition`, `flatten`, `unique_everseen`, `first`,
+  and `windowed` from `more-itertools`. If you're tallying, grouping, batching, or
+  sliding a window, there's likely a tool for it.
 
 ## Resources
 
