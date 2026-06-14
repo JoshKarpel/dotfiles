@@ -44,6 +44,13 @@ reach for `TypedDict` only when you genuinely can't control the shape.
   (The conventional advice to use `%`-style in logging to defer interpolation is rarely
   a meaningful optimization in practice.)
 
+## Docstrings
+
+- **Never write module-level docstrings.** The module's name and contents
+  already document it; a top-of-file docstring is noise that drifts out of
+  date. (See the comments rule: capture the non-obvious *why*, never the
+  obvious *what*.)
+
 ## Collections and Iteration
 
 - **Comprehensions** for transformations. Use a plain `for` loop when there are side

@@ -3,8 +3,6 @@
 # requires-python = ">=3.11"
 # dependencies = ["anthropic", "typer"]
 # ///
-"""Count Claude tokens in files via Anthropic's count_tokens API."""
-
 from __future__ import annotations
 
 import enum
