@@ -6,6 +6,11 @@
 # Supply-chain cooldown: ignore releases newer than this for fuzzy resolution.
 minimum_release_age = "7d"
 
+[settings.node]
+# Run `corepack enable` after installing node, activating the bundled
+# package-manager shims (yarn, pnpm).
+corepack = true
+
 [tools]
 aws-cli = "latest"
 bat = "latest"
