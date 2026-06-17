@@ -139,6 +139,10 @@
           },
           {
             "type": "command",
+            "command": "claude-pre-commit-reminder"
+          },
+          {
+            "type": "command",
             "command": "claude-git-status"
           },
           {

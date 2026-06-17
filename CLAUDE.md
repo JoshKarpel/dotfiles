@@ -39,6 +39,7 @@ Active hooks configured in `~/.claude/settings.json`:
 
 - **SessionStart**:
   - `claude-just-list` — Lists available justfile recipes at session start
+  - `claude-pre-commit-reminder` — If the repo uses pre-commit, points Claude at the `pre-commit-autofix` helper
   - `claude-git-status` — Shows git status at session start
   - `claude-gh-status` — If authenticated and in a GitHub-backed repo, injects the current repo name/URL and a reminder that `gh` commands default to it
 - **PreToolUse (Bash)**:

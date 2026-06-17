@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# SessionStart hook: if the repo uses pre-commit, point Claude at pre-commit-autofix
+
+set -euo pipefail
+
+is-pre-commit-project 2>/dev/null || exit 0
+
+cat <<EOF
+This repo uses pre-commit. Run it with \`pre-commit-autofix\` (on PATH from my dotfiles): works regardless of the project's toolchain, stages tracked changes, runs the hooks, re-stages any auto-fixes, and runs once more. Run it with no args in almost all cases; pre-commit already scopes each hook to the changed files.
+EOF
