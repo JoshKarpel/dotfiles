@@ -132,6 +132,7 @@
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "startup|clear|compact",
         "hooks": [
           {
             "type": "command",
@@ -143,11 +144,15 @@
           },
           {
             "type": "command",
-            "command": "claude-git-status"
-          },
+            "command": "claude-gh-status"
+          }
+        ]
+      },
+      {
+        "hooks": [
           {
             "type": "command",
-            "command": "claude-gh-status"
+            "command": "claude-git-status"
           }
         ]
       }
