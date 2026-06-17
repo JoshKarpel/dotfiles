@@ -21,3 +21,34 @@ Current GitHub repository: $URL (default branch: $DEFAULT_BRANCH)
 
 When using gh commands (issues, PRs, workflows, etc.), they already default to this repository — omit --repo unless you are explicitly targeting a different one.
 EOF
+
+# If the current branch has an open PR, surface it
+PR_JSON=$(gh pr view --json number,title,state,isDraft 2>/dev/null) || PR_JSON=""
+if [[ -n "$PR_JSON" && "$(echo "$PR_JSON" | jq -r '.state')" == "OPEN" ]]; then
+  PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
+  PR_TITLE=$(echo "$PR_JSON" | jq -r '.title')
+  PR_DRAFT=$(echo "$PR_JSON" | jq -r 'if .isDraft then " (draft)" else "" end')
+  cat <<EOF
+
+This branch has an open PR #${PR_NUMBER}${PR_DRAFT}: ${PR_TITLE}
+You can inspect it with: gh pr view ${PR_NUMBER}, gh pr checks ${PR_NUMBER}, gh pr diff ${PR_NUMBER}
+The handle-pr-review skill can fetch and address its review comments.
+EOF
+fi
+
+# Surface the latest CI run for the current branch, but only if it failed
+CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null) || CURRENT_BRANCH=""
+if [[ -n "$CURRENT_BRANCH" ]]; then
+  RUN_JSON=$(gh run list --branch "$CURRENT_BRANCH" --limit 1 --json databaseId,status,conclusion,workflowName,displayTitle 2>/dev/null) || RUN_JSON=""
+  RUN_FAILED=$(echo "$RUN_JSON" | jq -r 'first | if . and .status == "completed" and .conclusion != "success" and .conclusion != "skipped" then "yes" else "no" end' 2>/dev/null) || RUN_FAILED="no"
+  if [[ "$RUN_FAILED" == "yes" ]]; then
+    RUN_DESC=$(echo "$RUN_JSON" | jq -r '.[0] | "\(.workflowName) is \(.conclusion) (\(.displayTitle))"')
+    RUN_ID=$(echo "$RUN_JSON" | jq -r '.[0].databaseId')
+    cat <<EOF
+
+Latest CI run on this branch failed: $RUN_DESC
+You can inspect it with: gh run view ${RUN_ID}, gh run view ${RUN_ID} --log-failed
+The debug-gha skill can investigate and fix this failure.
+EOF
+  fi
+fi
