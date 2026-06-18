@@ -50,6 +50,9 @@ tsconfig.tsbuildinfo
 
 **/.claude/settings.local.json
 
+# dropbox
+*:com.dropbox.attrs
+
 # profiling
 *.austin
 *.memray
