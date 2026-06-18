@@ -8,6 +8,15 @@ set -uo pipefail
 
 INPUT=$(cat)
 
+# If Claude's last message looks like a question, it's handing control back to the user.
+# Don't let any check block the stop and force it to keep working — Claude is genuinely
+# stopping to await a reply, so play the stop sound and let it stop.
+LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // ""')
+if [[ "$LAST_MESSAGE" == *"?"* ]]; then
+  claude-sound stop || true
+  exit 0
+fi
+
 for check in claude-stop-precommit claude-stop-finish; do
   STDOUT=$(echo "$INPUT" | "$check")
   STATUS=$?

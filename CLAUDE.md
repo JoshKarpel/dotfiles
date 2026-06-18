@@ -50,7 +50,9 @@ Active hooks configured in `~/.claude/settings.json`:
 - **Stop**: `claude-stop` runs the checks below in sequence (not parallel, since hooks in
   a group otherwise run in parallel and order isn't guaranteed) and only plays the stop
   sound if none of them blocked, so the sound means Claude is actually stopping rather
-  than retrying after a block:
+  than retrying after a block. First, if Claude's last message looks like a question
+  (contains `?`), it's handing control back to the user, so the orchestrator skips every
+  check, plays the stop sound, and lets Claude stop:
   - `claude-stop-precommit` — Checks for untracked files first; then runs
     `git add --update` and if pre-commit is configured runs it, exiting early on
     success; on failure, re-stages auto-fixes (`git add --update`) and runs it once more,
@@ -62,8 +64,7 @@ Active hooks configured in `~/.claude/settings.json`:
     Uses the shared `claude-changeset-guard` helper: fires once per never-before-seen
     change-set (fingerprinted via `git diff HEAD` + untracked files, keyed per branch,
     stored in `.git/claude-finish/`), re-fires only when Claude changes the diff, and
-    goes quiet once a pass produces no changes. Skips during merge/rebase and when
-    Claude's last message looks like a question.
+    goes quiet once a pass produces no changes. Skips during merge/rebase.
 
   All Stop hooks output JSON: `additionalContext` carries the message to Claude
   without displaying it in the TUI; `systemMessage` shows a brief visible indicator.

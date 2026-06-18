@@ -3,8 +3,8 @@
 
 set -euo pipefail
 
-INPUT=$(cat)
-PORCELAIN=$(echo "$INPUT" | claude-changeset-guard finish) || exit 0
+cat >/dev/null  # drain the hook payload off stdin; the guard works from git state alone
+PORCELAIN=$(claude-changeset-guard finish) || exit 0
 
 MESSAGE="You made these changes this session:
 

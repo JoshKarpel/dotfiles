@@ -56,3 +56,4 @@ tsconfig.tsbuildinfo
 *.prof
 *.pstats
 *.speedscope
+*.har
