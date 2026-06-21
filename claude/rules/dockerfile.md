@@ -1,9 +1,9 @@
 ---
 paths:
-  - "Dockerfile"
-  - "Containerfile"
-  - "**/*.dockerfile"
-  - "**/*.Dockerfile"
+  - "**/*Dockerfile*"
+  - "**/*dockerfile*"
+  - "**/*Containerfile*"
+  - "**/*containerfile*"
 ---
 
 # Dockerfile Style Guide
