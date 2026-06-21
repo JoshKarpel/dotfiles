@@ -1,7 +1,9 @@
 ---
 paths:
   - "**/mise.toml"
+  - "**/mise.*.toml"
   - "**/.mise.toml"
+  - "**/.mise.*.toml"
   - "**/mise/config.toml"
   - "**/.tool-versions"
 ---

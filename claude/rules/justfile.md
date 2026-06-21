@@ -1,8 +1,7 @@
 ---
 paths:
-  - "justfile"
-  - "Justfile"
-  - "**/*.justfile"
+  - "**/*justfile*"
+  - "**/*Justfile*"
 ---
 
 # Justfile Style Guide

@@ -3,7 +3,9 @@ paths:
   - "**/*.rs"
   - "**/Cargo.toml"
   - "**/rustfmt.toml"
+  - "**/.rustfmt.toml"
   - "**/clippy.toml"
+  - "**/.clippy.toml"
 ---
 
 # Rust Style Guide
