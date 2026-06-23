@@ -109,6 +109,13 @@ come from.
 - **Background tasks for periodic work.** TTL sweeps, cache eviction, and
   similar maintenance don't belong inline on the critical path; start them with
   `asyncio.create_task` at app startup.
+- **Bounded concurrency over large iterables.** `gather()` + semaphore and
+  `as_completed()` both consume the input iterable upfront, which blows memory
+  on large inputs. Use `asyncio.wait()` with
+  `return_when=asyncio.FIRST_COMPLETED`, keeping a bounded set of pending tasks:
+  fill to `limit`, await until one completes, yield it, refill. See [Limiting
+  concurrency in Python asyncio](https://death.andgravity.com/limit-concurrency)
+  for the full pattern and tradeoffs.
 
 ## Performance
 
