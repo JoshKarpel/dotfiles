@@ -64,7 +64,6 @@
       "Bash(yq *)",
       "Bash(git status *)",
       "Bash(git diff *)",
-      "Bash(pr-diff*)",
       "Bash(git log *)",
       "Bash(git branch*)",
       "Bash(git show*)",

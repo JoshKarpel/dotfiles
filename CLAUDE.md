@@ -59,8 +59,7 @@ Active hooks configured in `~/.claude/settings.json`:
     blocking if still failing
   - `claude-stop-finish` — Once per change-set, nudges Claude through a structured
     finishing pass: (1) consistency updates (CLAUDE.md, docs, changelogs, etc.),
-    (2) PR-style review of the diff in the context of the branch since its merge-base,
-    (3) verify the changes work (e.g. build, type-checking, tests).
+    (2) verify the changes work (e.g. build, type-checking, tests).
     Uses the shared `claude-changeset-guard` helper: fires once per never-before-seen
     change-set (fingerprinted via `git diff HEAD` + untracked files, keyed per branch,
     stored in `.git/claude-finish/`), re-fires only when Claude changes the diff, and

@@ -55,6 +55,14 @@ reach for `TypedDict` only when you genuinely can't control the shape.
   worth writing. If the project has an established docstring convention
   (reStructuredText, Google, NumPy style), follow that instead.
 
+## Module Privacy
+
+Don't use `_` prefixes to signal private names. Control the public API
+surface through `__init__.py` re-exports instead: export only what's
+intentionally public and omit the rest. Type checkers, IDEs, and
+`from module import *` all respect `__all__` and re-export boundaries,
+so the constraint is enforced structurally without cluttering identifiers.
+
 ## Collections and Iteration
 
 - **Comprehensions** for transformations. Use a plain `for` loop when there are side
