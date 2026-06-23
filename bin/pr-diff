@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+default_branch=$(git-default-branch)
+base=$(git merge-base HEAD "$default_branch")
+git diff "$base" "$@"

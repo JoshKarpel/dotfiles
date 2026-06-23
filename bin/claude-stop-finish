@@ -17,9 +17,9 @@ scope):
 1. Consistency: update anything the change-set requires to stay in sync, e.g. CLAUDE.md,
    docs, changelogs, justfile recipes, or code comments.
 2. Review: review these changes as if they were a pull request, in the context of
-   the branch since its merge-base: bugs, unhandled edge cases, leftover scaffolding,
-   and anything that diverges from how this repo does things (its conventions and the
-   style rules already loaded for the files you touched).
+   the branch since its merge-base (use \`pr-diff\` to get that diff): bugs, unhandled
+   edge cases, leftover scaffolding, and anything that diverges from how this repo does
+   things (its conventions and the style rules already loaded for the files you touched).
 3. Verify: confirm your changes work, e.g. by building, type-checking, and running tests.
 
 Fix what genuinely needs fixing; if a step has nothing to do, move on. When the diff is
