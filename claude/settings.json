@@ -46,6 +46,7 @@
       "WebFetch(domain:docs.langchain.com)",
       "WebFetch(domain:support.langchain.com)",
       "WebFetch(domain:asgi.readthedocs.io)",
+      "WebFetch(domain:datatracker.ietf.org)",
       "Edit(//tmp/**)",
       "Read(//tmp/**)",
       "Bash(ls *)",
