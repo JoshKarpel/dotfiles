@@ -38,6 +38,15 @@ Avoid plain classes. Strongly prefer dataclasses; if you would have put logic in
 Prefer Pydantic over `TypedDict` for any validated or serialized data;
 reach for `TypedDict` only when you genuinely can't control the shape.
 
+Make Pydantic models frozen, mirroring the frozen-by-default dataclass rule:
+set it through the `model_config` classvar with `ConfigDict`, not the older
+`class Config` inner class.
+
+```python
+class Order(BaseModel):
+    model_config = ConfigDict(frozen=True)
+```
+
 ## Strings
 
 - **f-strings** for all string formatting, including logging calls. No `.format()` or `%`.
