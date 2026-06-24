@@ -24,6 +24,16 @@ exclude-newer = "7 days"
 exclude-newer-package = { internal-pkg = false }
 ```
 
+## Ruff isort
+
+Force one import per line so diffs stay minimal: adding or removing an import
+touches a single line rather than reflowing a combined `from x import a, b, c`.
+
+```toml
+[tool.ruff.lint.isort]
+force-single-line = true
+```
+
 ## References
 
 - [uv resolution: exclude-newer](https://docs.astral.sh/uv/concepts/resolution/#exclude-newer)

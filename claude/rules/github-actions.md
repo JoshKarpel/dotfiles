@@ -45,6 +45,21 @@ on:
   workflow_dispatch:
 ```
 
+## Concurrency
+
+Don't add a `cancel-in-progress` concurrency group to CI by default:
+
+```yaml
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true  # avoid: cancels in-flight CI on a new push
+```
+
+We want CI to run to completion on every commit, even when a newer commit is
+pushed to the same ref, so each commit gets a real pass/fail status. Only add
+`cancel-in-progress` when there's a specific reason (e.g. expensive jobs where
+only the latest result matters).
+
 ## Action Version Pinning
 
 Pin to full patch versions, not floating major tags. `@v4` drifts; `@v4.2.2`
