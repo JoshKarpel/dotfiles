@@ -36,6 +36,13 @@ cooldown:
   semver-major-days: 30
 ```
 
+The `semver-*` fields (`semver-major-days`, `semver-minor-days`,
+`semver-patch-days`) only apply to ecosystems that version semantically.
+`github-actions`, `docker`, `terraform`, and `devcontainers` support only
+`default-days`; adding a `semver-*` field there fails config validation with
+`The property '#/updates/0/cooldown/semver-major-days' is not supported for
+the package ecosystem 'github-actions'`. For those, set just `default-days`.
+
 ## References
 
 - [Dependabot options reference](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference)
