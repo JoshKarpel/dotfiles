@@ -108,6 +108,13 @@ come from.
   over `if x in y: use y[x]`: the latter does two lookups and obscures intent.
   Exception: when the "miss" is the *common* path, raising is expensive in CPython.
   If the exception fires on nearly every call, a pre-check may be faster.
+- **`match` statements should be total.** End every `match` with a final
+  `case`. When some values legitimately need no handling, use an explicit
+  `case _: ...` default. When the match is meant to be exhaustive over a
+  known set (an enum, a union of types, a sealed hierarchy), close it with
+  `case _ as unreachable: assert_never(unreachable)` so the type checker
+  flags any unhandled variant at the unreachable branch, turning a missed
+  case into a static error rather than a silent fall-through.
 
 ## Async
 
