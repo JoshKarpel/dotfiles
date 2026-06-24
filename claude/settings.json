@@ -45,6 +45,7 @@
       "WebFetch(domain:www.w3.org)",
       "WebFetch(domain:docs.langchain.com)",
       "WebFetch(domain:support.langchain.com)",
+      "WebFetch(domain:asgi.readthedocs.io)",
       "Edit(//tmp/**)",
       "Read(//tmp/**)",
       "Bash(ls *)",
