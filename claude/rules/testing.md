@@ -29,6 +29,13 @@ just arguments, so tests pass in whatever they need without patching.
 - **Test at the boundary the parser establishes.** Concentrate edge-case tests
   at the point where external input is parsed into internal types. Once data is
   internal, trust the types: don't re-test the parser in every downstream unit.
+- **No `sleep` to synchronize concurrent tests.** Sleeping to wait for a
+  background operation is both slow and flaky: any fixed duration is either too
+  short (racy under load) or too long (wasted wall-clock). Synchronize on the
+  actual signal instead, with whatever the concurrency model offers, an event,
+  a queue, a condition variable, a future or promise, a channel, or joining the
+  task directly, so the test proceeds the instant the awaited state is reached
+  and stays fully deterministic.
 
 ## References
 
