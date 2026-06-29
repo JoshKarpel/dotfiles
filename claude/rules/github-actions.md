@@ -84,6 +84,12 @@ the `uses:` line.
 
 Always include `name:` on every step and job.
 
+## Step Separation
+
+Put a blank line between steps in a job, and between steps in a composite
+action, to separate them visually. It's purely cosmetic, but it makes a long
+`steps:` list much easier to scan and edit.
+
 ## Quality-Check Job
 
 Structural conventions for matrix CI jobs:
@@ -122,21 +128,28 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@<version>
+
       - name: Install Just
         uses: extractions/setup-just@<version>
+
       - name: Install uv
         uses: astral-sh/setup-uv@<version>
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
+
       - name: Run pre-commit checks
         run: uv run pre-commit run --all-files --show-diff-on-failure --color=always
+
       - name: Make sure we can build the package
         run: uv build
+
       - name: Test types
         run: uv run mypy
+
       - name: Test code
         run: uv run pytest -v --cov --cov-report=xml --durations=20
+
       - name: Test docs
         run: uv run mkdocs build --clean --strict --verbose
 ```
@@ -164,12 +177,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@<version>
+
       - name: Install uv
         uses: astral-sh/setup-uv@<version>
         with:
           enable-cache: true
+
       - name: Build the package
         run: uv build -vvv
+
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@<version>
 ```
@@ -189,10 +205,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@<version>
+
       - name: Install uv
         uses: astral-sh/setup-uv@<version>
         with:
           enable-cache: true
+
       - name: Build and deploy docs
         run: uv run mkdocs gh-deploy --clean --strict --verbose --force
 ```
