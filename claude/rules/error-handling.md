@@ -4,6 +4,13 @@
   prefer failing over silently skipping or swallowing it. Quietly dropping a
   malformed file or an unrecognized case hides the problem; a loud failure
   surfaces what can go wrong so we can decide how to handle it deliberately.
+- **Valid-but-optional is not malformed.** "Fail loud" applies to input that
+  violates the contract, not to input that satisfies it in a way this consumer
+  doesn't care about. A producer adding an optional field (a new event kind, a
+  trailing header) must never crash a consumer that didn't ask for it; ignoring
+  it is a deliberate choice, not a swallowed error. Put strictness only where
+  something is *required*: the consumer that demands the value raises in its own
+  terms when it's absent, instead of every consumer rejecting anything extra.
 - **Don't add error handling, fallbacks, or validation for paths that can't
   occur.** No defensive checks for cases the types or call sites already rule out.
 - **Don't bubble-wrap preemptively.** Resist wrapping things in `try`/`except`

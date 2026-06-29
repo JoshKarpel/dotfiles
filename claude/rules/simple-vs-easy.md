@@ -19,4 +19,13 @@ Optimize for the simplicity of the artifact (the running system), not the
 convenience of the author. Easy-to-write code that's complected is a
 slow-burning problem.
 
+But optimizing the artifact means its simplicity, not its *symmetry*. Two sides
+of an interface looking uniform is an aesthetic property, not evidence they're
+unentangled. When an asymmetry is real (one side holds the continuation and
+calls inward, the other is called and reacts), forcing both into one shape
+contorts the caller's code to make the library merely *look* symmetric. The same
+trap is a framework that inverts your control flow to present a uniform surface:
+a library that hands back plain values and leaves the control flow with you is
+the less symmetric and the simpler one. Simple means unentangled, not matching.
+
 Reference: [Simple Made Easy](https://github.com/matthiasn/talk-transcripts/blob/master/Hickey_Rich/SimpleMadeEasy.md) by Rich Hickey

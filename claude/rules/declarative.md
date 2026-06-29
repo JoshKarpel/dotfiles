@@ -24,3 +24,10 @@ reconciliation loop).
   engine room to reorder, batch, cache, or parallelize. A SQL query says
   "give me X"; the planner picks the index, the join order, the execution
   plan, none of which the caller needs to know or could safely hardcode.
+- **One declaration, recovered not restated.** Whichever layer parses or
+  produces a value owns the description of that value's shape; secondary
+  representations (an API schema, a diagram, a dependency graph) are *recovered*
+  from that single declaration, never maintained alongside it. A description
+  kept in parallel with the code it describes is denormalized state that drifts;
+  derive it from the structure so it can't. This is the declarative move applied
+  to a system describing itself: state the shape once, compute the rest.

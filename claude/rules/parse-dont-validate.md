@@ -19,5 +19,12 @@ downstream checks.
   A return type of `None` means the information was thrown away.
 - **Avoid denormalized state.** Two fields that must be kept in sync are an
   invalid state waiting to happen. Refactor to a single source of truth.
+- **Default-value policy follows role, not shape.** A type a parser fills from
+  outside input (inbound) carries *no* defaults, so a field the parser forgot
+  fails loudly instead of silently defaulting: a parsed type must prove every
+  field was supplied, and a defaulted one cannot. A type the caller constructs
+  (outbound) carries defaults for ergonomic construction. Even when two types
+  have identical fields, don't reuse one across the boundary; they hold opposite
+  invariants, so model them separately.
 
 Reference: [Parse, Don't Validate](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/) by Alexis King
