@@ -175,40 +175,6 @@ the fact. See the `python-profiling` skill for measurement tools.
   - [`hypothesis`](https://hypothesis.readthedocs.io/) for property-based testing
     (rarely needed, but irreplaceable when you do)
 
-### Ruff Configuration
-
-Use `line-length = 120`. For `[tool.ruff.lint]`, start with this `select` set:
-
-```toml
-[tool.ruff.lint]
-select = [
-  "I",    # isort: import ordering
-  "F",    # pyflakes: unused imports, undefined names
-  "E",    # pycodestyle errors
-  "W",    # pycodestyle warnings
-  "PIE",  # flake8-pie: miscellaneous cleanups
-  "PLC",  # pylint convention
-  "PLE",  # pylint error
-  "PLW",  # pylint warning
-  "PTH",  # flake8-use-pathlib: enforce pathlib over os.path (matches style guide)
-  "PGH",  # pygrep-hooks: blanket noqa, deprecated calls
-  "RUF",  # ruff-specific rules
-]
-```
-
-Common `ignore` entries with rationale:
-
-```toml
-ignore = [
-  "E501",  # line length: formatter owns this
-  "E741",  # ambiguous variable name: occasionally fine (e.g. l in math)
-  "T201",  # print: allowed in CLIs and scripts
-  "T203",  # pprint: same
-]
-```
-
-Only add an ignore if you have a concrete reason; don't suppress speculatively.
-
 ## Preferred Libraries
 
 - **[`pydantic`](https://docs.pydantic.dev/)** for serialization/deserialization and
