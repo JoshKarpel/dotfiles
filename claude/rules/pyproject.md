@@ -81,6 +81,7 @@ ignore = [
     "T201",  # print: allowed in CLIs and scripts
     "T203",  # pprint: same
     "N818",  # exception names are deliberately descriptive (e.g. ClientDisconnect), not Error-suffixed
+    "G004",  # logging-f-string: f-strings in log calls are allowed (readability over lazy %-formatting)
     # pydocstyle: enforce well-formed docstrings, but don't mandate their presence or dictate mood.
     "D1",    # undocumented-*: docstrings are written where they add value (and never on modules, per house style)
     "D203",  # incompatible with D211 (no blank line before a class docstring)
