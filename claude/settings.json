@@ -40,6 +40,7 @@
       "WebFetch(domain:pre-commit.com)",
       "WebFetch(domain:pyo3.rs)",
       "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:pytest-asyncio.readthedocs.io)",
       "WebFetch(domain:python.temporal.io)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:sqlite.org)",
