@@ -175,6 +175,11 @@ the fact. See the `python-profiling` skill for measurement tools.
   - [`hypothesis`](https://hypothesis.readthedocs.io/) for property-based testing
     (rarely needed, but irreplaceable when you do)
 
+  See the `optimize-pytest` skill when a suite is slow or flaky: profiling with
+  `--durations`/pytest-durations, fixture scope, removing sleeps, xdist
+  distribution, pytest-randomly to surface isolation bugs before CI, and cutting
+  collection/import/coverage startup cost.
+
 ## Preferred Libraries
 
 - **[`pydantic`](https://docs.pydantic.dev/)** for serialization/deserialization and
