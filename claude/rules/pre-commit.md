@@ -81,6 +81,35 @@ Prefer ruff lints over the Python-only `pre-commit-hooks` entries.
       args: [--fix]
 ```
 
+## Generated Code
+
+When part of a file is generated (e.g. an overload ladder produced by
+[cog](https://nedbatchelder.com/code/cog/)), regenerate it from its single
+source in a `repo: local`, `language: system` hook instead of hand-editing the
+output or letting it drift. Have that one hook run the generator *and then* the
+formatter, in a single script: a raw generator emits unformatted code, so if the
+formatter is a separate hook the two fight (the generated output never matches
+what the formatter would produce, and hook ordering and re-runs churn over it).
+Running generator-then-formatter in one script emits already-formatted code
+before pre-commit inspects it:
+
+```yaml
+- repo: local
+  hooks:
+    - id: regenerate-ladders
+      name: regenerate overload ladders (cog + ruff)
+      language: system
+      entry: tools/regenerate.sh
+      files: ^src/pkg/(handlers|extractors)\.py$
+```
+
+Don't add a separate `--check` mode: pre-commit already fails the run whenever a
+hook modifies a tracked file, so regenerating in place *is* the check. Scope the
+hook with `files:` to just the generated outputs so it doesn't fire on unrelated
+commits. This is the declarative "recovered, not restated" principle (see the
+declarative rule) applied to codegen: the generator owns the shape, the
+checked-in file is derived.
+
 ## Schema Validation
 
 When the repo has GitHub config under `.github/`, add the

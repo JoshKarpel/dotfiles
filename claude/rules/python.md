@@ -140,6 +140,16 @@ come from.
   fill to `limit`, await until one completes, yield it, refill. See [Limiting
   concurrency in Python asyncio](https://death.andgravity.com/limit-concurrency)
   for the full pattern and tradeoffs.
+- **Don't hold an invariant across an `await` on shared state.** An `await` is a
+  suspension point: while a coroutine is parked there, other tasks run and can
+  mutate any shared place it reaches, so a value read or checked *before* the
+  `await` may be stale or violated *after* it, even in single-threaded asyncio.
+  Configuring a shared `ssl.SSLContext`'s ALPN protocols and then reading the
+  negotiated protocol after `await open_connection(...)` is a race: a concurrent
+  caller can reconfigure the context mid-negotiation. Hand each operation its own
+  value instead (take a factory that produces a fresh object per use, or snapshot
+  what you need before the `await`) rather than sharing a mutable place across the
+  suspension. See the values-over-places rule.
 
 ## Performance
 
