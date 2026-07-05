@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Surface or locate the current branch's journal: the branch's working memory
+# (decisions, open questions, dead-ends), richer than a commit message.
+#
+# Dual-use: a SessionStart hook (prints the journal so a fresh session is re-primed)
+# and a CLI command you can run yourself.
+#   claude-branch-journal            show the current branch's journal (default)
+#   claude-branch-journal show       same
+#   claude-branch-journal path       print the journal file path for the current branch
+
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+
+branch=$(git symbolic-ref --short HEAD 2>/dev/null) || branch=""
+if [[ -z "$branch" ]]; then
+  branch=$(git rev-parse --short HEAD 2>/dev/null) || exit 0
+fi
+
+FILE="$ROOT/branch-journals/$branch.md"
+
+case "${1:-show}" in
+  path)
+    printf '%s\n' "$FILE"
+    ;;
+  show)
+    if [[ ! -s "$FILE" ]]; then
+      echo "No journal yet for branch '$branch' ($FILE)" >&2
+      exit 0
+    fi
+    cat <<EOF
+Branch journal for \`$branch\` — this branch's working memory (decisions, open
+questions, dead-ends), not committed. Update it with the checkpoint skill. File: $FILE
+
+$(cat "$FILE")
+EOF
+    ;;
+  *)
+    echo "usage: claude-branch-journal [show|path]" >&2
+    exit 2
+    ;;
+esac

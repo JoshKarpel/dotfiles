@@ -156,6 +156,10 @@
           {
             "type": "command",
             "command": "claude-gh-status"
+          },
+          {
+            "type": "command",
+            "command": "claude-branch-journal"
           }
         ]
       },

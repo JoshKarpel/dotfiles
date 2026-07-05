@@ -42,6 +42,7 @@ Active hooks configured in `~/.claude/settings.json`:
   - `claude-pre-commit-reminder` — If the repo uses pre-commit, points Claude at the `pre-commit-autofix` helper
   - `claude-git-status` — Shows git status at session start
   - `claude-gh-status` — If authenticated and in a GitHub-backed repo, injects the current repo name/URL and a reminder that `gh` commands default to it; also surfaces the current branch's open PR (number, title, stub `gh pr` commands, and a pointer to the `handle-pr-review` skill) when one exists, and the latest GitHub Actions CI run on the branch only when it failed (workflow, conclusion, stub `gh run` commands, and a pointer to the `debug-gha` skill)
+  - `claude-branch-journal` — Surfaces the current branch's journal (`branch-journals/<branch>.md`, git-ignored via the global excludes), the branch's working memory written by the `checkpoint` skill. Runnable at the CLI too: `claude-branch-journal` to show, `claude-branch-journal path` to locate the file
 - **PreToolUse (Bash)**:
   - `claude-uv-check` — Reminds Claude to use `uv run python` in uv projects
   - `claude-read-check` — Blocks `sed -n X,Yp`, `head -n N file`, and `tail -n N file` used just to read files; tells Claude to use the Read tool with `offset`/`limit` instead

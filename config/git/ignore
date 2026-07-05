@@ -60,3 +60,6 @@ tsconfig.tsbuildinfo
 *.pstats
 *.speedscope
 *.har
+
+# claude branch journals (per-branch working memory, never committed)
+branch-journals/
