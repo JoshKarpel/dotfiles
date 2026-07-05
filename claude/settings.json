@@ -150,6 +150,10 @@
           },
           {
             "type": "command",
+            "command": "claude-python-version"
+          },
+          {
+            "type": "command",
             "command": "claude-gh-status"
           }
         ]

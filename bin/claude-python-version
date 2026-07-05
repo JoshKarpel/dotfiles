@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# SessionStart hook: if this is a Python project, report the target Python
+# version (from .python-version / pyproject.toml) and point Claude at the
+# "What's New" docs for looking up changes between versions.
+
+set -euo pipefail
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || root="$PWD"
+
+pinned=""
+if [[ -f "$root/.python-version" ]]; then
+  pinned=$(grep -oE '[0-9]+\.[0-9]+' "$root/.python-version" | head -n1 || true)
+fi
+
+requires=""
+if [[ -f "$root/pyproject.toml" ]]; then
+  requires=$(grep -E '^[[:space:]]*requires-python[[:space:]]*=' "$root/pyproject.toml" \
+      | head -n1 \
+    | sed -E 's/.*requires-python[[:space:]]*=[[:space:]]*["'\'']([^"'\'']*)["'\''].*/\1/' || true)
+fi
+
+# Not a Python project (or no version info) — stay silent.
+[[ -z "$pinned" && -z "$requires" ]] && exit 0
+
+# Prefer the pinned version for the What's New link; otherwise use the floor
+# from requires-python.
+whatsnew="$pinned"
+if [[ -z "$whatsnew" && -n "$requires" ]]; then
+  whatsnew=$(grep -oE '[0-9]+\.[0-9]+' <<<"$requires" | head -n1 || true)
+fi
+
+{
+  printf 'This is a Python project.'
+  [[ -n "$pinned" ]] && printf ' Pinned interpreter (.python-version): Python %s.' "$pinned"
+  [[ -n "$requires" ]] && printf ' pyproject.toml requires-python = "%s".' "$requires"
+  printf '\n\n'
+  printf 'When you need to confirm what changed in a given Python version (new syntax, stdlib additions, deprecations, removals), consult the "What'\''s New" docs instead of relying on memory:\n'
+  [[ -n "$whatsnew" ]] && printf -- '- This version: https://docs.python.org/3/whatsnew/%s.html\n' "$whatsnew"
+  printf -- '- All versions: https://docs.python.org/3/whatsnew/\n'
+}
