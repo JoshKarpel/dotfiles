@@ -24,6 +24,20 @@ exclude-newer = "7 days"
 exclude-newer-package = { internal-pkg = false }
 ```
 
+## Classifiers
+
+Draw `[project]` `classifiers` values from the canonical
+[trove classifier list](https://pypi.org/classifiers/); PyPI rejects uploads
+with unrecognized classifiers. The uv build backend adds none automatically
+(unlike Poetry), so list every classifier explicitly.
+
+- Add a `Programming Language :: Python :: 3.X` line per supported minor
+  version so the supported range is discoverable on PyPI.
+- Prefer the SPDX `license` expression over a `License ::` classifier; the
+  classifiers are deprecated for licensing.
+- For a package that must never reach PyPI, add
+  `Private :: Do Not Upload` so an accidental upload is rejected.
+
 ## Ruff
 
 Use `line-length = 120`. Select broadly; each selected group links its
@@ -106,3 +120,4 @@ Only add an ignore if you have a concrete reason; don't suppress speculatively.
 ## References
 
 - [uv resolution: exclude-newer](https://docs.astral.sh/uv/concepts/resolution/#exclude-newer)
+- [PyPI trove classifiers](https://pypi.org/classifiers/)
