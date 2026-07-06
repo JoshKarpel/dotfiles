@@ -10,8 +10,10 @@ if ! is-uv-project; then
   exit 0
 fi
 
-# Check if python is invoked as a command (not just a substring of an argument or path)
-if echo "$COMMAND" | grep -qE '(^|[|;&(])[[:space:]]*python' && ! echo "$COMMAND" | grep -q 'uv'; then
+# Check if python is invoked as a command: preceded by start or a command separator, and
+# followed by whitespace, a version digit, or end. The trailing check keeps `python` inside a
+# quoted argument from matching, e.g. grep "requires-python\|python" (the `\|` looks like a pipe).
+if echo "$COMMAND" | grep -qE '(^|[|;&(])[[:space:]]*python([[:space:]]|[0-9]|$)' && ! echo "$COMMAND" | grep -q 'uv'; then
   echo "Use 'uv run python' instead of 'python' directly." >&2
   exit 2
 fi

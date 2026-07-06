@@ -62,15 +62,21 @@ one. `--sessions N` limits to the N most recent.
 
 Spawn a subagent (general-purpose) per session, or per small batch if there are
 many. This keeps the megabytes of transcript out of the main context; each
-subagent spends *its own* context reading one session deeply. Give each a
-self-contained task like:
+subagent spends *its own* context reading one session deeply.
+
+Run these readers on a cheaper, faster model (pass `model: haiku` or
+`model: sonnet` to the Agent tool): reading one transcript against a fixed rubric
+is well-scoped extraction, not the cross-session synthesis that earns a frontier
+model. A single reader can burn 60-100k tokens, so the model tier matters at
+fan-out width. Reserve the session's default model for the synthesis in step 3,
+where the reasoning actually lives. Give each reader a self-contained task like:
 
 > Analyze one Claude Code session for lessons worth encoding into Claude config
 > (rules, skills, hooks, CLAUDE.md, etc.).
 > Read it (user/assistant text and tool calls/errors, labeled and in order) with:
 >
 > ```bash
-> uv run ${CLAUDE_SKILL_DIR}/scripts/read_sessions.py --project <PROJECT> --session <ID> --tools
+> uv run ${CLAUDE_SKILL_DIR}/scripts/read_sessions.py --project=<PROJECT> --session <ID> --tools
 > ```
 >
 > Read the whole thing and report what a future Claude should learn from it. Look
@@ -141,9 +147,12 @@ Output labels each line by role: `user`, `assistant`, `tool`, or `error`.
   bodies, interrupt markers, and system reminders all arrive as `type: "user"`.
   The script filters these; a subagent reading raw jsonl instead would drown.
 - **Path encoding.** The transcript dir is the project path with every
-  non-alphanumeric char replaced by `-`. The script falls back to matching by
-  basename when the exact path isn't resolvable, and lists candidates if
-  ambiguous.
+  non-alphanumeric char replaced by `-`. Pass `--project` either a real path
+  (`/home/jtk/projects/without`) or the encoded dir name printed by `--list`
+  (`-home-jtk-projects-without`) verbatim; both resolve. Encoded names start with
+  a `-`, so pass them with `--project=<name>` (the `=` form), or argparse reads
+  the leading dash as a flag. The script also falls back to matching by basename
+  when the exact path isn't resolvable, and lists candidates if ambiguous.
 - **Dedup is by prefix** (first 200 chars, per role), so near-identical re-pastes
   collapse; two genuinely different messages sharing a long prefix would too.
 - **Recency is by file mtime**, not conversation time: a resumed old session sorts

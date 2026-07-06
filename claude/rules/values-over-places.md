@@ -21,4 +21,12 @@ fine. The concern is mutation that *escapes*: modifying a caller's data,
 writing to a shared reference, changing what a place holds in ways other
 holders can observe.
 
+Beware values that are secretly places. An object can present as immutable
+while carrying mutable state internally, or be mutated in place by the code you
+hand it to: a TLS context caches sessions and has its ALPN list rewritten by
+the client that borrows it; a "config" object gets fields set by a downstream
+consumer. "Read-only" is a claim to verify, not assume: before sharing or
+caching such an object as if it were a value, confirm empirically that nothing
+mutates it (see the verify-empirically rule).
+
 Reference: [The Value of Values](https://www.infoq.com/presentations/Value-Values/) by Rich Hickey

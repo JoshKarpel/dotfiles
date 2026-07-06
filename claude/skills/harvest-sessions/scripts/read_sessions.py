@@ -47,6 +47,16 @@ def encode_project(path: Path) -> str:
     return re.sub(r"[^A-Za-z0-9]", "-", str(path))
 
 
+def resolve_project_dir(project: Path, base: Path) -> Path:
+    # A bare, already-encoded transcript-dir name (e.g. "-home-jtk-projects-without") is
+    # accepted verbatim, so callers can pass the name printed by --list without decoding it
+    # back to a filesystem path. Anything else is treated as a real path.
+    if project.parent == Path(".") and project.name and (base / project).is_dir():
+        if any((base / project).glob("*.jsonl")):
+            return base / project
+    return find_project_dir(project.resolve(), base)
+
+
 def find_project_dir(project: Path, base: Path) -> Path:
     exact = base / encode_project(project)
     if exact.is_dir():
@@ -226,7 +236,7 @@ def main() -> int:
 
     base = args.projects_dir
     if args.project is not None:
-        dirs = [find_project_dir(args.project.resolve(), base)]
+        dirs = [resolve_project_dir(args.project, base)]
     else:
         dirs = sorted(
             d for d in base.iterdir() if d.is_dir() and any(d.glob("*.jsonl"))
