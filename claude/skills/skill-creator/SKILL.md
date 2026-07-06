@@ -26,6 +26,13 @@ Create well-structured Claude Code skills that are discoverable and effective.
 
 Use the template at [assets/SKILL.template.md](assets/SKILL.template.md) as a starting SKILL.md file.
 
+**Reference bundled files with `${CLAUDE_SKILL_DIR}`, never a hardcoded path.**
+Write `uv run ${CLAUDE_SKILL_DIR}/scripts/build.py`, not
+`~/.claude/skills/my-skill-name/scripts/build.py`. The placeholder is substituted
+with the skill's real directory wherever it's installed (personal, project, or
+plugin); a hardcoded `~/.claude/...` path is brittle and breaks for project- or
+plugin-scoped skills. This is easy to forget when writing paths from habit.
+
 SKILL.md files are markdown; the `markdown` rule applies automatically.
 
 Upstream documentation on skills is available [here](https://code.claude.com/docs/en/skills).
@@ -169,8 +176,8 @@ scripts must be invoked with `uv`. If you're not *extremely clear* that Claude s
 `uv`, Claude **will** try to run the scripts with `python3` and then be confused when it
 doesn't work.
 
-Reference bundled scripts with `${CLAUDE_SKILL_DIR}` so the path resolves correctly regardless
-of where the skill is installed (personal, project, or plugin). Example in SKILL.md:
+Always reference bundled scripts with `${CLAUDE_SKILL_DIR}` (see Skill Setup), so the path
+resolves correctly regardless of where the skill is installed. Example in SKILL.md:
 `uv run ${CLAUDE_SKILL_DIR}/scripts/analyze.py`
 
 Design the API of scripts with care. Always provide `--help`. Avoid exposing unneeded
