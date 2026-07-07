@@ -124,6 +124,12 @@ come from.
   `case _ as unreachable: assert_never(unreachable)` so the type checker
   flags any unhandled variant at the unreachable branch, turning a missed
   case into a static error rather than a silent fall-through.
+- **Unparenthesized multiple exception types are valid (Python 3.14+).**
+  Per [PEP 758](https://peps.python.org/pep-0758/), `except A, B:` and
+  `except* A, B:` are legal syntax, equivalent to `except (A, B):`. This is
+  *not* the removed Python 2 `except A, B:` (catch `A`, bind to `B`). Brackets
+  may be omitted only when there is no `as` clause; `except (A, B) as e:` still
+  requires them.
 
 ## Async
 
