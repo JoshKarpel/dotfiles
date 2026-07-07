@@ -112,8 +112,10 @@ Sigils are per-line prefixes that modify how a command runs:
 
 ## Bash Recipes
 
-When writing a multi-line recipe that uses a bash shebang (i.e., `#!/usr/bin/env bash`),
-follow the shell style guide for shell scripting conventions.
+The shell style guide's `paths` cover justfiles too, so it applies to every
+recipe. Its file-header guidance (shebang, `set -euo pipefail`) is specific to
+multi-line recipes with a bash shebang (i.e., `#!/usr/bin/env bash`); a
+default recipe line runs through `sh -cu` per line and has no header to add.
 
 ## References
 

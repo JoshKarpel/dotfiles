@@ -130,6 +130,9 @@ come from.
   *not* the removed Python 2 `except A, B:` (catch `A`, bind to `B`). Brackets
   may be omitted only when there is no `as` clause; `except (A, B) as e:` still
   requires them.
+- **Log exceptions with `repr(e)`, not `str(e)`.** Some exceptions have an
+  empty `str()` (the message lives in the type or args), which turns into a
+  blank log field; `repr(e)` always shows at least the exception type.
 
 ## Async
 

@@ -11,6 +11,11 @@ just arguments, so tests pass in whatever they need without patching.
 - **Prefer real objects via dependency injection over patching.** Pass a
   different argument in tests rather than monkeypatching globals or module
   internals.
+- **When patching is unavoidable, patch where the name is looked up, not
+  where it's defined.** A shim module that re-imports a third-party function
+  binds its own name to it at import time; patching the shim leaves call
+  sites that import directly from the third-party module untouched. Patch
+  the module that actually resolves the name at runtime.
 - **One behavior per test; arrange/act/assert; descriptive names.** A test
   name should state the behavior under test, not the function name. If a test
   covers multiple behaviors, it can only fail at one of them: split it.
