@@ -47,6 +47,16 @@ class Order(BaseModel):
     model_config = ConfigDict(frozen=True)
 ```
 
+## Time and Durations
+
+- **Represent time intervals as `timedelta`, not bare numbers.** Any value
+  that *is* a duration (config options, sleep durations, timeouts, TTLs,
+  retry backoffs) should be a `datetime.timedelta`, so the unit is explicit
+  and can't be misread as seconds-vs-milliseconds at the call site.
+  Reasonable exception: a value that never leaves the context it's produced
+  in and is obviously an interval, such as subtracting two `time.monotonic()`
+  calls in the same function to measure elapsed time.
+
 ## Strings
 
 - **f-strings** for all string formatting, including logging calls. No `.format()` or `%`.
