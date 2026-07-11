@@ -28,7 +28,7 @@ keeps working for you. `Any` silently disables checking wherever it spreads.
 | Use | When |
 |---|---|
 | `@dataclass(frozen=True, slots=True)` | Default: prefer immutable value objects |
-| `@dataclass(slots=True)` | Only when mutation is genuinely required |
+| `@dataclass(slots=True)` | Only when the instance's own fields must be reassigned |
 | `NamedTuple` | Only when tuple unpacking is genuinely required (should be rare) |
 | `TypedDict` | Smell: only when an existing API forces a bare dict shape |
 | Plain `dict` | Truly dynamic keys or quick one-off mappings |
@@ -37,6 +37,12 @@ Avoid plain classes. Strongly prefer dataclasses; if you would have put logic in
 `__init__`, use a `@classmethod` factory instead. Default to frozen+slotted.
 Prefer Pydantic over `TypedDict` for any validated or serialized data;
 reach for `TypedDict` only when you genuinely can't control the shape.
+
+`frozen=True` blocks only rebinding the instance's own fields; it says nothing
+about the field *values*. A frozen dataclass can still hold a list you append
+to or a mutable object you mutate, and that's fine. Interior mutability of a
+field is not a reason to drop `frozen`: keep the dataclass frozen and omit it
+only when you genuinely need to reassign the instance's own fields.
 
 Make Pydantic models frozen, mirroring the frozen-by-default dataclass rule:
 set it through the `model_config` classvar with `ConfigDict`, not the older

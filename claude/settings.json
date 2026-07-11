@@ -222,6 +222,7 @@
   },
   "feedbackSurveyRate": 0,
   "effortLevel": "high",
+  "askUserQuestionTimeout": "never",
   "voice": {
     "enabled": true,
     "mode": "hold",
@@ -229,6 +230,6 @@
   },
   "theme": "dark",
   "autoCompactEnabled": true,
-  "askUserQuestionTimeout": "never",
-  "skipAutoPermissionPrompt": true
+  "skipAutoPermissionPrompt": true,
+  "skipWorkflowUsageWarning": true
 }
