@@ -26,6 +26,8 @@ paths:
 
 ## Code Blocks
 
+- Always use fenced code blocks (` ``` `), never indented ones. Fences are
+  explicit, survive copy-paste, and carry a language tag.
 - Always specify a language on fenced code blocks
   (` ```python `, ` ```bash `, etc.). Use `text` if there's no applicable language.
 

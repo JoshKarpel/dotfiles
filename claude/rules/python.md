@@ -149,6 +149,12 @@ come from.
 - **Log exceptions with `repr(e)`, not `str(e)`.** Some exceptions have an
   empty `str()` (the message lives in the type or args), which turns into a
   blank log field; `repr(e)` always shows at least the exception type.
+- **Never `assert` outside of tests.** `python -O` (and `PYTHONOPTIMIZE`)
+  strips every `assert`, so an assertion guarding real runtime behavior
+  silently vanishes in optimized runs. Raise an explicit exception instead
+  (`TypeError` for a wrong type, `ValueError` for a bad value). `assert` is
+  fine in test bodies and for `assert_never` exhaustiveness checks the type
+  checker reads statically.
 
 ## Async
 
