@@ -198,6 +198,52 @@ the fact. See the `python-profiling` skill for measurement tools.
 - **Parse once.** If a deserialized result is needed in two places (e.g., a
   debug log and actual processing), parse once and pass the result to both.
 
+## Type-level tests
+
+When a guarantee lives in the type system (a generic bound, variance, an
+overload set, a "this call must not type-check"), assert it with the type
+checker, not just the runtime suite. This is how you regression-guard an
+invariant that has *no runtime failure to catch* because the whole point was to
+turn it into a static error.
+
+Put the cases in a normal test module (so they live with the tests and run
+through the same type-check pass) and drive two directions:
+
+- **Positive:** `typing.assert_type(expr, T)` pins that `expr` has exactly type
+  `T`. Use it for the invariants that are easy to break silently: what a generic
+  solves to, what an overload returns, the element type of a container.
+- **Negative:** write the code that *should* fail and mark it with a specific
+  `# type: ignore[code]`. With mypy's `warn_unused_ignores = true` (part of
+  `strict`), the ignore doubles as an assertion: if the line ever stops erroring,
+  the now-unused ignore fails the build. That is the regression guard a deleted
+  runtime check no longer provides.
+
+Two things make this robust:
+
+- **Match the exact error code, not a bare `# type: ignore`.** A bare ignore is
+  satisfied by *any* error on the line, so an unrelated breakage still looks
+  green. Run the checker once to see the real code (it is not always the obvious
+  one: a bad argument to an *overloaded* call often reports `call-overload`,
+  while the same argument to a single signature reports `arg-type`), then pin
+  that code. Keep the rest of the line otherwise valid so it is the only error.
+- **Guard the whole block behind `if TYPE_CHECKING:`.** mypy still checks the
+  branch; the runtime never executes it, so there are no placeholder objects to
+  construct or drive. `assert_type` is erased at runtime anyway, but the negative
+  lines would otherwise run.
+
+```python
+from typing import TYPE_CHECKING, assert_type
+
+if TYPE_CHECKING:
+    assert_type(path_param("id", INT), "Extractor[RequestHead, int]")
+    handle_stream(body(parse, schema=S), fn=fn)  # type: ignore[arg-type]
+```
+
+For asserting a checker's *exact* diagnostic output (message text, not just
+"errors here"), a purpose-built harness like `pytest-mypy-plugins` exists, but it
+is a heavy dependency; reach for it only when the `assert_type` + typed-ignore
+pair genuinely can't express the invariant.
+
 ## Toolchain
 
 - **[`uv`](https://docs.astral.sh/uv/)** for project management and running scripts
