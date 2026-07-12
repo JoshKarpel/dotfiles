@@ -230,12 +230,17 @@ Two things make this robust:
   branch; the runtime never executes it, so there are no placeholder objects to
   construct or drive. `assert_type` is erased at runtime anyway, but the negative
   lines would otherwise run.
+- **Write the `assert_type` target as a bare type, not a string.** A
+  string-quoted target (`assert_type(x, "Extractor[RequestHead, int]")`) hides
+  the type names inside a string literal, so ruff's unused-import pass doesn't
+  see them as used and silently strips their imports on autofix, breaking the
+  test only after the next lint run. A bare expression keeps the names live.
 
 ```python
 from typing import TYPE_CHECKING, assert_type
 
 if TYPE_CHECKING:
-    assert_type(path_param("id", INT), "Extractor[RequestHead, int]")
+    assert_type(path_param("id", INT), Extractor[RequestHead, int])
     handle_stream(body(parse, schema=S), fn=fn)  # type: ignore[arg-type]
 ```
 
