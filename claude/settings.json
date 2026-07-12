@@ -17,6 +17,7 @@
       "WebFetch(domain:asgi.readthedocs.io)",
       "WebFetch(domain:code.claude.com)",
       "WebFetch(domain:datatracker.ietf.org)",
+      "WebFetch(domain:developers.cloudflare.com)",
       "WebFetch(domain:docs.anthropic.com)",
       "WebFetch(domain:docs.astral.sh)",
       "WebFetch(domain:docs.crossplane.io)",
