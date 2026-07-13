@@ -191,6 +191,10 @@
           {
             "type": "command",
             "command": "claude-git-dash-c-check"
+          },
+          {
+            "type": "command",
+            "command": "claude-http-server-bind-check"
           }
         ]
       }

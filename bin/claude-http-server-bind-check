@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# PreToolUse hook: block `python -m http.server` without an explicit --bind.
+# http.server defaults to binding all interfaces (0.0.0.0), exposing the server
+# to the local network; a local static site almost always wants 127.0.0.1.
+
+set -euo pipefail
+
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
+
+# Only fire on the http.server module invocation (python, python3, uv run python, etc.)
+if ! echo "$COMMAND" | grep -qE '\-m[[:space:]]+http\.server'; then
+  exit 0
+fi
+
+# Already binding explicitly (either --bind or the -b short form)? Nothing to do.
+if echo "$COMMAND" | grep -qE '(\-\-bind|(^|[[:space:]])-b([[:space:]]|=|[0-9]))'; then
+  exit 0
+fi
+
+echo "http.server binds all interfaces (0.0.0.0) by default, exposing it on the network. Pass '--bind 127.0.0.1' for a localhost-only server (or an explicit address if you truly need external access)." >&2
+exit 2

@@ -48,6 +48,7 @@ Active hooks configured in `~/.claude/settings.json`:
   - `claude-read-check` — Blocks `sed -n X,Yp`, `head -n N file`, and `tail -n N file` used just to read files; tells Claude to use the Read tool with `offset`/`limit` instead
   - `claude-shell-comment-check` — Blocks shell commands where `#` appears as a comment (preceded by whitespace or at the start of the command); the permission harness truncates at `#`, causing pattern matching to fail; tells Claude to write a temp script file instead
   - `claude-git-dash-c-check` — Blocks `git -C <dir>` when the path resolves to the current repository (redundant; just run without `-C`); allows it when targeting a different repo
+  - `claude-http-server-bind-check` — Blocks `python -m http.server` without an explicit `--bind`/`-b`; the module defaults to binding all interfaces (0.0.0.0), so a local static site should pass `--bind 127.0.0.1`
 - **Stop**: `claude-stop` runs the checks below in sequence (not parallel, since hooks in
   a group otherwise run in parallel and order isn't guaranteed) and only plays the stop
   sound if none of them blocked, so the sound means Claude is actually stopping rather
