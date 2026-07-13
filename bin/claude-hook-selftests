@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Run the embedded self-tests of every hook that declares them. A participating hook
+# carries a `# CLAUDE_HOOK_SELFTEST` marker line; this discovers the set from those
+# declarations so there is no separate list to drift. Runnable directly and wired
+# into pre-commit. Exits non-zero if any hook's self-tests fail.
+
+set -uo pipefail
+
+bin_dir="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+
+fails=0
+found=0
+for hook in "$bin_dir"/*; do
+  [[ -f "$hook" && -x "$hook" ]] || continue
+  grep -qE '^# CLAUDE_HOOK_SELFTEST' "$hook" || continue
+  found=$((found + 1))
+  CLAUDE_HOOK_SELFTEST=1 "$hook" || fails=$((fails + 1))
+done
+
+if [[ "$found" -eq 0 ]]; then
+  echo "claude-hook-selftests: no hooks declare self-tests" >&2
+  exit 1
+fi
+if [[ "$fails" -gt 0 ]]; then
+  echo "claude-hook-selftests: $fails of $found hook(s) failed self-tests" >&2
+  exit 1
+fi
+echo "claude-hook-selftests: $found hook(s) passed"

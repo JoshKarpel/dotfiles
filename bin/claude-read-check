@@ -4,6 +4,34 @@
 
 set -euo pipefail
 
+# CLAUDE_HOOK_SELFTEST: set this env var to run the hook's embedded self-tests. This
+# marker line is how `claude-hook-selftests` discovers participating hooks. The tests
+# drive the hook through its own stdin interface (exit 2 = block, 0 = allow).
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  fails=0
+  t() {
+    local want="$1" cmd="$2" got
+    jq -cn --arg c "$cmd" '{tool_input: {command: $c}}' \
+      | CLAUDE_HOOK_SELFTEST= "$0" >/dev/null 2>&1 && got=0 || got=$?
+    [[ "$got" == "$want" ]] ||
+    { printf 'FAIL want=%s got=%s :: %s\n' "$want" "$got" "$cmd"; fails=1; }
+  }
+  t 2 "sed -n '1,5p' file.txt"
+  t 2 'sed -n 1,5p file.txt'
+  t 2 'head -n 20 file.txt'
+  t 2 'tail -n 5 app.log'
+  t 0 "sed -n '5p' file"
+  t 0 'sed -i s/a/b/ file'
+  t 0 'head -c 100 file'
+  t 0 'cat file | head -n 5'
+  t 0 'tail -f log'
+  t 0 'ls -la'
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 

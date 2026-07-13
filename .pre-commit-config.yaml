@@ -28,3 +28,12 @@ repos:
     rev: v1.5.6
     hooks:
       - id: remove-crlf
+
+  - repo: local
+    hooks:
+      - id: claude-hook-selftests
+        name: claude hook self-tests
+        entry: bin/claude-hook-selftests
+        language: script
+        pass_filenames: false
+        files: ^bin/

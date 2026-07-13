@@ -193,6 +193,70 @@ echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision
 exit 0
 ```
 
+## Self-Testing Hooks
+
+A hook with non-trivial matching (regex, path logic, command parsing) carries its
+own tests, gated on the `CLAUDE_HOOK_SELFTEST` environment variable so nothing
+pollutes its real arguments. Run them with `CLAUDE_HOOK_SELFTEST=1 <hook-name>`;
+the hook prints results and exits 0 (pass) or 1 (fail). A safety hook (one that
+blocks destructive actions) without a test is theater.
+
+Keep the harness **embedded in the hook**, not factored into a shared script: a
+hook should stay self-contained and copy-pasteable, and a small duplicated harness
+is a better trade than a hidden dependency.
+
+Declare participation with a `# CLAUDE_HOOK_SELFTEST` marker comment line. A runner
+(`claude-hook-selftests` in this repo) discovers every hook carrying that marker,
+runs each with the env var set, and fails if any do; wiring it into pre-commit
+(`files: ^bin/`, `pass_filenames: false`) turns a hook regression into a failed
+commit. The marker is a deliberate declaration, so discovery recovers the set from
+the hooks themselves rather than from a hand-maintained list that drifts.
+
+**Bash hooks** embed this block right after `set -euo pipefail`, *before* reading
+stdin (so it never blocks waiting for input). The `t` helper re-invokes the hook
+through its real stdin interface (with the env var unset, so it processes
+normally) and asserts the exit code:
+
+```bash
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  fails=0
+  t() {
+    local want="$1" cmd="$2" got
+    jq -cn --arg c "$cmd" '{tool_input: {command: $c}}' \
+      | CLAUDE_HOOK_SELFTEST= "$0" >/dev/null 2>&1 && got=0 || got=$?
+    [[ "$got" == "$want" ]] ||
+      { printf 'FAIL want=%s got=%s :: %s\n' "$want" "$got" "$cmd"; fails=1; }
+  }
+  t 2 'command that should block'
+  t 0 'command that should pass'
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+```
+
+**Python hooks** check the env var at the top of `main()` and run an embedded case
+matrix against a **pure** `(command, cwd, …) -> result` function, so the tests need
+no git or filesystem and stay deterministic:
+
+```python
+def main() -> int:
+    if os.environ.get("CLAUDE_HOOK_SELFTEST"):
+        return _selftest()
+    ...
+```
+
+Be adversarial when writing cases: try to defeat your future self. Cover flag and
+spelling variants, wrapper/indirection forms, quoted-but-not-executed mentions,
+and boundary conditions (e.g. a path exactly at a scope edge), not just the happy
+path. Use distinct, non-default test values.
+
+Hooks whose result depends on external state that a black-box self-test can't set
+up deterministically (a hook that only fires inside a uv project, or against one
+specific git repo) are **not** worth self-testing this way without a fixture; note
+the omission rather than writing a test that passes only in one environment.
+
 ## settings.json Structure
 
 ```json

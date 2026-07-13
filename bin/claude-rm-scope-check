@@ -1,0 +1,386 @@
+#!/usr/bin/env python3
+"""PreToolUse hook: block an ``rm`` whose target escapes the work area.
+
+The rule is about *where*, not *how*. Deleting inside the current git repo (or
+the session scratchpad) is fine, recursive or not; deleting outside it is not.
+This inspects each ``rm`` invocation's target paths and blocks the call when any
+target resolves outside the allowed roots:
+
+  allowed = the git repo containing the cwd (or the cwd itself if not a repo),
+            and the session temp tree (``/tmp/claude-*``)
+  blocked = absolute paths elsewhere (``/etc``, ``/usr``), ``~`` / ``$HOME``,
+            any ``$VAR`` target (unprovable), ``..`` that escapes the repo, and
+            bare ``/``
+
+It sees ``rm`` reached directly, through a wrapper (``sudo``/``env``/``xargs``/…),
+by path (``/bin/rm``), or spelled inside an interpreter's inline code such as
+``sh -c '…'`` / ``python -c "os.system('…')"`` (best effort).
+
+It is defense-in-depth, not a boundary: it deliberately cannot resolve symlinks
+ahead of time, see into a script *file* (``python evil.py``), or follow a ``cd``
+inside ``sh -c``. It fails open (exit 0) on any error so a bug never bricks Bash;
+a handful of catastrophic-literal deny rules in settings.json backstop it.
+"""
+
+from __future__ import annotations
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests (`_selftest`).
+# This marker line is how `claude-hook-selftests` discovers participating hooks.
+
+import json
+import os
+import os.path
+import re
+import shlex
+import subprocess
+import sys
+
+# Commands that run another command given as their trailing arguments.
+WRAPPERS = {
+    "env", "command", "exec", "nohup", "nice", "ionice", "stdbuf", "setsid",
+    "sudo", "doas", "xargs", "busybox", "time", "timeout",
+}
+# Interpreters whose inline code (-c / -e) can carry an rm past shell tokenizing.
+INTERPRETERS = {
+    "sh", "bash", "zsh", "dash", "ksh", "python", "python2", "python3",
+    "perl", "ruby", "node", "nodejs",
+}
+TEMP_PREFIXES = ("/tmp/claude-",)
+
+_VAR_ASSIGN = re.compile(r"^\w+=")
+_WORD_RM = re.compile(r"\brm\b")
+
+
+def _tokenize(command: str) -> list[str]:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    return list(lexer)
+
+
+def _split_segments(tokens: list[str]) -> list[list[str]]:
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token and all(char in ";&|()" for char in token):
+            if current:
+                segments.append(current)
+                current = []
+            continue
+        current.append(token)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def _resolve_command(segment: list[str]) -> tuple[str | None, list[str]]:
+    index = 0
+    while index < len(segment):
+        token = segment[index]
+        if _VAR_ASSIGN.match(token):
+            index += 1
+            continue
+        if os.path.basename(token) in WRAPPERS:
+            index += 1
+            while index < len(segment) and segment[index].startswith("-"):
+                index += 1
+            continue
+        return token, segment[index + 1:]
+    return None, []
+
+
+def _rm_targets(args: list[str]) -> list[str]:
+    targets: list[str] = []
+    past_double_dash = False
+    for arg in args:
+        if past_double_dash:
+            targets.append(arg)
+        elif arg == "--":
+            past_double_dash = True
+        elif arg.startswith("-") and len(arg) > 1:
+            continue
+        else:
+            targets.append(arg)
+    return targets
+
+
+def _repo_root(cwd: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=3,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return cwd
+
+
+def _is_under(path: str, root: str) -> bool:
+    root = root.rstrip("/")
+    return path == root or path.startswith(root + "/")
+
+
+def _has_dotdot(path: str) -> bool:
+    return ".." in path.replace("\\", "/").split("/")
+
+
+def _target_escapes(target: str, cwd: str | None, repo_root: str) -> bool:
+    if not target:
+        return False
+    if target.startswith("~") or "$" in target or _has_dotdot(target):
+        return True
+    if os.path.isabs(target):
+        resolved = os.path.normpath(target)
+    elif cwd is None:
+        return True
+    else:
+        resolved = os.path.normpath(os.path.join(cwd, target))
+    if _is_under(resolved, repo_root):
+        return False
+    if any(resolved.startswith(prefix) for prefix in TEMP_PREFIXES):
+        return False
+    return True
+
+
+def _apply_cd(cwd: str | None, args: list[str]) -> str | None:
+    """Effective cwd after a ``cd`` in a preceding segment. ``None`` means the
+    destination can't be resolved (``cd -``, ``cd $VAR``), so later relative
+    targets can't be proven in-scope."""
+    dest = None
+    for arg in args:
+        if arg in ("-L", "-P", "-e", "-@"):
+            continue
+        dest = arg
+        break
+    if dest is None:
+        return os.path.expanduser("~")
+    if dest == "-" or "$" in dest or _has_dotdot(dest):
+        return None
+    dest = os.path.expanduser(dest)
+    if os.path.isabs(dest):
+        return os.path.normpath(dest)
+    if cwd is None:
+        return None
+    return os.path.normpath(os.path.join(cwd, dest))
+
+
+def _has_inline_code_flag(args: list[str]) -> bool:
+    for arg in args:
+        if arg in ("-c", "-e"):
+            return True
+        if arg.startswith("-") and not arg.startswith("--") and ("c" in arg or "e" in arg):
+            return True
+    return False
+
+
+def _embedded_escape(text: str, cwd: str, repo_root: str) -> str | None:
+    for match in _WORD_RM.finditer(text):
+        rest = re.split(r"[;)&|\n]", text[match.end():])[0]
+        rest = rest.replace("'", " ").replace('"', " ")
+        for token in rest.split():
+            if token.startswith("-"):
+                continue
+            if _target_escapes(token, cwd, repo_root):
+                return token
+    return None
+
+
+def escaping_target(command: str, cwd: str) -> str | None:
+    return _escaping_target(command, cwd, _repo_root(cwd))
+
+
+def _statements(command: str) -> list[str]:
+    """Split on unquoted newlines, quote/escape aware, so the args of a command on a
+    following line aren't swallowed as rm targets (tokenizing treats a bare newline as
+    whitespace). The other separators (`;`, `&&`, `|`, ...) are handled downstream."""
+    statements: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for char in command:
+        if escaped:
+            buf.append(char)
+            escaped = False
+        elif char == "\\" and quote != "'":
+            buf.append(char)
+            escaped = True
+        elif quote:
+            buf.append(char)
+            if char == quote:
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+            buf.append(char)
+        elif char == "\n":
+            statements.append("".join(buf))
+            buf = []
+        else:
+            buf.append(char)
+    statements.append("".join(buf))
+    return statements
+
+
+def _escaping_target(command: str, cwd: str, repo_root: str) -> str | None:
+    effective_cwd: str | None = cwd
+    for statement in _statements(command):
+        try:
+            segments = _split_segments(_tokenize(statement))
+        except ValueError:
+            continue
+        for segment in segments:
+            name, args = _resolve_command(segment)
+            if name is None:
+                continue
+            base = os.path.basename(name)
+            if base == "cd":
+                effective_cwd = _apply_cd(effective_cwd, args)
+            elif base == "rm":
+                for target in _rm_targets(args):
+                    if _target_escapes(target, effective_cwd, repo_root):
+                        return target
+            elif base in INTERPRETERS and _has_inline_code_flag(args):
+                for arg in args:
+                    escape = _embedded_escape(arg, effective_cwd, repo_root)
+                    if escape is not None:
+                        return escape
+    return None
+
+
+def _message(target: str) -> str:
+    if _has_dotdot(target):
+        return (
+            f"Blocked: this `rm` path `{target}` contains `..`. Resolve it to its real "
+            "location first (no `..` segments) so the destination is unambiguous, then "
+            "retry. Deleting inside the current git repo or the session scratchpad "
+            "`/tmp/claude-*` is fine.\n"
+        )
+    return (
+        f"Blocked: this `rm` targets `{target}`, which is outside the work area "
+        "(the current git repo and the session scratchpad `/tmp/claude-*`). "
+        "Deleting inside the repo or scratchpad is fine; deleting outside it is "
+        "gated to avoid clobbering unrelated files. If the target really is meant "
+        "to be inside the repo, use an explicit in-repo path (not `~`, `$HOME`, or "
+        "an unexpanded `$VAR`). If you truly need to delete outside the repo, do it "
+        "yourself.\n"
+    )
+
+
+# (command, cwd, repo_root, should_block). A safety hook without a test is
+# theater; run these with `CLAUDE_HOOK_SELFTEST=1 claude-rm-scope-check`.
+_SELFTEST_CASES = [
+    # --- BLOCK: absolute path outside the repo / scratchpad ---
+    ("rm -rf /etc/passwd", "/repo", "/repo", True),
+    ("rm /etc/hosts", "/repo", "/repo", True),
+    ("rm -rf /home/jtk/other", "/repo", "/repo", True),
+    ("rm -rf /", "/repo", "/repo", True),
+    ("rm -rf //etc", "/repo", "/repo", True),
+    ("rm -rf /etc/", "/repo", "/repo", True),
+    # --- BLOCK: home / unexpandable variable ---
+    ("rm -rf ~", "/repo", "/repo", True),
+    ("rm -rf ~/Documents", "/repo", "/repo", True),
+    ("rm -rf $HOME/x", "/repo", "/repo", True),
+    ('rm -rf "$BUILD_DIR"', "/repo", "/repo", True),
+    ("rm -rf $PWD/x", "/repo", "/repo", True),
+    # --- BLOCK: any path with a `..` segment (resolve first) ---
+    ("rm -rf ..", "/repo", "/repo", True),
+    ("rm -rf ../sibling", "/repo", "/repo", True),
+    ("rm -rf a/b/../../c", "/repo", "/repo", True),
+    ("rm -rf ./x/../../escape", "/repo", "/repo", True),
+    ("rm -rf /repo/../secret", "/repo", "/repo", True),
+    ("rm -rf /tmp/claude-1000/foo/../../etc", "/repo", "/repo", True),
+    ("rm -rf sub/deep/../shallow", "/repo", "/repo", True),
+    ("rm -rf -- ../escape", "/repo", "/repo", True),
+    # --- BLOCK: cd moves out of the repo before the rm ---
+    ("cd /var && rm -rf log", "/repo", "/repo", True),
+    ("cd /etc; rm -rf x", "/repo", "/repo", True),
+    ("cd - && rm -rf build", "/repo", "/repo", True),
+    ("cd && rm -rf x", "/repo", "/repo", True),
+    ("cd $HOME && rm -rf x", "/repo", "/repo", True),
+    ("cd ../.. && rm -rf etc", "/repo", "/repo", True),
+    ("(cd /etc && rm -rf x)", "/repo", "/repo", True),
+    # --- BLOCK: rm reached by wrapper / path / escaped name ---
+    ("sudo rm -rf /etc/x", "/repo", "/repo", True),
+    ("command rm -rf /etc", "/repo", "/repo", True),
+    ("/bin/rm -rf /usr/local/x", "/repo", "/repo", True),
+    ("\\rm -rf /etc", "/repo", "/repo", True),
+    ("rm --force --recursive /etc", "/repo", "/repo", True),
+    ("rm -r /etc", "/repo", "/repo", True),
+    ("rm -rf -- /etc", "/repo", "/repo", True),
+    # --- BLOCK: rm inside an interpreter's inline code ---
+    ("sh -c 'rm -rf /etc/x'", "/repo", "/repo", True),
+    ("python3 -c \"import os; os.system('rm -rf /etc/x')\"", "/repo", "/repo", True),
+    ("perl -e 'system(\"rm -rf /etc\")'", "/repo", "/repo", True),
+    # --- ALLOW: target stays inside the repo ---
+    ("rm -rf build", "/repo", "/repo", False),
+    ("rm -rf ./node_modules", "/repo", "/repo", False),
+    ("rm foo.txt", "/repo", "/repo", False),
+    ("rm -rf /repo/dist", "/repo", "/repo", False),
+    ("rm -rf /repo", "/repo", "/repo", False),
+    ("rm -rf .", "/repo", "/repo", False),
+    ("rm -rf -- build", "/repo", "/repo", False),
+    ("cd sub && rm -rf tmp", "/repo", "/repo", False),
+    ("cd /repo/worker && rm -rf .wrangler", "/repo", "/repo", False),
+    ("sh -c 'rm -rf build'", "/repo", "/repo", False),
+    # --- ALLOW: target is in the session scratchpad ---
+    ("rm -rf /tmp/claude-1000/sess/scratchpad/chrome-profile", "/repo", "/repo", False),
+    ("rm -rf /tmp/claude-1000/*/scratchpad/x", "/repo", "/repo", False),
+    ("cd /tmp/claude-1000/sess/scratchpad && rm -rf profile", "/repo", "/repo", False),
+    # --- cwd is a subdirectory of the repo (repo_root is an ancestor) ---
+    ("rm -rf dist", "/repo/packages/web", "/repo", False),
+    ("rm -rf /repo/tooling/out", "/repo/packages/web", "/repo", False),
+    ("rm foo.txt", "/repo/packages/web", "/repo", False),
+    ("cd /repo && rm -rf build", "/repo/packages/web", "/repo", False),
+    ("rm -rf /etc/x", "/repo/packages/web", "/repo", True),
+    ("rm -rf ~", "/repo/packages/web", "/repo", True),
+    ("rm -rf ../web-old", "/repo/packages/web", "/repo", True),
+    ("cd ../.. && rm -rf x", "/repo/packages/web", "/repo", True),
+    # --- ALLOW: not a delete, or rm only mentioned ---
+    ("ls -la", "/repo", "/repo", False),
+    ('grep "rm -rf /etc" logfile', "/repo", "/repo", False),
+    ('git commit -m "stop rm -rf /tmp usage"', "/repo", "/repo", False),
+    # --- multiline: a following line's args must not become rm targets ---
+    ("rm -rf build\nmkdir -p $OUT/dir", "/repo", "/repo", False),
+    ("cp a b\nrm -rf /etc/x", "/repo", "/repo", True),
+    ("cd /var\nrm -rf log", "/repo", "/repo", True),
+    # KNOWN BLIND SPOTS (allowed; documented in the module docstring): targets fed
+    # from a pipe, a `cd` inside `sh -c`, a script file, or non-`rm` deleters.
+    ("find . -name '*.pyc' | xargs rm -f", "/repo", "/repo", False),
+]
+
+
+def _selftest() -> int:
+    failures = 0
+    for command, cwd, repo_root, should_block in _SELFTEST_CASES:
+        blocked = _escaping_target(command, cwd, repo_root) is not None
+        if blocked != should_block:
+            failures += 1
+            print(f"FAIL want_block={should_block} got_block={blocked} :: {command}")
+    if not failures:
+        print(f"claude-rm-scope-check: all {len(_SELFTEST_CASES)} self-tests passed")
+    return 1 if failures else 0
+
+
+def main() -> int:
+    if os.environ.get("CLAUDE_HOOK_SELFTEST"):
+        return _selftest()
+    try:
+        data = json.load(sys.stdin)
+    except Exception:
+        return 0
+    command = (data.get("tool_input") or {}).get("command") or ""
+    if not command:
+        return 0
+    cwd = data.get("cwd") or os.getcwd()
+    try:
+        target = escaping_target(command, cwd)
+    except Exception:
+        return 0
+    if target is None:
+        return 0
+    sys.stderr.write(_message(target))
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
