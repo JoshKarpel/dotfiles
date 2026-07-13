@@ -106,5 +106,5 @@ Rules live in `claude/rules/` and load automatically when Claude works with matc
 
 - Shell scripts use 2-space indentation (enforced by beautysh via pre-commit)
 - Target files in `targets/` are auto-sorted by the `file-contents-sorter` pre-commit hook
-- Pre-commit hooks run via [pre-commit.ci](https://pre-commit.ci) on push; hooks include trailing whitespace, end-of-file fixer, YAML/TOML checks, and beautysh formatting
+- Pre-commit hooks run via [pre-commit.ci](https://pre-commit.ci) on push; hooks include trailing whitespace, end-of-file fixer, YAML/TOML checks, and beautysh formatting. pre-commit.ci skips `claude-hook-selftests` (it needs a real dev environment), so the `.github/workflows/pre-commit.yml` workflow runs the full suite (self-tests included) on push and PRs. Dependabot keeps the workflow's actions updated.
 - The `exists` helper function (from `sources/exists.sh`) is used throughout to check command availability before use

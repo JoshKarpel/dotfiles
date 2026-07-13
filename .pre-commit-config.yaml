@@ -19,6 +19,13 @@ repos:
       - id: mixed-line-ending
       - id: file-contents-sorter
         files: "^targets/.*$"
+
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.37.4
+    hooks:
+      - id: check-dependabot
+      - id: check-github-workflows
+
   - repo: https://github.com/lovesegfault/beautysh
     rev: v6.4.3
     hooks:
@@ -37,3 +44,9 @@ repos:
         language: script
         pass_filenames: false
         files: ^bin/
+
+ci:
+  # The self-tests shell out to hooks that expect a real dev environment
+  # (jq, python3, git state); skip them on pre-commit.ci and rely on the
+  # local pre-commit run instead.
+  skip: [claude-hook-selftests]

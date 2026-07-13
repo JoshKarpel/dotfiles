@@ -90,6 +90,13 @@ Put a blank line between steps in a job, and between steps in a composite
 action, to separate them visually. It's purely cosmetic, but it makes a long
 `steps:` list much easier to scan and edit.
 
+## Timeouts
+
+Set `timeout-minutes` on every job, matrix or not. Runners default to a
+360-minute cap, so a hung step (a wedged process, a stalled network call)
+burns six hours before GitHub kills it. `timeout-minutes: 15` is a sane
+default for a quick check job; raise it only for genuinely long builds.
+
 ## Quality-Check Job
 
 Structural conventions for matrix CI jobs:
@@ -97,7 +104,6 @@ Structural conventions for matrix CI jobs:
 - Matrix key is `platform`, not `os`
 - `fail-fast: false`, so a single failure doesn't stop other matrix legs
 - `defaults.run.shell: bash` for cross-platform consistency
-- `timeout-minutes: 15` on the job
 
 ## Python / uv Workflow Examples
 
