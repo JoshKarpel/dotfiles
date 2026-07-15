@@ -60,6 +60,69 @@ pushed to the same ref, so each commit gets a real pass/fail status. Only add
 `cancel-in-progress` when there's a specific reason (e.g. expensive jobs where
 only the latest result matters).
 
+## Permissions
+
+Set `permissions: {}` at the workflow root, then grant each job only what it
+needs. The default `GITHUB_TOKEN` is broad, so any compromised action in any
+step inherits write access to the repo. An empty root block drops that to
+nothing and makes every grant deliberate and visible.
+
+```yaml
+permissions: {}
+
+jobs:
+  test-code:
+    permissions:
+      contents: read
+```
+
+A `permissions:` block replaces the defaults wholesale rather than merging with
+them, so a job that checks out code has to name `contents: read` itself.
+
+## Checkout Credentials
+
+Pass `persist-credentials: false` to `actions/checkout`. It defaults to `true`,
+which writes the job's token into `.git/config`, where it outlives the step and
+stays readable by everything the job runs afterward.
+
+```yaml
+- name: Check out repository
+  uses: actions/checkout@<version>
+  with:
+    persist-credentials: false
+```
+
+Leave the default only when a later step pushes back to the repo and needs the
+credential (e.g. `mkdocs gh-deploy`).
+
+## Auditing with zizmor
+
+Run [zizmor](https://docs.zizmor.sh) over workflows. It catches the insecure
+defaults above (broad permissions, persisted credentials) along with template
+injection and similar issues:
+
+```bash
+uvx zizmor .github/
+```
+
+Wire it into pre-commit (see the pre-commit style guide). In CI, the
+`zizmorcore/zizmor-action` reports findings to the repo's Security tab.
+
+zizmor's `unpinned-uses` audit defaults to demanding SHA pins, so it flags
+patch-version tags. Keep the tags (see below) and relax the policy in
+`zizmor.yml`:
+
+```yaml
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": ref-pin
+```
+
+`ref-pin` accepts any explicit tag or SHA while still flagging a floating
+`@main`.
+
 ## Action Version Pinning
 
 Pin to full patch versions, not floating major tags. `@v4` drifts; `@v4.2.2`
@@ -125,6 +188,8 @@ jobs:
         shell: bash
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 15
+    permissions:
+      contents: read
     env:
       PLATFORM: ${{ matrix.platform }}
       PYTHON_VERSION: ${{ matrix.python-version }}
@@ -134,6 +199,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@<version>
+        with:
+          persist-credentials: false
 
       - name: Install Just
         uses: extractions/setup-just@<version>
@@ -160,7 +227,8 @@ jobs:
         run: uv run mkdocs build --clean --strict --verbose
 ```
 
-- `setup-uv` handles both uv and Python installation; always set `enable-cache: true`
+- `setup-uv` handles both uv and Python installation; set `enable-cache: true`
+  in CI jobs (but not in publish jobs: see the PyPI section below)
 - `uv build` (no `-vvv`) for the build smoke test
 - Omit steps that don't apply (e.g. skip "Test docs" if there's no MkDocs site,
   skip "Install Just" if the project doesn't use Just)
@@ -183,11 +251,13 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@<version>
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@<version>
         with:
-          enable-cache: true
+          enable-cache: false  # don't restore a cache into a publish job
 
       - name: Build the package
         run: uv build -vvv
@@ -199,6 +269,26 @@ jobs:
 `id-token: write` grants the OIDC exchange. The `contents: read` comment is
 intentional: it restores the default that's otherwise dropped when you set any
 explicit `permissions`.
+
+Turn the cache off here, unlike in CI. A publish job builds the artifact that
+ships, and a cache is writable by other workflows on the repo (a PR-triggered
+run, say), so restoring one lets a poisoned entry reach the built distribution.
+`setup-uv` caches by default, so `enable-cache: false` has to be explicit;
+omitting the input isn't enough. The publish job runs once per release, so the
+lost cache costs nothing worth having.
+
+Trusted publishing means there's no API token to store, scope, or rotate, and
+it's the prerequisite for PyPI's digital attestations. Configure the trusted
+publisher on PyPI with the environment name (`pypi` above): PyPI checks the
+environment claim on the incoming OIDC token, so the workflow's `environment:`
+block is load-bearing, not decoration.
+
+Add [required reviewers](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments#required-reviewers)
+to that environment. Publishing is irreversible (a filename can never be reused
+on PyPI), so it's worth a human gate: an accidental or malicious trigger stalls
+pending approval instead of shipping. Approving your own releases still buys
+something, since it demands an active, logged-in action at publish time rather
+than just a push.
 
 ### MkDocs Docs Publish Job
 

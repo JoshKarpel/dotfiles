@@ -123,3 +123,15 @@ hooks that validate those files against their published schemas:
     - id: check-github-workflows
     - id: check-github-actions
 ```
+
+## Workflow Auditing
+
+Pair the schema hooks with [zizmor](https://docs.zizmor.sh), which audits
+workflows for insecure defaults rather than shape (see the GitHub Actions style
+guide for the findings it catches and the config it needs):
+
+```yaml
+- repo: https://github.com/zizmorcore/zizmor-pre-commit
+  hooks:
+    - id: zizmor
+```
