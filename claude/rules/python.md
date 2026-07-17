@@ -249,6 +249,15 @@ For asserting a checker's *exact* diagnostic output (message text, not just
 is a heavy dependency; reach for it only when the `assert_type` + typed-ignore
 pair genuinely can't express the invariant.
 
+## Code Search
+
+- **[`symbex`](https://github.com/simonw/symbex)**, run on demand with `uvx
+  symbex` (no install needed), extracts a Python function, class, or method
+  definition by name (`uvx symbex parse_config`, `--class Order`,
+  `--imports-only`) without reading the whole file. Reach for it over `grep`
+  when you want a symbol's definition rather than every textual match. Run
+  `uvx symbex --help` for the full set of selectors.
+
 ## Toolchain
 
 - **[`uv`](https://docs.astral.sh/uv/)** for project management and running scripts

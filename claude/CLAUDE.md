@@ -26,3 +26,6 @@
   not `pkill`: killing a harness-tracked task reports a spurious failure exit.
 - When you start a server just to check something, assume I may already be running the app on
   the default port; pick a non-default port and clean it up when done.
+- Reach past plain `grep` when a code search is structural rather than textual. `ast-grep`
+  matches and rewrites by AST pattern (a bare `except`, a call with a literal argument) where
+  regex can't. Run `--help` for the interface.

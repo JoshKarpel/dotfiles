@@ -12,6 +12,7 @@ minimum_release_age = "7d"
 corepack = true
 
 [tools]
+ast-grep = "latest"
 aws-cli = "latest"
 bat = "latest"
 bottom = "latest"
