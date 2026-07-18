@@ -8,6 +8,9 @@ paths:
 
 ## SQLite
 
+For diagnosing and speeding up a slow query (reading `EXPLAIN QUERY PLAN`, the
+`.expert` index recommender, index design), see the `optimize-sqlite` skill.
+
 ### Prefer STRICT tables
 
 Add `STRICT` to every `CREATE TABLE` in new SQLite schemas:

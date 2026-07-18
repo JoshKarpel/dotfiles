@@ -133,7 +133,7 @@ don't fit neatly into any of them, and that's fine:
 
 1. **Library & API reference**: usage guides, gotchas, and code snippets for a tool,
    library, or API the model would otherwise have to rediscover each session (e.g.
-   `hook-creator`, `python-profiling`).
+   `hook-creator`, `optimize-python`).
 2. **Product verification**: testing workflows, browser drivers, and assertion patterns for
    confirming that a change actually works.
 3. **Data fetching & analysis**: connection libraries, query patterns, and dashboard/field

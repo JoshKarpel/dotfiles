@@ -185,7 +185,7 @@ come from.
 ## Performance
 
 These are proactive design decisions, not micro-optimizations to apply after
-the fact. See the `python-profiling` skill for measurement tools.
+the fact. See the `optimize-python` skill for measurement tools.
 
 - **Construct expensive objects once.** Objects like parsed configs, compiled
   schemas, HTTP clients, and connection pools should be built at startup and

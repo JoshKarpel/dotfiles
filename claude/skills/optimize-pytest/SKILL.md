@@ -24,7 +24,7 @@ parallelize**. Parallelizing an un-isolated suite just converts slowness into
 flakiness, so prove isolation (randomly) *before* leaning on xdist for speed.
 
 For profiling the code *under* a slow test (CPU/IO hotspots inside the
-production code path), use the `python-profiling` skill instead. This skill is
+production code path), use the `optimize-python` skill instead. This skill is
 about the suite's own overhead: fixtures, scope, ordering, distribution,
 collection, and startup.
 

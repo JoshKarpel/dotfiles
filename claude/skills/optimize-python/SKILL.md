@@ -1,5 +1,5 @@
 ---
-name: python-profiling
+name: optimize-python
 description: >
   Python performance profiling and optimization. MUST be invoked when investigating CPU
   hotspots, memory usage, I/O slowness, async event loop blocking, or when
@@ -10,7 +10,7 @@ description: >
   profiling Python processes in Kubernetes pods.
 ---
 
-# Python Performance Profiling
+# Optimizing Python
 
 ## The Profiling Loop
 
