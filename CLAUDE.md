@@ -50,7 +50,8 @@ Active hooks configured in `~/.claude/settings.json`:
   - `claude-git-dash-c-check` — Blocks `git -C <dir>` when the path resolves to the current repository (redundant; just run without `-C`); allows it when targeting a different repo
   - `claude-http-server-bind-check` — Blocks `python -m http.server` without an explicit `--bind`/`-b`; the module defaults to binding all interfaces (0.0.0.0), so a local static site should pass `--bind 127.0.0.1`
   - `claude-rm-scope-check` — Blocks an `rm` whose target escapes the work area (the
-    current git repo plus the session scratchpad `/tmp/claude-*`); in-scope deletes
+    current git repo plus the session scratchpad, see `TEMP_PREFIXES` in the script);
+    in-scope deletes
     (recursive or not) pass through. Tokenizes the command so it also catches `rm` via a
     wrapper (`sudo`/`env`/`xargs`), by path (`/bin/rm`), after a `cd`, or inside `sh -c` /
     `python -c` inline code. The settings deny list keeps only never-in-scope catastrophic

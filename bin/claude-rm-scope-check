@@ -10,7 +10,8 @@ This inspects each ``rm`` invocation's target paths and blocks the call when any
 target resolves outside the allowed roots:
 
   allowed = the git repo containing the cwd (or the cwd itself if not a repo),
-            and the session temp tree (``/tmp/claude-*``)
+            and the session temp tree (``/tmp/claude-*``, or ``/private/tmp/claude-*``
+            since macOS resolves ``/tmp`` to ``/private/tmp``)
   blocked = absolute paths elsewhere (``/etc``, ``/usr``), ``~`` / ``$HOME``,
             any ``$VAR`` target (unprovable), ``..`` that escapes the repo, and
             bare ``/``
@@ -48,7 +49,7 @@ INTERPRETERS = {
     "sh", "bash", "zsh", "dash", "ksh", "python", "python2", "python3",
     "perl", "ruby", "node", "nodejs",
 }
-TEMP_PREFIXES = ("/tmp/claude-",)
+TEMP_PREFIXES = ("/tmp/claude-", "/private/tmp/claude-")
 
 _VAR_ASSIGN = re.compile(r"^\w+=")
 _WORD_RM = re.compile(r"\brm\b")
@@ -250,17 +251,22 @@ def _escaping_target(command: str, cwd: str, repo_root: str) -> str | None:
     return None
 
 
+def _scratchpad_description() -> str:
+    return " or ".join(f"`{prefix}*`" for prefix in TEMP_PREFIXES)
+
+
 def _message(target: str) -> str:
+    scratchpad = _scratchpad_description()
     if _has_dotdot(target):
         return (
             f"Blocked: this `rm` path `{target}` contains `..`. Resolve it to its real "
             "location first (no `..` segments) so the destination is unambiguous, then "
             "retry. Deleting inside the current git repo or the session scratchpad "
-            "`/tmp/claude-*` is fine.\n"
+            f"({scratchpad}) is fine.\n"
         )
     return (
         f"Blocked: this `rm` targets `{target}`, which is outside the work area "
-        "(the current git repo and the session scratchpad `/tmp/claude-*`). "
+        f"(the current git repo and the session scratchpad, {scratchpad}). "
         "Deleting inside the repo or scratchpad is fine; deleting outside it is "
         "gated to avoid clobbering unrelated files. If the target really is meant "
         "to be inside the repo, use an explicit in-repo path (not `~`, `$HOME`, or "
@@ -329,6 +335,9 @@ _SELFTEST_CASES = [
     ("rm -rf /tmp/claude-1000/sess/scratchpad/chrome-profile", "/repo", "/repo", False),
     ("rm -rf /tmp/claude-1000/*/scratchpad/x", "/repo", "/repo", False),
     ("cd /tmp/claude-1000/sess/scratchpad && rm -rf profile", "/repo", "/repo", False),
+    # --- ALLOW: macOS resolves /tmp to /private/tmp, so the scratchpad shows up there ---
+    ("rm -rf /private/tmp/claude-1000/sess/scratchpad/x", "/repo", "/repo", False),
+    ("cd /private/tmp/claude-1000/sess/scratchpad && rm -rf profile", "/repo", "/repo", False),
     # --- cwd is a subdirectory of the repo (repo_root is an ancestor) ---
     ("rm -rf dist", "/repo/packages/web", "/repo", False),
     ("rm -rf /repo/tooling/out", "/repo/packages/web", "/repo", False),
