@@ -24,4 +24,16 @@ Recent commits:
 $LOG
 EOF
   fi
+
+  # Net diff vs. the merge-base (three-dot): each file once, cumulative change,
+  # collapsing per-commit churn. Orients a cold session on what the branch amounts to.
+  DIFFSTAT=$(git diff "${DEFAULT_BRANCH}...HEAD" --stat 2>/dev/null)
+  if [[ -n "$DIFFSTAT" ]]; then
+    cat <<EOF
+
+Net changes vs. ${DEFAULT_BRANCH} (merge-base):
+
+$DIFFSTAT
+EOF
+  fi
 fi
