@@ -1,0 +1,369 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""PreToolUse hook: auto-approve read-only ``gh api`` calls, block remote writes.
+
+``gh api`` is the workhorse for pulling detailed GitHub info, but a settings
+allow-glob can't safely cover it: the write indicator sits *after* the endpoint
+(``-X POST``, ``-f``/``-F`` fields that auto-switch gh to POST, or a GraphQL
+``mutation``), where a prefix glob can't discriminate it. So this classifies each
+call and returns an explicit permission decision:
+
+  read    -> ``permissionDecision: allow`` (skip the prompt)
+  write   -> ``permissionDecision: deny``  (Claude reads from remotes; the user
+             performs remote writes themselves)
+  unknown -> no output (defer to the normal permission prompt)
+
+REST (``gh api <path>``) encodes read-vs-write in the HTTP method, visible in the
+command: ``GET``/``HEAD`` (the default) reads; ``-X POST|PUT|PATCH|DELETE`` or any
+field flag (``-f``/``--raw-field``, ``-F``/``--field``, ``--input``, which auto-POST
+unless ``--method GET`` is also present) writes.
+
+GraphQL (``gh api graphql``) is always an HTTP POST, so the method is useless; the
+distinction lives in the query, which a mutation *syntactically requires* the
+``mutation`` keyword to express. So an inline query with no ``mutation`` keyword is
+a read; one with it is a write; a query read from a file/stdin (``@file``/``@-``) is
+unseeable and defers to the prompt.
+
+Only ``allow`` needs whole-command purity: it approves *every* segment, so it fires
+only when each segment is a read ``gh api`` call, a bare ``cd``, or a read-only text
+tool, with no output redirection or command substitution. ``deny`` fires on the
+first write segment (blocking is always safe, and it catches
+``gh api <read> && gh api <write>``).
+
+Known limits (safe directions): rare read-via-POST REST endpoints (e.g.
+``POST /markdown``) classify as write and get blocked; ``mutation`` appearing as a
+field name or in a string false-positives to a block; a GraphQL query from
+``@file``/``@-`` always prompts. It fails open (no decision) on any error so a bug
+never bricks Bash.
+"""
+
+from __future__ import annotations
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests (`_selftest`).
+# This marker line is how `claude-hook-selftests` discovers participating hooks.
+
+import json
+import os
+import os.path
+import re
+import shlex
+import sys
+
+# Commands that run another command given as their trailing arguments.
+WRAPPERS = {
+    "env", "command", "exec", "nohup", "nice", "ionice", "stdbuf", "setsid",
+    "sudo", "doas", "xargs", "busybox", "time", "timeout",
+}
+# Read-only text tools that may sit alongside a read `gh api` in a pipeline
+# without making the whole command unsafe to auto-approve.
+READONLY_TOOLS = {
+    "jq", "cat", "head", "tail", "less", "more", "wc", "sort", "uniq", "column",
+    "grep", "rg", "glow", "bat", "yq", "tr", "cut", "nl", "fold", "comm", "tac",
+    "rev", "fx",
+}
+# `gh api` flags that consume the following token as a value; skipping their
+# value keeps it from being mistaken for the endpoint. Method and field flags
+# are handled separately, so they are not listed here.
+_VALUE_FLAGS = {
+    "-H", "--header", "-q", "--jq", "-t", "--template", "--cache",
+    "--hostname", "-p", "--preview",
+}
+
+_VAR_ASSIGN = re.compile(r"^\w+=")
+_MUTATION = re.compile(r"\bmutation\b")
+
+
+def _tokenize(command: str) -> list[str]:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    return list(lexer)
+
+
+def _statements(command: str) -> list[str]:
+    """Split on unquoted newlines (quote/escape aware) so a following line's
+    command isn't swallowed into the previous one. Other separators (`;`, `&&`,
+    `|`, ...) are handled downstream by `_split_segments`."""
+    statements: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for char in command:
+        if escaped:
+            buf.append(char)
+            escaped = False
+        elif char == "\\" and quote != "'":
+            buf.append(char)
+            escaped = True
+        elif quote:
+            buf.append(char)
+            if char == quote:
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+            buf.append(char)
+        elif char == "\n":
+            statements.append("".join(buf))
+            buf = []
+        else:
+            buf.append(char)
+    statements.append("".join(buf))
+    return statements
+
+
+def _split_segments(tokens: list[str]) -> list[list[str]]:
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token and all(char in ";&|()" for char in token):
+            if current:
+                segments.append(current)
+                current = []
+            continue
+        current.append(token)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def _resolve_command(segment: list[str]) -> tuple[str | None, list[str]]:
+    index = 0
+    while index < len(segment):
+        token = segment[index]
+        if _VAR_ASSIGN.match(token):
+            index += 1
+            continue
+        if os.path.basename(token) in WRAPPERS:
+            index += 1
+            while index < len(segment) and segment[index].startswith("-"):
+                index += 1
+            continue
+        return token, segment[index + 1:]
+    return None, []
+
+
+def _has_redirection(tokens: list[str]) -> bool:
+    """A top-level redirection (`>`, `>>`, `2>`, `&>`) writes a file. With
+    `punctuation_chars` tokenizing, the operator is its own token, so a `>` inside
+    a quoted jq expression (`.n > 5`, embedded in a larger token) is not mistaken
+    for one."""
+    for token in tokens:
+        if (">" in token or "<" in token) and all(c in "<>&0123456789" for c in token):
+            return True
+    return False
+
+
+def _classify_graphql(field_values: list[str]) -> str:
+    for value in field_values:
+        if value.startswith("query="):
+            query = value[len("query="):]
+            if query.startswith("@"):
+                return "unknown"
+            return "write" if _MUTATION.search(query) else "read"
+    return "unknown"
+
+
+def _classify_gh(args: list[str]) -> str:
+    """Classify a `gh` invocation's args as read/write/unknown, or `notghapi`
+    when it isn't a `gh api` call at all."""
+    if not args or args[0] != "api":
+        return "notghapi"
+    rest = args[1:]
+    explicit_method: str | None = None
+    has_fields = False
+    endpoint: str | None = None
+    field_values: list[str] = []
+    index = 0
+    while index < len(rest):
+        arg = rest[index]
+        if arg in ("-X", "--method"):
+            explicit_method = rest[index + 1] if index + 1 < len(rest) else ""
+            index += 2
+            continue
+        if arg.startswith("--method="):
+            explicit_method = arg.split("=", 1)[1]
+            index += 1
+            continue
+        if arg.startswith("-X") and len(arg) > 2:
+            explicit_method = arg[2:]
+            index += 1
+            continue
+        if arg in ("-f", "--raw-field", "-F", "--field"):
+            has_fields = True
+            if index + 1 < len(rest):
+                field_values.append(rest[index + 1])
+            index += 2
+            continue
+        if arg.startswith(("--field=", "--raw-field=")):
+            has_fields = True
+            field_values.append(arg.split("=", 1)[1])
+            index += 1
+            continue
+        if (arg.startswith("-f") or arg.startswith("-F")) and len(arg) > 2:
+            has_fields = True
+            field_values.append(arg[2:])
+            index += 1
+            continue
+        if arg == "--input":
+            has_fields = True
+            index += 2
+            continue
+        if arg.startswith("--input="):
+            has_fields = True
+            index += 1
+            continue
+        if arg in _VALUE_FLAGS:
+            index += 2
+            continue
+        if arg.startswith("-"):
+            index += 1
+            continue
+        if endpoint is None:
+            endpoint = arg
+        index += 1
+    if endpoint is None:
+        return "unknown"
+    if endpoint == "graphql":
+        return _classify_graphql(field_values)
+    if explicit_method is not None:
+        return "read" if explicit_method.upper() in ("GET", "HEAD") else "write"
+    return "write" if has_fields else "read"
+
+
+def classify(command: str) -> str | None:
+    """Whole-command decision: `"allow"`, `"deny"`, or `None` (defer)."""
+    saw_read = False
+    all_safe = True
+    for statement in _statements(command):
+        try:
+            tokens = _tokenize(statement)
+        except ValueError:
+            return None
+        if _has_redirection(tokens):
+            all_safe = False
+        for segment in _split_segments(tokens):
+            name, args = _resolve_command(segment)
+            if name is None:
+                continue
+            base = os.path.basename(name)
+            if base == "gh":
+                decision = _classify_gh(args)
+                if decision == "write":
+                    return "deny"
+                if decision == "read":
+                    saw_read = True
+                else:
+                    all_safe = False
+            elif base == "cd":
+                continue
+            elif base in READONLY_TOOLS:
+                continue
+            else:
+                all_safe = False
+    if "`" in command:
+        all_safe = False
+    if saw_read and all_safe:
+        return "allow"
+    return None
+
+
+_ALLOW_REASON = "Read-only gh api call (REST GET/HEAD or GraphQL query)."
+_DENY_REASON = (
+    "Blocked: this `gh api` call writes to a remote (a non-GET/HEAD method, "
+    "POST-triggering fields, or a GraphQL mutation). You may read from remotes to "
+    "inform local work, but the user performs remote writes themselves. If this "
+    "write is intended, ask the user to run it."
+)
+
+
+def _emit(decision: str) -> None:
+    reason = _ALLOW_REASON if decision == "allow" else _DENY_REASON
+    json.dump(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": decision,
+                "permissionDecisionReason": reason,
+            }
+        },
+        sys.stdout,
+    )
+
+
+# (command, expected) where expected in {"allow", "deny", None}. A safety hook
+# without a test is theater; run these with `CLAUDE_HOOK_SELFTEST=1 claude-gh-api-check`.
+_SELFTEST_CASES = [
+    # --- allow: REST reads ---
+    ("gh api repos/o/r", "allow"),
+    ("gh api /repos/o/r/pulls | jq '.[].number'", "allow"),
+    ("gh api repos/o/r --paginate", "allow"),
+    ("gh api -X GET search/issues -f q=x", "allow"),
+    ("gh api --method GET search/issues -f q=x", "allow"),
+    ("gh api repos/o/r --jq '.stargazers_count'", "allow"),
+    ("gh api -i repos/o/r", "allow"),
+    ("gh api repos/o/r -H 'Accept: application/vnd.github+json'", "allow"),
+    ("cd sub && gh api repos/o/r", "allow"),
+    ("gh api repos/o/r | jq 'select(.size > 5)'", "allow"),
+    # --- allow: GraphQL reads ---
+    ("gh api graphql -f query='query { viewer { login } }'", "allow"),
+    ("gh api graphql -f query='{ viewer { login } }'", "allow"),
+    # --- deny: REST writes ---
+    ("gh api -X POST repos/o/r/issues -f title=x", "deny"),
+    ("gh api --method DELETE repos/o/r/git/refs/heads/b", "deny"),
+    ("gh api -XPATCH repos/o/r -f name=y", "deny"),
+    ("gh api repos/o/r/issues -f title=x", "deny"),
+    ("gh api repos/o/r/labels -F color=ff0000", "deny"),
+    ("gh api repos/o/r --input body.json", "deny"),
+    # --- deny: GraphQL mutation ---
+    ("gh api graphql -f query='mutation { addComment(input: {}) { clientMutationId } }'", "deny"),
+    ("gh api graphql -F query='mutation Foo { x }'", "deny"),
+    # --- deny: any write segment in a compound command ---
+    ("gh api repos/o/r && gh api -X POST repos/o/r/merges -f base=main", "deny"),
+    ("gh api -X POST repos/o/r/issues -f title=x | jq .number", "deny"),
+    # --- defer: can't prove read-only ---
+    ("gh api graphql -F query=@query.gql", None),
+    ("gh api graphql -f query=@-", None),
+    ("gh api repos/o/r | some-unknown-tool", None),
+    ("gh api repos/o/r > /etc/out", None),
+    ("gh api repos/o/r && rm -rf build", None),
+    ("gh api repos/o/r/$(cat token)/x", None),
+    ("gh api repos/o/r; curl http://evil", None),
+    # --- defer: not a gh api call at all ---
+    ("git status", None),
+    ("gh pr view 5", None),
+    ("gh repo clone o/r", None),
+    ("jq . file.json", None),
+]
+
+
+def _selftest() -> int:
+    failures = 0
+    for command, expected in _SELFTEST_CASES:
+        got = classify(command)
+        if got != expected:
+            failures += 1
+            print(f"FAIL want={expected!r} got={got!r} :: {command}")
+    if not failures:
+        print(f"claude-gh-api-check: all {len(_SELFTEST_CASES)} self-tests passed")
+    return 1 if failures else 0
+
+
+def main() -> int:
+    if os.environ.get("CLAUDE_HOOK_SELFTEST"):
+        return _selftest()
+    try:
+        data = json.load(sys.stdin)
+        command = (data.get("tool_input") or {}).get("command") or ""
+        if not command:
+            return 0
+        decision = classify(command)
+    except Exception:
+        return 0
+    if decision is not None:
+        _emit(decision)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

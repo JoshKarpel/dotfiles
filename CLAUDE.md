@@ -56,6 +56,20 @@ Active hooks configured in `~/.claude/settings.json`:
     `python -c` inline code. The settings deny list keeps only never-in-scope catastrophic
     backstops (`rm -rf ~`, `rm -rf $HOME`, `rm -rf /`). Carries its own tests: run
     `CLAUDE_HOOK_SELFTEST=1 claude-rm-scope-check`
+  - `claude-gh-api-check` — Auto-approves read-only `gh api` calls and blocks ones
+    that write to a remote, so reads don't prompt while writes stay something the
+    user does. Tokenizes the command and classifies each `gh api` invocation:
+    reads (`permissionDecision: allow`) are REST `GET`/`HEAD` calls and GraphQL
+    queries; writes (`deny`) are a REST write method (`-X POST`/`PUT`/`PATCH`/`DELETE`),
+    field flags that auto-switch gh to POST (`-f`/`-F`/`--field`/`--input`), or a
+    GraphQL `mutation`; anything it can't prove (a GraphQL query read from
+    `@file`/`@-`, a read piped into an unrecognized command) emits nothing and falls
+    through to the normal prompt. Only `allow` requires the whole command to be
+    provably read-only (every segment a read `gh api`, a `cd`, or a read-only text
+    tool, with no redirection or command substitution); `deny` fires on the first
+    write segment. Replaces the former blanket `Bash(gh api graphql *)` allow, which
+    auto-approved mutations. Carries its own tests: run
+    `CLAUDE_HOOK_SELFTEST=1 claude-gh-api-check`
 - **Stop**: `claude-stop` runs the checks below in sequence (not parallel, since hooks in
   a group otherwise run in parallel and order isn't guaranteed) and only plays the stop
   sound if none of them blocked, so the sound means Claude is actually stopping rather
@@ -104,6 +118,15 @@ Rules live in `claude/rules/` and load automatically when Claude works with matc
 
 ## Conventions
 
+- Python scripts in `bin/` run under `uv`, not the system interpreter. Use the
+  [PEP 723](https://peps.python.org/pep-0723/) inline-script shebang
+  `#!/usr/bin/env -S uv run --quiet --script` followed by a `# /// script` metadata
+  block declaring `requires-python` (and `dependencies` if any), so the script is
+  self-contained and reproducible. `count-claude-tokens` is the exemplar with
+  third-party dependencies; the Python hooks (`claude-rm-scope-check`,
+  `claude-gh-api-check`) use the same shebang with an empty dependency set. `--quiet`
+  keeps `uv`'s own output off stdout, which matters for hooks whose stdout must stay
+  clean (parseable JSON or empty).
 - Shell scripts use 2-space indentation (enforced by beautysh via pre-commit)
 - Target files in `targets/` are auto-sorted by the `file-contents-sorter` pre-commit hook
 - Pre-commit hooks run via [pre-commit.ci](https://pre-commit.ci) on push; hooks include trailing whitespace, end-of-file fixer, YAML/TOML checks, and beautysh formatting. pre-commit.ci skips `claude-hook-selftests` (it needs a real dev environment), so the `.github/workflows/pre-commit.yml` workflow runs the full suite (self-tests included) on push and PRs. Dependabot keeps the workflow's actions updated.

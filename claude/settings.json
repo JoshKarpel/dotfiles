@@ -94,7 +94,6 @@
       "Bash(gh pr view *)",
       "Bash(gh cache list *)",
       "Bash(gh search *)",
-      "Bash(gh api graphql *)",
       "Bash(gh status *)",
       "Bash(gh run *)",
       "Bash(uv run *)",
@@ -216,6 +215,10 @@
           {
             "type": "command",
             "command": "claude-rm-scope-check"
+          },
+          {
+            "type": "command",
+            "command": "claude-gh-api-check"
           }
         ]
       }

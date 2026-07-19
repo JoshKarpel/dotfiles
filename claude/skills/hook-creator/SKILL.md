@@ -75,6 +75,8 @@ exit 2
 
 Write prose as long unbroken lines in the heredoc rather than hard-wrapping at 80 chars. The TUI reflows text at its own width; hard wraps baked into the source wrap awkwardly when the TUI width doesn't match.
 
+Any text a hook feeds back to Claude, whether exit-2 stderr or a `permissionDecisionReason` (pattern 5), is read by Claude, not shown to the user. Address Claude in the second person and refer to the user in the third person: write "the user performs remote writes themselves; ask them to run it", not "you perform remote writes yourself".
+
 ### stop_hook_active: Loop Prevention
 
 `Stop` and `SubagentStop` events include `"stop_hook_active": true/false`. When
