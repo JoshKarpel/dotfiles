@@ -12,6 +12,7 @@
   "includeGitInstructions": false,
   "permissions": {
     "allow": [
+      "WebSearch",
       "WebFetch(domain:api.github.com)",
       "WebFetch(domain:argo-cd.readthedocs.io)",
       "WebFetch(domain:asgi.readthedocs.io)",
