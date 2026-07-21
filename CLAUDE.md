@@ -71,6 +71,20 @@ Active hooks configured in `~/.claude/settings.json`:
     write segment. Replaces the former blanket `Bash(gh api graphql *)` allow, which
     auto-approved mutations. Carries its own tests: run
     `CLAUDE_HOOK_SELFTEST=1 claude-gh-api-check`
+  - `claude-awk-check` — Auto-approves read-only `awk` calls so field-extraction
+    and filtering don't prompt, while writes fall through to the normal prompt (no
+    `deny`: a write should *ask*, not be blocked). Tokenizes the command and
+    classifies each `awk` invocation: a `read` (`permissionDecision: allow`) has a
+    visible inline program (not `-f file`, not `-i`/`--include`) reached through only
+    recognized options, containing none of `>`, `|`, or `system` (covering `>`/`>>`
+    redirection, `|`/`|&` pipes and `cmd | getline`, and `system()`); anything else
+    emits nothing and defers. `>` is awk's comparison operator too, so read-only
+    `$1 > 5` conservatively defers rather than risk auto-approving `print > "f"`
+    (comparisons with `<` stay allowed). Like `claude-gh-api-check`, only `allow`
+    requires whole-command purity (every segment a read-only `awk`, a `cd`, or a
+    read-only text tool, with no redirection or command substitution, and at least
+    one `awk` read). Carries its own tests: run
+    `CLAUDE_HOOK_SELFTEST=1 claude-awk-check`
 - **Stop**: `claude-stop` runs the checks below in sequence (not parallel, since hooks in
   a group otherwise run in parallel and order isn't guaranteed) and only plays the stop
   sound if none of them blocked, so the sound means Claude is actually stopping rather

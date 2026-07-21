@@ -220,6 +220,10 @@
           {
             "type": "command",
             "command": "claude-gh-api-check"
+          },
+          {
+            "type": "command",
+            "command": "claude-awk-check"
           }
         ]
       }

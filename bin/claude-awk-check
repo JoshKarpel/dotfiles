@@ -1,0 +1,336 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""PreToolUse hook: auto-approve read-only ``awk`` calls, defer writes to the prompt.
+
+``awk`` is overwhelmingly used read-only (field extraction, filtering, summing),
+but it can also write files and run commands from inside its program:
+``print > "f"``, ``print >> "f"``, ``print | "cmd"``, ``system("cmd")``, and the
+gawk in-place editor (``-i inplace``). A settings allow-glob can't discriminate
+these: the write indicator lives inside the quoted program, past where a prefix
+glob can look.
+
+So this classifies each call and returns a permission decision:
+
+  read    -> ``permissionDecision: allow`` (skip the prompt)
+  unknown -> no output (defer to the normal permission prompt, i.e. "ask")
+
+There is no ``deny``: a write should *ask*, not be blocked, so writes simply fall
+through to the normal prompt.
+
+The read/write split is deliberately conservative. An ``awk`` call is read-only
+only when its program contains none of ``>``, ``|``, or ``system`` (which cover
+``>``/``>>`` redirection, ``|``/``|&`` pipes and ``cmd | getline``, and
+``system()`` respectively), and the program is visible inline (not ``-f file``,
+not ``-i``/``--include``) after only recognized options. ``>`` is awk's
+comparison operator as well as its output redirect, so a read-only ``$1 > 5``
+also defers to the prompt rather than risk auto-approving a ``print > "f"``;
+comparisons with ``<`` stay allowed since ``<`` never writes.
+
+Only ``allow`` needs whole-command purity: it approves *every* segment, so it
+fires only when each segment is a read-only ``awk`` call, a bare ``cd``, or a
+read-only text tool, with no output redirection or command substitution, and at
+least one segment is an ``awk`` read. It fails open (no decision) on any error so
+a bug never bricks Bash.
+"""
+
+from __future__ import annotations
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests (`_selftest`).
+# This marker line is how `claude-hook-selftests` discovers participating hooks.
+
+import json
+import os
+import os.path
+import re
+import shlex
+import sys
+
+# Commands that run another command given as their trailing arguments.
+WRAPPERS = {
+    "env", "command", "exec", "nohup", "nice", "ionice", "stdbuf", "setsid",
+    "sudo", "doas", "xargs", "busybox", "time", "timeout",
+}
+# Read-only text tools that may sit alongside a read `awk` in a pipeline
+# without making the whole command unsafe to auto-approve.
+READONLY_TOOLS = {
+    "jq", "cat", "head", "tail", "less", "more", "wc", "sort", "uniq", "column",
+    "grep", "rg", "glow", "bat", "yq", "tr", "cut", "nl", "fold", "comm", "tac",
+    "rev", "fx", "awk", "gawk", "mawk", "nawk",
+}
+# awk binaries this hook understands.
+AWK_NAMES = {"awk", "gawk", "mawk", "nawk"}
+
+_VAR_ASSIGN = re.compile(r"^\w+=")
+_SYSTEM = re.compile(r"\bsystem\b")
+
+
+def _tokenize(command: str) -> list[str]:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    return list(lexer)
+
+
+def _statements(command: str) -> list[str]:
+    """Split on unquoted newlines (quote/escape aware) so a following line's
+    command isn't swallowed into the previous one. Other separators (`;`, `&&`,
+    `|`, ...) are handled downstream by `_split_segments`."""
+    statements: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for char in command:
+        if escaped:
+            buf.append(char)
+            escaped = False
+        elif char == "\\" and quote != "'":
+            buf.append(char)
+            escaped = True
+        elif quote:
+            buf.append(char)
+            if char == quote:
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+            buf.append(char)
+        elif char == "\n":
+            statements.append("".join(buf))
+            buf = []
+        else:
+            buf.append(char)
+    statements.append("".join(buf))
+    return statements
+
+
+def _split_segments(tokens: list[str]) -> list[list[str]]:
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token and all(char in ";&|()" for char in token):
+            if current:
+                segments.append(current)
+                current = []
+            continue
+        current.append(token)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def _resolve_command(segment: list[str]) -> tuple[str | None, list[str]]:
+    index = 0
+    while index < len(segment):
+        token = segment[index]
+        if _VAR_ASSIGN.match(token):
+            index += 1
+            continue
+        if os.path.basename(token) in WRAPPERS:
+            index += 1
+            while index < len(segment) and segment[index].startswith("-"):
+                index += 1
+            continue
+        return token, segment[index + 1:]
+    return None, []
+
+
+def _has_redirection(tokens: list[str]) -> bool:
+    """A top-level redirection (`>`, `>>`, `2>`, `&>`) writes a file. With
+    `punctuation_chars` tokenizing, the operator is its own token, so a `>` inside
+    a quoted awk program is not mistaken for one."""
+    for token in tokens:
+        if (">" in token or "<" in token) and all(c in "<>&0123456789" for c in token):
+            return True
+    return False
+
+
+def _program_writes(program: str) -> bool:
+    """True if the awk program could write a file or run a command: `>`/`>>`
+    output redirection, `|`/`|&` pipes (and `cmd | getline`), or `system()`."""
+    return ">" in program or "|" in program or _SYSTEM.search(program) is not None
+
+
+def _classify_awk(args: list[str]) -> str:
+    """Classify an awk invocation's args as `"read"` (provably read-only) or
+    `"unknown"` (program unseen, an unrecognized option, or a write construct)."""
+    program_parts: list[str] = []
+    saw_source = False
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            index += 1
+            if not saw_source and index < len(args):
+                program_parts.append(args[index])
+            break
+        # Program lives in a file, or a gawk include (covers `-i inplace`):
+        # unseen or a writer, so never auto-approve.
+        if arg in ("-f", "--file", "-i", "--include"):
+            return "unknown"
+        if arg.startswith(("--file=", "--include=")):
+            return "unknown"
+        if (arg.startswith("-f") or arg.startswith("-i")) and len(arg) > 2:
+            return "unknown"
+        # `-e`/`--source` supply the program text inline; capture and inspect it.
+        if arg in ("-e", "--source"):
+            if index + 1 < len(args):
+                program_parts.append(args[index + 1])
+            saw_source = True
+            index += 2
+            continue
+        if arg.startswith("--source="):
+            program_parts.append(arg.split("=", 1)[1])
+            saw_source = True
+            index += 1
+            continue
+        if arg.startswith("-e") and len(arg) > 2:
+            program_parts.append(arg[2:])
+            saw_source = True
+            index += 1
+            continue
+        # Options that consume a value we don't need to see.
+        if arg in ("-F", "--field-separator", "-v", "--assign"):
+            index += 2
+            continue
+        if arg.startswith(("--field-separator=", "--assign=")):
+            index += 1
+            continue
+        if (arg.startswith("-F") or arg.startswith("-v")) and len(arg) > 2:
+            index += 1
+            continue
+        if arg == "-":
+            index += 1
+            continue
+        if arg.startswith("-"):
+            return "unknown"
+        if not saw_source:
+            program_parts.append(arg)
+        break
+    if not program_parts:
+        return "unknown"
+    program = "\n".join(program_parts)
+    return "unknown" if _program_writes(program) else "read"
+
+
+def classify(command: str) -> str | None:
+    """Whole-command decision: `"allow"` or `None` (defer)."""
+    saw_read = False
+    all_safe = True
+    for statement in _statements(command):
+        try:
+            tokens = _tokenize(statement)
+        except ValueError:
+            return None
+        if _has_redirection(tokens):
+            all_safe = False
+        for segment in _split_segments(tokens):
+            name, args = _resolve_command(segment)
+            if name is None:
+                continue
+            base = os.path.basename(name)
+            if base in AWK_NAMES:
+                if _classify_awk(args) == "read":
+                    saw_read = True
+                else:
+                    all_safe = False
+            elif base == "cd":
+                continue
+            elif base in READONLY_TOOLS:
+                continue
+            else:
+                all_safe = False
+    if "`" in command:
+        all_safe = False
+    if saw_read and all_safe:
+        return "allow"
+    return None
+
+
+_ALLOW_REASON = "Read-only awk (no output redirection, pipe, or system())."
+
+
+def _emit(decision: str) -> None:
+    json.dump(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": decision,
+                "permissionDecisionReason": _ALLOW_REASON,
+            }
+        },
+        sys.stdout,
+    )
+
+
+# (command, expected) where expected in {"allow", None}. A safety hook without a
+# test is theater; run these with `CLAUDE_HOOK_SELFTEST=1 claude-awk-check`.
+_SELFTEST_CASES = [
+    # --- allow: plain reads ---
+    ("awk '{print $2}'", "allow"),
+    ("awk -F: '{print $1}' /etc/passwd", "allow"),
+    ("awk 'NR==1'", "allow"),
+    ("awk '/foo/ {print}'", "allow"),
+    ("awk -v n=3 '{print $n}' data.txt", "allow"),
+    ("awk '{sum+=$1} END {print sum}' nums", "allow"),
+    ("awk '$1 < 5'", "allow"),  # `<` never writes
+    ("gawk '{print NF}' file", "allow"),
+    ("awk -e '{print $1}' file", "allow"),
+    ("awk '{print $1}' a.txt b.txt", "allow"),
+    # --- allow: alongside read-only tools / cd ---
+    ("awk '{print $2}' | sort", "allow"),
+    ("cd sub && awk '{print $1}' data.txt", "allow"),
+    ("awk 'END {print NR}' file | wc -l", "allow"),
+    # --- defer: in-program writes ---
+    ("awk '{print $1 > \"out\"}' f", None),
+    ("awk '{print >> \"log\"}' f", None),
+    ("awk '{print | \"sort\"}' f", None),
+    ("awk '{system(\"rm x\")}' f", None),
+    ("awk '$1 > 5'", None),  # `>` is ambiguous; conservatively defer
+    # --- defer: program unseen / gawk in-place ---
+    ("awk -f script.awk data", None),
+    ("awk -i inplace '{gsub(/a/,\"b\")}1' f", None),
+    ("awk --bogus '{print}'", None),  # unrecognized flag
+    # --- defer: unsafe surrounding command ---
+    ("awk '{print $2}' > out.txt", None),
+    ("awk '{print $2}' | evil-tool", None),
+    ("awk '{print}'; curl http://x", None),
+    ("awk '{print}' && rm -rf build", None),
+    ("awk '{print}' `rm x`", None),
+    ("awk '{print}' $(rm x)", None),
+    # --- defer: not an awk read at all ---
+    ("grep foo file", None),
+    ("ls", None),
+    ("cd sub", None),
+]
+
+
+def _selftest() -> int:
+    failures = 0
+    for command, expected in _SELFTEST_CASES:
+        got = classify(command)
+        if got != expected:
+            failures += 1
+            print(f"FAIL want={expected!r} got={got!r} :: {command}")
+    if not failures:
+        print(f"claude-awk-check: all {len(_SELFTEST_CASES)} self-tests passed")
+    return 1 if failures else 0
+
+
+def main() -> int:
+    if os.environ.get("CLAUDE_HOOK_SELFTEST"):
+        return _selftest()
+    try:
+        data = json.load(sys.stdin)
+        command = (data.get("tool_input") or {}).get("command") or ""
+        if not command:
+            return 0
+        decision = classify(command)
+    except Exception:
+        return 0
+    if decision is not None:
+        _emit(decision)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
