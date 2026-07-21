@@ -28,9 +28,10 @@ unseeable and defers to the prompt.
 
 Only ``allow`` needs whole-command purity: it approves *every* segment, so it fires
 only when each segment is a read ``gh api`` call, a bare ``cd``, or a read-only text
-tool, with no output redirection or command substitution. ``deny`` fires on the
-first write segment (blocking is always safe, and it catches
-``gh api <read> && gh api <write>``).
+tool, with no command substitution. Local output redirection (``>``, ``2>``, ``2>&1``)
+is irrelevant: the hook guards against *remote* writes, and where output lands on the
+local disk is not its concern. ``deny`` fires on the first write segment (blocking is
+always safe, and it catches ``gh api <read> && gh api <write>``).
 
 Known limits (safe directions): rare read-via-POST REST endpoints (e.g.
 ``POST /markdown``) classify as write and get blocked; ``mutation`` appearing as a
@@ -143,16 +144,6 @@ def _resolve_command(segment: list[str]) -> tuple[str | None, list[str]]:
     return None, []
 
 
-def _has_redirection(tokens: list[str]) -> bool:
-    """A top-level redirection (`>`, `>>`, `2>`, `&>`) writes a file. With
-    `punctuation_chars` tokenizing, the operator is its own token, so a `>` inside
-    a quoted jq expression (`.n > 5`, embedded in a larger token) is not mistaken
-    for one."""
-    for token in tokens:
-        if (">" in token or "<" in token) and all(c in "<>&0123456789" for c in token):
-            return True
-    return False
-
 
 def _classify_graphql(field_values: list[str]) -> str:
     for value in field_values:
@@ -240,8 +231,6 @@ def classify(command: str) -> str | None:
             tokens = _tokenize(statement)
         except ValueError:
             return None
-        if _has_redirection(tokens):
-            all_safe = False
         for segment in _split_segments(tokens):
             name, args = _resolve_command(segment)
             if name is None:
@@ -305,6 +294,12 @@ _SELFTEST_CASES = [
     ("gh api repos/o/r -H 'Accept: application/vnd.github+json'", "allow"),
     ("cd sub && gh api repos/o/r", "allow"),
     ("gh api repos/o/r | jq 'select(.size > 5)'", "allow"),
+    # --- allow: local output redirection is irrelevant (only remote writes matter) ---
+    ("gh api repos/o/r 2>&1 | head -60", "allow"),
+    ("gh api repos/o/r >&2", "allow"),
+    ("gh api repos/o/r > out.json", "allow"),
+    ("gh api repos/o/r 2>err.log", "allow"),
+    ("gh api repos/o/r > /etc/out", "allow"),
     # --- allow: GraphQL reads ---
     ("gh api graphql -f query='query { viewer { login } }'", "allow"),
     ("gh api graphql -f query='{ viewer { login } }'", "allow"),
@@ -325,7 +320,6 @@ _SELFTEST_CASES = [
     ("gh api graphql -F query=@query.gql", None),
     ("gh api graphql -f query=@-", None),
     ("gh api repos/o/r | some-unknown-tool", None),
-    ("gh api repos/o/r > /etc/out", None),
     ("gh api repos/o/r && rm -rf build", None),
     ("gh api repos/o/r/$(cat token)/x", None),
     ("gh api repos/o/r; curl http://evil", None),

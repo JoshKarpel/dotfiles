@@ -67,8 +67,9 @@ Active hooks configured in `~/.claude/settings.json`:
     `@file`/`@-`, a read piped into an unrecognized command) emits nothing and falls
     through to the normal prompt. Only `allow` requires the whole command to be
     provably read-only (every segment a read `gh api`, a `cd`, or a read-only text
-    tool, with no redirection or command substitution); `deny` fires on the first
-    write segment. Replaces the former blanket `Bash(gh api graphql *)` allow, which
+    tool, with no command substitution); local output redirection (`>`, `2>`,
+    `2>&1`) is ignored, since the hook guards only against remote writes, not where
+    output lands locally; `deny` fires on the first write segment. Replaces the former blanket `Bash(gh api graphql *)` allow, which
     auto-approved mutations. Carries its own tests: run
     `CLAUDE_HOOK_SELFTEST=1 claude-gh-api-check`
   - `claude-awk-check` — Auto-approves read-only `awk` calls so field-extraction
