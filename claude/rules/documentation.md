@@ -1,7 +1,7 @@
 # Writing Documentation
 
 Guidance for the *prose* in durable docs: READMEs, API references, guides,
-design and philosophy docs, issue and PR text, and docstrings. It applies
+design and philosophy docs, reports, issue and PR text, and docstrings. It applies
 wherever that prose lives, including docstrings embedded in source files.
 
 The boundary against the comments rule is audience, not file type: a docstring
@@ -43,6 +43,27 @@ sense as a diff against text the reader can't see, delete the obsolete half.
 When the change itself is worth communicating, it belongs in a changelog, a
 release announcement, or a prominent callout, not scattered through the prose
 as parentheticals and corrections.
+
+## Reports Assembled Incrementally
+
+A report is often written in passes: draft a section, discover you need more
+data or research or thinking, go do it, revise. The finished report must read
+as if you had all the data from the start. It presents the current state of
+your knowledge, not the archaeology of how you assembled it.
+
+The failure mode is the drafting process leaking into the artifact:
+
+- "Initially the data suggested X, but after more samples we found Y" should
+  just be "the data shows Y".
+- "We didn't have the Q3 numbers at first, so this uses Q2" should be deleted
+  and the analysis presented on the Q3 numbers.
+- "After further investigation" and "upon revisiting" narrate the journey; the
+  report is the destination.
+
+Apply the same test as Updating Existing Text: a sentence that only makes sense
+as a record of how the report came together is scaffolding, so cut it. And the
+same exception as Tense and Voice: when the process itself is the point (a
+methodology section, a research log, a retrospective), narrating it is correct.
 
 ## Volatile Metrics
 
