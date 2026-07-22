@@ -31,7 +31,7 @@ while IFS= read -r -d '' link; do
     echo "prune $link"
     rm "$link"
   fi
-done < <(find ~/.claude -maxdepth 1 -type l -print0; find ~/.claude/rules ~/.claude/skills -type l -print0 2>/dev/null)
+done < <(find ~/.claude -maxdepth 1 -type l -print0; find ~/.claude/rules ~/.claude/skills ~/.claude/commands -type l -print0 2>/dev/null)
 
 # remove skill directories emptied by pruning
 find ~/.claude/skills -type d -empty -delete 2>/dev/null || true
