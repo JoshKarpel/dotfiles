@@ -264,6 +264,7 @@
     "autoSubmit": false
   },
   "theme": "dark",
+  "showThinkingSummaries": true,
   "autoCompactEnabled": true,
   "skipAutoPermissionPrompt": true,
   "skipWorkflowUsageWarning": true
