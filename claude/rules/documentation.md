@@ -25,7 +25,8 @@ This applies to docs that describe *what is*. Explicitly historical or
 discussion-oriented docs are the opposite case: a changelog, an ADR, a design
 retrospective, or a migration note exists precisely to record what changed, when,
 and why, so narrating history there is the point, not scaffolding. Judge by the
-document's job, not a blanket ban on the past tense.
+document's job, not a blanket ban on the past tense. When narrating that history,
+frame it around systems rather than people (see the blameless rule).
 
 ## Updating Existing Text
 
