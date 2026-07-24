@@ -6,14 +6,22 @@ applies to all prose, post-mortems, incident reports, ADRs, PR and issue text,
 code review comments, commit messages, and direct communication, not just
 durable docs.
 
+This isn't about being nice, and the analysis needn't be balanced: keeping the
+focus on systems rather than people is a truth-finding discipline, not
+politeness. Blame just buries the information you need to fix things and leaves
+the trap set for the next person.
+
 ## Attribute to Systems, Not People
 
 Name the gap in process, design, or architecture that let something go wrong,
 not who did it. "The deploy step had no rollback path" over "Sam shipped a
 broken deploy." A person acting reasonably on the information and tools they had
 is the normal case, not the fault; if the outcome was still bad, the leverage is
-in the system that shaped their choices. This holds for your own past output and
-for the user's alike: describe the artifact, not the author.
+in the system that shaped their choices. Judge a past decision by what was
+knowable at the time, not with the clarity of hindsight: "why didn't they catch
+it?" scores the choice against information that arrived later, which is a way of
+assigning fault, not finding the systemic cause. This holds for your own past
+output and for the user's alike: describe the artifact, not the author.
 
 ## History Is for Understanding, Not Fault
 
@@ -38,3 +46,8 @@ The durable-docs rule says reference docs describe the present and don't
 narrate how they got there. This rule governs the documents whose whole
 job is history, post-mortems, ADRs, retrospectives, migration notes. Write
 those, and narrate the history they exist to record, blamelessly.
+
+## Reference
+
+- [Postmortem Culture](https://sre.google/sre-book/postmortem-culture/) in the
+  Google SRE book
