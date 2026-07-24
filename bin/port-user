@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Show which process(es) are using a TCP/UDP port.
+# Usage: port-user <port>
+# Prints an lsof table (COMMAND/PID/USER/…) for every process bound to the
+# port. Exits 1 if nothing is using it, so it composes in scripts and `if`.
+
+set -euo pipefail
+
+if [[ $# -ne 1 || "$1" == "-h" || "$1" == "--help" ]]; then
+  echo "usage: port-user <port>" >&2
+  [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && exit 0
+  exit 2
+fi
+
+PORT="$1"
+if ! [[ "$PORT" =~ ^[0-9]+$ ]] || ((PORT < 1 || PORT > 65535)); then
+  echo "port-user: invalid port: $PORT" >&2
+  exit 2
+fi
+
+# -n/-P skip DNS and port-name lookups so output is fast and literal.
+if ! lsof -nP -i ":$PORT"; then
+  echo "port-user: nothing is using port $PORT" >&2
+  exit 1
+fi

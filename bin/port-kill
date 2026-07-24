@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Kill whatever process(es) are using a TCP/UDP port.
+# Usage: port-kill [-9|--force] <port>
+# Sends SIGTERM by default; pass -9/--force for SIGKILL. Reports each PID it
+# signals. Exits 1 if nothing is using the port.
+
+set -euo pipefail
+
+SIGNAL="TERM"
+if [[ "${1:-}" == "-9" || "${1:-}" == "--force" ]]; then
+  SIGNAL="KILL"
+  shift
+fi
+
+if [[ $# -ne 1 || "$1" == "-h" || "$1" == "--help" ]]; then
+  echo "usage: port-kill [-9|--force] <port>" >&2
+  [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && exit 0
+  exit 2
+fi
+
+PORT="$1"
+if ! [[ "$PORT" =~ ^[0-9]+$ ]] || ((PORT < 1 || PORT > 65535)); then
+  echo "port-kill: invalid port: $PORT" >&2
+  exit 2
+fi
+
+# -t prints just PIDs, one per line, for scripting.
+mapfile -t PIDS < <(lsof -t -i ":$PORT" || true)
+if ((${#PIDS[@]} == 0)); then
+  echo "port-kill: nothing is using port $PORT" >&2
+  exit 1
+fi
+
+for PID in "${PIDS[@]}"; do
+  if kill "-$SIGNAL" "$PID"; then
+    echo "port-kill: sent SIG$SIGNAL to PID $PID (port $PORT)"
+  fi
+done
