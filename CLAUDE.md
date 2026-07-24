@@ -31,6 +31,11 @@ pre-commit run
 # Count Claude tokens in files/dirs via the Anthropic count_tokens API
 # (needs ANTHROPIC_API_KEY). Run with --help for usage and flags.
 count-claude-tokens --help
+
+# Convert a Claude Code session to shareable HTML (pinned wrapper around
+# simonw/claude-code-transcripts). No args: interactive picker over recent
+# local sessions, opened in a browser. Run with --help for subcommands.
+claude-transcript
 ```
 
 ## Claude Code Hooks

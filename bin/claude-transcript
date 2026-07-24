@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Convert a Claude Code session into shareable, mobile-friendly HTML.
+#
+# Thin wrapper around Simon Willison's `claude-code-transcripts`
+# (https://github.com/simonw/claude-code-transcripts) so the tool has a
+# memorable name on PATH. All arguments forward to the underlying CLI.
+#
+# With no arguments it runs the default `local` subcommand: an interactive
+# picker over recent local sessions that opens the result in a browser.
+# Other subcommands: `all` (browsable archive of every session), `json`
+# (a specific JSONL file or URL), `web` (a session from the Claude API).
+# Add `--gist` to publish to a GitHub Gist instead (needs `gh`).
+#
+# The tool shells out to a bare `gh gist create`, so the gist lands under
+# whichever identity `gh` resolves (a `GH_TOKEN`/`GITHUB_TOKEN` env token,
+# else the active `gh auth login` account). With multiple accounts that's
+# easy to get wrong, so when `--gist` is passed this wrapper resolves that
+# identity up front (via the same lookup `gh` uses) and asks to confirm
+# before handing off.
+#
+# Pinned per the supply-chain rule; bump deliberately after the cooldown
+# window and re-test the picker.
+set -euo pipefail
+
+wants_gist=false
+for arg in "$@"; do
+  [[ "$arg" == "--gist" ]] && wants_gist=true && break
+done
+
+if [[ "$wants_gist" == true && -t 0 ]]; then
+  # `gh gist create` has no --hostname, so it targets gh's default host:
+  # GH_HOST if set, else the sole authenticated host (which may be a GHES
+  # instance, not github.com), else github.com.
+  if [[ -n "${GH_HOST:-}" ]]; then
+    host="$GH_HOST"
+  else
+    mapfile -t authed_hosts < <(gh auth status --json hosts --jq '.hosts | keys[]' 2>/dev/null)
+    if [[ ${#authed_hosts[@]} -eq 1 ]]; then
+      host="${authed_hosts[0]}"
+    else
+      host="github.com"
+    fi
+  fi
+  # gh's own active-account lookup for that host, so `login`/`tokenSource` are
+  # exactly the identity and credential `gh gist create` will publish with.
+  template='{{range $h, $accounts := .hosts}}{{range $accounts}}{{if .login}}{{.login}} on {{.host}} (auth: {{.tokenSource}}){{end}}{{end}}{{end}}'
+  who=$(gh auth status --active --hostname "$host" --json hosts --template "$template" 2>/dev/null)
+  if [[ -n "$who" ]]; then
+    read -r -p "Publish gist as $who? [y/N] " reply
+    [[ "$reply" == [yY]* ]] || { echo "Aborted." >&2; exit 1; }
+  else
+    echo "Warning: not logged in to $host; 'gh gist create' will likely fail." >&2
+  fi
+fi
+
+exec uvx claude-code-transcripts@0.6 "$@"
