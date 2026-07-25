@@ -272,9 +272,12 @@
     "mode": "hold",
     "autoSubmit": false
   },
-  "theme": "dark",
   "showThinkingSummaries": true,
+  "skipWorkflowUsageWarning": true,
+  "theme": "dark",
   "autoCompactEnabled": true,
   "skipAutoPermissionPrompt": true,
-  "skipWorkflowUsageWarning": true
+  "enabledPlugins": {
+    "rust-analyzer-lsp@claude-plugins-official": true
+  }
 }
