@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# PreToolUse hook: block shell commands containing #.
-# The permission harness treats # as a comment, truncating the rest of the
+# PreToolUse hook: block shell commands containing #, except in permission modes that
+# never prompt. The permission harness treats # as a comment, truncating the rest of the
 # command and causing it to fail pattern matching, which requires manual approval.
 
 set -euo pipefail
@@ -11,11 +11,11 @@ set -euo pipefail
 if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   fails=0
   t() {
-    local want="$1" cmd="$2" got
-    jq -cn --arg c "$cmd" '{tool_input: {command: $c}}' \
+    local want="$1" cmd="$2" mode="${3:-manual}" got
+    jq -cn --arg c "$cmd" --arg m "$mode" '{permission_mode: $m, tool_input: {command: $c}}' \
       | CLAUDE_HOOK_SELFTEST= "$0" >/dev/null 2>&1 && got=0 || got=$?
     [[ "$got" == "$want" ]] ||
-    { printf 'FAIL want=%s got=%s :: %s\n' "$want" "$got" "$cmd"; fails=1; }
+    { printf 'FAIL want=%s got=%s mode=%s :: %s\n' "$want" "$got" "$mode" "$cmd"; fails=1; }
   }
   t 2 'ls -la # show all'
   t 2 '# leading comment'
@@ -23,6 +23,11 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   t 0 'echo foo#bar'
   t 0 'curl https://example.com/#section'
   t 0 'ls -la'
+  t 2 'ls -la # show all' acceptEdits
+  t 2 'ls -la # show all' dontAsk
+  t 2 'ls -la # show all' ''
+  t 0 'ls -la # show all' auto
+  t 0 '# leading comment' bypassPermissions
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
   fi
@@ -31,6 +36,13 @@ fi
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
+PERMISSION_MODE=$(echo "$INPUT" | jq -r '.permission_mode // ""')
+
+# The block only exists to avoid a manual approval prompt. Modes that never prompt for
+# Bash have nothing to lose from truncated pattern matching, so # is harmless there.
+case "$PERMISSION_MODE" in
+  auto | bypassPermissions) exit 0 ;;
+esac
 
 # In bash, # only starts a comment when it begins a word (preceded by whitespace or at the
 # start of the command). Quoted # (e.g. in URLs or grep patterns) is technically still

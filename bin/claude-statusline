@@ -55,10 +55,7 @@ colorize() {
 else echo "$text"; fi
 }
 
-status="${date_str}${branch:+ | ${branch}} | $model $(colorize "$context_pct" "ctx:${context_pct}%")"
-if [[ -n "${effort:-}" ]]; then
-  status+=" | effort:${effort}"
-fi
+status="${date_str}${branch:+ | ${branch}} | ${model}${effort:+ (${effort})} $(colorize "$context_pct" "ctx:${context_pct}%")"
 if [[ -n "${pr_number:-}" ]]; then
   pr_info="pr:#${pr_number}"
   if [[ -n "${pr_review_state:-}" ]]; then
