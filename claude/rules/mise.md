@@ -10,6 +10,20 @@ paths:
 
 # Mise Style Guide
 
+## Global Config vs. a Project's `mise.toml`
+
+Maintain both, deliberately, because they have different audiences:
+
+- The **global config** is your own supporting toolchain: what you want on hand
+  across projects, including tools no single repo declares (a profiler, a
+  benchmarking harness, a diff viewer).
+- A **project's `mise.toml`** declares only what that project needs, pinned, so a
+  contributor gets a working setup from a clone.
+
+A tool appearing in both is not duplication to resolve. The project's entry is the
+contract; the global one is your convenience, and neither can stand in for the
+other.
+
 ## [tools]
 
 - Keep entries sorted alphabetically.
@@ -31,8 +45,12 @@ paths:
 - Curated short names: `mise registry` lists them, `mise registry <name>` shows
   the mapping, and `mise ls-remote <tool>` lists a tool's versions.
 - Not in the registry? Use a backend-prefixed name: `cargo:`, `npm:`, `pipx:`,
-  `go:`, `ubi:owner/repo`, `aqua:`, or an `asdf:` plugin. This reaches most of
+  `go:`, `github:owner/repo`, `aqua:`, or an `asdf:` plugin. This reaches most of
   crates.io / npm / PyPI / Go / GitHub releases.
+- `ubi:` is deprecated (removed in mise 2027.1); use `github:owner/repo`, which
+  also verifies GitHub artifact attestations and SLSA provenance on install.
+- Prefer `github:` over `cargo:` for a Rust tool that publishes release binaries:
+  `cargo:` builds it from source, which can take minutes per install.
 
 ## [env]
 

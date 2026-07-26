@@ -124,7 +124,6 @@
       "Bash(sort *)",
       "Bash(uniq *)",
       "Bash(pre-commit run*)",
-      "Bash(claude-branch-journal*)",
       "Bash(kubectl get *)",
       "Bash(kubectl describe *)",
       "Bash(kubectl logs *)",
@@ -183,10 +182,6 @@
           {
             "type": "command",
             "command": "claude-gh-status"
-          },
-          {
-            "type": "command",
-            "command": "claude-branch-journal"
           }
         ]
       },

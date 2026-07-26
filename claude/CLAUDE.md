@@ -12,6 +12,13 @@
 ## How to Work
 
 - Don't create git commits or push changes on my behalf.
+- Change file contents with the Edit tool, not `sed`/`python`/heredoc text surgery.
+  Hand-rolled replacement skips the uniqueness check, hides the change inside an
+  opaque command, and bypasses the harness's file-state tracking, which then
+  reports "modified on disk since you last read it" and tempts yet more scripting.
+- A command that was blocked or that failed did nothing. Don't assume any artifact
+  it would have produced exists; re-run it before anything downstream reads that
+  output, or you'll debug a stale file instead of the actual change.
 - Don't grind on a blocker. If you've spent a few turns without making real progress (repeated
   failures, going in circles, missing context only I can supply), stop and ask me for help
   instead of continuing to burn time and tokens. This applies especially to third-party tool

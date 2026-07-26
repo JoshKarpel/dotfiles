@@ -19,7 +19,18 @@ you think the API does.
   (`inspect.getsource`, the installed package files) or run it. For a CLI, ask
   the tool itself, `--version` for what's installed and `--help` (or subcommand
   help) for the actual interface, rather than a docs page for a version you
-  don't have.
+  don't have. When `--help` doesn't explain a flag interaction you're seeing, read
+  the tool's source at its exact pinned tag rather than inferring the semantics:
+  a flag that sets a value may still fall through to the behavior you thought it
+  replaced.
+- **Platform behavior is a claim, not a fact.** How a third-party service renders,
+  serves, or size-limits something is worth one `curl -sSIL` before any code
+  depends on it. A remembered, precise-sounding threshold ("renders inline under
+  ~1 MB") is exactly the kind that proves false only after a feature, its tests,
+  and its docs are built on it.
+- **Never state a performance claim you haven't measured**, least of all in a
+  comment or doc. Plausible reasoning about what amortizes or what dominates is
+  frequently backwards, and a measurement is usually one command away.
 - **Treat invariants as claims to test.** "Read-only", "immutable",
   "thread-safe", "idempotent" are properties to confirm, not assume. An object
   can look like a value while holding mutable state (see the values-over-places

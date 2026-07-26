@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
 
-# auto color on everything
-if exists eza; then
-  alias ls="eza"
-  alias ll="eza -lh"
-  alias la="eza -lha"
-else
-  alias ls="ls --color=auto"
-  alias ll="ls -lh --color=auto"
-  alias la="ls -lha --color=auto"
-fi
+# auto color on everything. Deliberately coreutils rather than eza: eza's output
+# format and flags differ enough from ls that Claude misreads them and reaches for
+# flags that don't exist.
+alias ls="ls --color=auto"
+alias ll="ls -lh --color=auto"
+alias la="ls -lha --color=auto"
 alias dir="dir --color=auto"
 alias vdir="vdir --color=auto"
 alias grep="grep --color=auto"

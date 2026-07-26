@@ -34,6 +34,20 @@ just arguments, so tests pass in whatever they need without patching.
 - **Test at the boundary the parser establishes.** Concentrate edge-case tests
   at the point where external input is parsed into internal types. Once data is
   internal, trust the types: don't re-test the parser in every downstream unit.
+- **When a check fails, suspect the check.** A probe can quietly measure the
+  platform's own behavior instead of the thing under test: a browser restoring
+  scroll position, a same-document navigation that never re-runs the script, a
+  default that masks the branch you meant to exercise. Confirm the probe reaches
+  the path you think it does before concluding the code is broken.
+- **Substring assertions match the whole artifact.** Generated output that embeds
+  a script's own source will contain every selector that script mentions, and a
+  negative assertion (`!output.contains("x")`) is satisfied by your own comment
+  explaining why `x` is absent. Assert against the parsed element, or strip
+  comments and embedded sources first.
+- **A corpus sweep discovers; fixtures verify.** Running against real production
+  data is how you find shapes you didn't anticipate. Once found, a shape becomes a
+  committed fixture with a real assertion. "Nothing panicked across 300 files" is
+  slow and proves almost nothing as a standing test.
 - **No `sleep` to synchronize concurrent tests.** Sleeping to wait for a
   background operation is both slow and flaky: any fixed duration is either too
   short (racy under load) or too long (wasted wall-clock). Synchronize on the
