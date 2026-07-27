@@ -271,6 +271,7 @@
   "skipWorkflowUsageWarning": true,
   "theme": "dark",
   "autoCompactEnabled": true,
+  "autoMemoryEnabled": false,
   "skipAutoPermissionPrompt": true,
   "enabledPlugins": {
     "rust-analyzer-lsp@claude-plugins-official": true

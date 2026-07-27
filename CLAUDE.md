@@ -35,99 +35,62 @@ count-claude-tokens --help
 
 ## Claude Code Hooks
 
-Active hooks configured in `~/.claude/settings.json`:
+Hooks are registered in `claude/settings.json` and implemented as scripts in `bin/`.
+Read those two for which hooks exist, what events they fire on, and what each one
+does. What follows is only what neither source states.
 
-- **SessionStart**:
-  - `claude-just-list` — Lists available justfile recipes at session start
-  - `claude-pre-commit-reminder` — If the repo uses pre-commit, points Claude at the `pre-commit-autofix` helper
-  - `claude-python-version` — If this is a Python project, reports the target Python version (from `.python-version` / `pyproject.toml`) and points at the "What's New" docs for changes between versions
-  - `claude-git-status` — Shows git status at session start (registered without a matcher, so it runs on every SessionStart event)
-  - `claude-gh-status` — If authenticated and in a GitHub-backed repo, injects the current repo name/URL and a reminder that `gh` commands default to it; also surfaces the current branch's open PR (number, title, stub `gh pr` commands, and a pointer to the `handle-pr-review` skill) when one exists, and the latest GitHub Actions CI run on the branch only when it failed (workflow, conclusion, stub `gh run` commands, and a pointer to the `debug-gha` skill)
-- **PreToolUse (Bash)**:
-  - `claude-uv-check` — Reminds Claude to use `uv run python` in uv projects
-  - `claude-read-check` — Blocks `sed -n X,Yp`, `head -n N file`, and `tail -n N file` used just to read files; tells Claude to use the Read tool with `offset`/`limit` instead
-  - `claude-shell-comment-check` — Blocks shell commands where `#` appears as a comment
-    (preceded by whitespace or at the start of the command); the permission harness truncates
-    at `#`, causing pattern matching to fail; tells Claude to write a temp script file instead.
-    Skipped in permission modes that never prompt for Bash (`auto`, `bypassPermissions`), where
-    a failed pattern match costs nothing. Carries its own tests: run
-    `CLAUDE_HOOK_SELFTEST=1 claude-shell-comment-check`
-  - `claude-git-dash-c-check` — Blocks `git -C <dir>` when the path resolves to the current repository (redundant; just run without `-C`); allows it when targeting a different repo
-  - `claude-http-server-bind-check` — Blocks `python -m http.server` without an explicit `--bind`/`-b`; the module defaults to binding all interfaces (0.0.0.0), so a local static site should pass `--bind 127.0.0.1`
-  - `claude-rm-scope-check` — Blocks an `rm` whose target escapes the work area (the
-    current git repo plus the session scratchpad, see `TEMP_PREFIXES` in the script);
-    in-scope deletes
-    (recursive or not) pass through. Tokenizes the command so it also catches `rm` via a
-    wrapper (`sudo`/`env`/`xargs`), by path (`/bin/rm`), after a `cd`, or inside `sh -c` /
-    `python -c` inline code. The settings deny list keeps only never-in-scope catastrophic
-    backstops (`rm -rf ~`, `rm -rf $HOME`, `rm -rf /`). Carries its own tests: run
-    `CLAUDE_HOOK_SELFTEST=1 claude-rm-scope-check`
-  - `claude-gh-api-check` — Auto-approves read-only `gh api` calls and blocks ones
-    that write to a remote, so reads don't prompt while writes stay something the
-    user does. Tokenizes the command and classifies each `gh api` invocation:
-    reads (`permissionDecision: allow`) are REST `GET`/`HEAD` calls and GraphQL
-    queries; writes (`deny`) are a REST write method (`-X POST`/`PUT`/`PATCH`/`DELETE`),
-    field flags that auto-switch gh to POST (`-f`/`-F`/`--field`/`--input`), or a
-    GraphQL `mutation`; anything it can't prove (a GraphQL query read from
-    `@file`/`@-`, a read piped into an unrecognized command) emits nothing and falls
-    through to the normal prompt. Only `allow` requires the whole command to be
-    provably read-only (every segment a read `gh api`, a `cd`, or a read-only text
-    tool, with no command substitution); local output redirection (`>`, `2>`,
-    `2>&1`) is ignored, since the hook guards only against remote writes, not where
-    output lands locally; `deny` fires on the first write segment. Replaces the former blanket `Bash(gh api graphql *)` allow, which
-    auto-approved mutations. Carries its own tests: run
-    `CLAUDE_HOOK_SELFTEST=1 claude-gh-api-check`
-  - `claude-awk-check` — Auto-approves read-only `awk` calls so field-extraction
-    and filtering don't prompt, while writes fall through to the normal prompt (no
-    `deny`: a write should *ask*, not be blocked). Tokenizes the command and
-    classifies each `awk` invocation: a `read` (`permissionDecision: allow`) has a
-    visible inline program (not `-f file`, not `-i`/`--include`) reached through only
-    recognized options, containing none of `>`, `|`, or `system` (covering `>`/`>>`
-    redirection, `|`/`|&` pipes and `cmd | getline`, and `system()`); anything else
-    emits nothing and defers. `>` is awk's comparison operator too, so read-only
-    `$1 > 5` conservatively defers rather than risk auto-approving `print > "f"`
-    (comparisons with `<` stay allowed). Like `claude-gh-api-check`, only `allow`
-    requires whole-command purity (every segment a read-only `awk`, a `cd`, or a
-    read-only text tool, with no redirection or command substitution, and at least
-    one `awk` read). Carries its own tests: run
-    `CLAUDE_HOOK_SELFTEST=1 claude-awk-check`
-- **Stop**: `claude-stop` runs the checks below in sequence (not parallel, since hooks in
-  a group otherwise run in parallel and order isn't guaranteed) and only plays the stop
-  sound if none of them blocked, so the sound means Claude is actually stopping rather
-  than retrying after a block. First, if Claude's last message looks like a question
-  (contains `?`), it's handing control back to the user, so the orchestrator skips every
-  check, plays the stop sound, and lets Claude stop:
-  - `claude-stop-precommit` — Checks for untracked files first; then runs
-    `git add --update` and if pre-commit is configured runs it, exiting early on
-    success; on failure, re-stages auto-fixes (`git add --update`) and runs it once more,
-    blocking if still failing
-  - `claude-stop-finish` — Once per change-set, nudges Claude through a structured
-    finishing pass: (1) consistency updates (CLAUDE.md, docs, changelogs, etc.),
-    (2) verify the changes work (e.g. build, type-checking, tests).
-    Uses the shared `claude-changeset-guard` helper: fires once per never-before-seen
-    change-set (fingerprinted via `git diff HEAD` + untracked files, keyed per branch,
-    stored in `.git/claude-finish/`), re-fires only when Claude changes the diff, and
-    goes quiet once a pass produces no changes. Skips during merge/rebase.
+### Design Constraints
 
-  All Stop hooks output JSON: `additionalContext` carries the message to Claude
-  without displaying it in the TUI; `systemMessage` shows a brief visible indicator.
-  - `claude-sound stop` — Plays stop sound notification
-- **Notification**: `claude-sound notify` — Plays notification sound
-- **StatusLine**: `claude-statusline` — Custom status line display
-
-## Hook Design
-
-Hooks run in non-interactive shell subprocesses, so functions defined in `sources/` (e.g., `exists`) are **not available**. Any shared logic needed by hooks must be a standalone script in `bin/`, not a sourced function.
+- Hooks run in non-interactive shell subprocesses, so functions defined in
+  `sources/` (e.g. `exists`) are _not_ available. Shared logic needed by hooks must
+  be a standalone script in `bin/`, not a sourced function.
+- Hooks registered together in one group run in parallel, with no guaranteed order.
+  `claude-stop` is therefore an orchestrator rather than a group: it runs its checks
+  in sequence and plays the stop sound only when none of them blocked, so the sound
+  means Claude is actually stopping rather than retrying after a block.
+- Stop hooks return JSON: `additionalContext` carries a message to Claude without
+  displaying it in the TUI, `systemMessage` shows a brief visible indicator.
+- A hook that auto-approves has to prove the _whole_ command is safe, while one that
+  blocks needs only a single bad segment. `claude-gh-api-check` and
+  `claude-awk-check` are both built around that asymmetry: `allow` requires every
+  segment to be read-only, and anything unproven emits nothing so the call falls
+  through to the normal prompt.
+- `claude-changeset-guard` is the shared helper for firing at most once per
+  change-set. It fingerprints the working diff plus untracked files, keys the result
+  per branch, and stores state under the git directory.
+- The `deny` list in `settings.json` stays thin on purpose. `claude-rm-scope-check`
+  decides whether an `rm` escapes the work area, so `deny` keeps only the
+  never-in-scope catastrophic backstops it can't reason about.
 
 ### Hook Self-Tests
 
-A hook with non-trivial matching carries its own tests, gated on the `CLAUDE_HOOK_SELFTEST` environment variable so nothing pollutes its real arguments. Run a hook's tests with `CLAUDE_HOOK_SELFTEST=1 <hook-name>`; it prints results and exits 0 (pass) or 1 (fail). Keep the harness embedded in the hook rather than factored into a shared script: a hook should stay self-contained and copy-pasteable, and a small duplicated harness is a better trade than a hidden dependency.
+A hook with non-trivial matching carries its own tests, gated on the
+`CLAUDE_HOOK_SELFTEST` environment variable so nothing pollutes its real arguments.
+Run a hook's tests with `CLAUDE_HOOK_SELFTEST=1 <hook-name>`; it prints results and
+exits 0 (pass) or 1 (fail). Keep the harness embedded in the hook rather than
+factored into a shared script: a hook should stay self-contained and
+copy-pasteable, and a small duplicated harness is a better trade than a hidden
+dependency.
 
-Each participating hook carries a `# CLAUDE_HOOK_SELFTEST` marker comment line as an explicit declaration. The `claude-hook-selftests` runner discovers the set from those markers (no separate list to drift), runs each with the env var set, and fails if any hook's tests fail. It's wired into pre-commit (`files: ^bin/`), so a hook regression fails the commit. A missing dependency (`jq`, `python3`) surfaces as a failed run rather than a silent pass, since the hook whose tests can't run exits non-zero.
+Each participating hook carries a `# CLAUDE_HOOK_SELFTEST` marker comment line as an
+explicit declaration. The `claude-hook-selftests` runner discovers the set from those
+markers, so there's no separate list to drift. It's wired into pre-commit
+(`files: ^bin/`), so a hook regression fails the commit. A missing dependency (`jq`,
+`python3`) surfaces as a failed run rather than a silent pass, since the hook whose
+tests can't run exits non-zero.
 
-- **Bash hooks** embed a ~10-line block right after `set -euo pipefail` (before reading stdin). It defines a `t <want-exit> <command>` helper that re-invokes the hook (`CLAUDE_HOOK_SELFTEST= "$0"`) with a crafted `{tool_input:{command:…}}` payload and asserts the exit code. See `claude-http-server-bind-check`, `claude-read-check`, `claude-shell-comment-check` for the copy-paste template.
-- **Python hooks** check the env var in `main()` and run an embedded case matrix against a pure `(command, cwd, repo_root) -> …` function, so the tests need no git or filesystem. See `claude-rm-scope-check`.
-- Hooks whose result depends on external state (`claude-uv-check` needs a uv project, `claude-git-dash-c-check` needs a specific git repo) are **not** self-tested this way: a black-box self-test can't set up that state deterministically without a fixture.
+- **Bash hooks** embed a ~10-line block right after `set -euo pipefail` (before
+  reading stdin). It defines a `t <want-exit> <command>` helper that re-invokes the
+  hook (`CLAUDE_HOOK_SELFTEST= "$0"`) with a crafted `{tool_input:{command:…}}`
+  payload and asserts the exit code. See `claude-http-server-bind-check` for the
+  copy-paste template.
+- **Python hooks** check the env var in `main()` and run an embedded case matrix
+  against a pure `(command, cwd, repo_root) -> …` function, so the tests need no git
+  or filesystem. See `claude-rm-scope-check`.
+- A hook whose result depends on external state is **not** self-tested this way
+  (`claude-uv-check` needs a uv project, `claude-git-dash-c-check` needs a specific
+  git repo). A black-box self-test can't set that up deterministically without a
+  fixture.
 
 ## Claude Code Skills
 
@@ -141,27 +104,15 @@ Rules are read at runtime, while the work is being done, so each one describes w
 
 A cross-reference describing which rule owns which topic is not. That's maintenance guidance for whoever edits the corpus, it goes stale the moment a rule is split or renamed, and it costs context in every session that loads it. Keep that kind of guidance here instead.
 
-Several rules govern prose, and they split by *axis* rather than by document type, so more than one usually applies at once:
-
-- **`writing.md`**: argument, evidence, and scope. How to make a case and back it
-  up, in any prose.
-- **`durable-docs.md`**: how a durable doc addresses time. Tense and voice,
-  replacing obsolete text instead of accreting corrections, keeping volatile
-  metrics out.
-- **`blameless.md`**: how failures and past decisions get framed, including in the
-  documents whose whole job is history.
-- **`comments.md`**: prose addressed to the next person reading an implementation.
-- **`markdown.md`**, **`latex.md`**: formatting and source conventions, scoped by
-  file type.
-- **`rfc2119.md`**: when normative keywords (MUST, SHOULD, MAY) carry weight.
-- **`claude-md.md`**: authoring `CLAUDE.md` files, including what belongs in one
-  versus in a rule.
+Several rules govern prose, and they split by *axis* rather than by document type
+(how to make a case, how a document treats time, how failure gets framed, formatting
+by file type), so more than one usually applies at once. Each rule states its own
+axis in its opening lines; don't restate them here.
 
 Language rules split the same way, source conventions in one file and project
-configuration in another: `rust.md` and `cargo.md`, `python.md` and
-`pyproject.md`. In both pairs the config rule's `paths:` are a subset of the
-source rule's, so the two are always in context together and neither needs to
-mention the other.
+configuration in another: `rust.md` and `cargo.md`, `python.md` and `pyproject.md`.
+In both pairs the config rule's `paths:` are a subset of the source rule's, so the
+two are always in context together and neither needs to mention the other.
 
 ## Conventions
 
@@ -176,5 +127,9 @@ mention the other.
   clean (parseable JSON or empty).
 - Shell scripts use 2-space indentation (enforced by beautysh via pre-commit)
 - Target files in `targets/` are auto-sorted by the `file-contents-sorter` pre-commit hook
-- Pre-commit hooks run via [pre-commit.ci](https://pre-commit.ci) on push; hooks include trailing whitespace, end-of-file fixer, YAML/TOML checks, and beautysh formatting. pre-commit.ci skips `claude-hook-selftests` (it needs a real dev environment), so the `.github/workflows/pre-commit.yml` workflow runs the full suite (self-tests included) on push and PRs. Dependabot keeps the workflow's actions updated.
+- Pre-commit hooks run via [pre-commit.ci](https://pre-commit.ci) on push; see
+  `.pre-commit-config.yaml` for the set. pre-commit.ci skips `claude-hook-selftests`
+  (it needs a real dev environment), so the `.github/workflows/pre-commit.yml`
+  workflow runs the full suite (self-tests included) on push and PRs. Dependabot
+  keeps the workflow's actions updated.
 - The `exists` helper function (from `sources/exists.sh`) is used throughout to check command availability before use

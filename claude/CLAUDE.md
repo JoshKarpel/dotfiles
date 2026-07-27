@@ -12,6 +12,15 @@
 ## How to Work
 
 - Don't create git commits or push changes on my behalf.
+- Auto-memory is off, so nothing persists automatically between sessions. When something
+  is worth keeping past this one, put it in a committed artifact: a rule in
+  `claude/rules/` for portable doctrine, `CLAUDE.md` for how-to-work-with-me guidance, a
+  skill for a procedure, a hook for something the harness should enforce. Ask where it
+  belongs when that isn't obvious, rather than dropping it in the nearest file.
+- Context that belongs in every session but is only true at a point in time wants a
+  `SessionStart` hook that computes it, not a hand-maintained list that drifts. Repo
+  state, available recipes, the current toolchain version: derive it at startup so it
+  can't go stale.
 - Change file contents with the Edit tool, not `sed`/`python`/heredoc text surgery.
   Hand-rolled replacement skips the uniqueness check, hides the change inside an
   opaque command, and bypasses the harness's file-state tracking, which then
