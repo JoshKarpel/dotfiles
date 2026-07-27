@@ -70,3 +70,31 @@ methodology section, a research log, a retrospective), narrating it is correct.
 Don't bake volatile metrics into durable docs: an exact test count, file count,
 or coverage percentage is stale the moment the next change lands. State the
 property ("tests pass", "fully typed"), not the number.
+
+## Don't Enumerate the Discoverable
+
+Don't restate what a reader could recover from the source: the recipes
+`just --list` prints, the scripts in `package.json`, the entries in a config file,
+the contents of a `bin/` directory. Link the command or the file instead ("run
+`just --list` to see available recipes"). The copy drifts the moment someone adds
+an entry and forgets the doc, and nothing fails when it does.
+
+Worse than a list of names is a **paragraph of behavior per item**: what each hook
+matches, what each flag does, what each script classifies. That's an untestable
+prose reimplementation, rotting silently while the code stays correct.
+
+The test is whether one command or one named file would tell the reader the same
+thing. What survives it is what no single source states:
+
+- Constraints invisible from any one file (a hook can't call the shell functions
+  the repo defines, because it runs in a non-interactive subprocess).
+- Rationale for a design that otherwise looks arbitrary (why one check runs in
+  sequence rather than as a parallel group).
+- Interactions between artifacts, where neither alone tells the story (a deny list
+  stays thin _because_ another component does the reasoning).
+- A pointer to an exemplar worth copying, rather than a description of it.
+
+The objection is to a copy maintained by hand, not to the list appearing at all.
+Where the toolchain can generate it at build time (a docs-site plugin or hook, an
+autodoc extension, a preprocessor), derive the list from the source and render it
+in full.
