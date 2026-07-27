@@ -1,8 +1,9 @@
 # Comments
 
 Code comments only: prose addressed to the next person reading the
-implementation. Docstrings document an interface for the people who use it, so
-they follow the documentation rule instead.
+implementation. A docstring is not a comment: it documents an interface for the
+people who use it, which makes it a durable doc, so the durable-docs rule
+governs it instead of this one.
 
 Write no comments by default. Add one only when the WHY is non-obvious:
 a hidden constraint, a subtle invariant, a specific bug workaround,

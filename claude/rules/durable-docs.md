@@ -1,14 +1,13 @@
-# Writing Documentation
+# Durable Docs
 
 Guidance for the *prose* in durable docs: READMEs, API references, guides,
-design and philosophy docs, reports, issue and PR text, and docstrings. It applies
-wherever that prose lives, including docstrings embedded in source files.
+design and philosophy docs, reports, issue and PR text, and docstrings. It
+applies wherever that prose lives, including docstrings embedded in source
+files, since a docstring documents an interface for the people who use it.
 
-The boundary against the comments rule is audience, not file type: a docstring
-documents an interface for the people who use it, so it follows this rule; a
-code comment addresses the next person reading the implementation, so it follows
-the comments rule. For markdown *formatting* (headings, line length, code
-blocks), see the markdown rule.
+What ties the sections below together is how a durable doc addresses time. It
+describes the present state of the thing as if it always was, and the history
+of how it got there lives somewhere else.
 
 ## Tense and Voice
 

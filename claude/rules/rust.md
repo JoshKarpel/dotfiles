@@ -12,8 +12,8 @@ paths:
 
 # Rust Style Guide
 
-For the project's configuration files (edition, toolchain pinning, dependencies,
-rustfmt and clippy settings), see the `cargo` rule.
+Conventions for Rust source: derives, language features, arithmetic, error
+handling, async, and benchmarking.
 
 ## Derive
 

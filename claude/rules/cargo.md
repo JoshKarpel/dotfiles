@@ -11,8 +11,8 @@ paths:
 
 # Cargo Project Configuration
 
-Conventions for a Rust project's configuration files. For the language itself,
-see the `rust` rule, which also loads here.
+Conventions for a Rust project's configuration files: edition, toolchain
+pinning, dependencies, formatting, and linting.
 
 ## Edition
 
@@ -21,8 +21,8 @@ the edition of an existing project as a side effect of other work.
 
 ## Toolchain
 
-Which compiler builds the project, as distinct from the tools it invokes (those
-are Tools, in the `rust` rule). Pin the channel and version at the repo root in
+Which compiler builds the project, as distinct from the tools it invokes. Pin
+the channel and version at the repo root in
 `rust-toolchain.toml`, so
 contributors and CI share one compiler:
 
@@ -40,7 +40,8 @@ the whole project on nightly. Install it once with
 Two cases commonly need it:
 
 - Unstable `rustfmt.toml` options, so formatting runs as `cargo +nightly fmt`.
-- `#[bench]`/`test::Bencher`; the `rust` rule covers the alternatives.
+- `#[bench]`/`test::Bencher`. Prefer staying on stable and reaching for
+  hyperfine or `criterion`/`divan` instead.
 
 ## Dependencies
 

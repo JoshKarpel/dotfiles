@@ -20,8 +20,11 @@ paths:
 - Wrap bullet list items onto continuation lines (indent 2 spaces) rather than
   letting them run long. Long bullets are hard to read in narrow windows and
   hard to edit in-place.
-- Break at natural break points: after a period, comma, or closing parenthesis.
-  Try not to break mid-phrase or mid-clause.
+- Break at natural break points: after a period, comma, colon, or closing
+  parenthesis. Try not to break mid-phrase or mid-clause. This is the
+  *semantic line break* (or "one sentence per line") convention, and the payoff
+  is in the diff: a reworded clause changes one line instead of reflowing the
+  paragraph, so review shows what actually changed.
 - Prose paragraphs should also be wrapped, not left as single long lines.
 
 ## Code Blocks
@@ -40,10 +43,15 @@ paths:
 
 ## Inline Formatting
 
-- Use `**bold**` for emphasis that matters, sparingly. Don't bold for decoration.
+- Use `**bold**` to mark the **first** use of a term you're defining, once, and
+  then never again for that term. That's the job it does well. Don't bold for
+  decoration or general emphasis.
+- Use `_italics_` (underscores, not asterisks) to stress a single pivotal word:
+  `_not_`, `_at runtime_`. Stressing a whole phrase stresses nothing.
 - Use backticks for all code, filenames, CLI flags, and identifiers,
   even short ones like `True` or `-v`.
 - **No em dashes.** Prefer a colon when introducing or appending a clause;
-  otherwise use a comma or parentheses.
+  otherwise use a comma, parentheses, a spaced hyphen (` - `), or a new
+  sentence.
 - **Prefer inline links** placed on a natural word or phrase rather than appended
   at the end of a line. Write `[uv](https://...)` not `uv — [docs](https://...)`.

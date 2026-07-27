@@ -137,6 +137,32 @@ When asked to write a skill, place it in `claude/skills/` in this dotfiles repo 
 
 Rules live in `claude/rules/` and load automatically when Claude works with matching file types (if `paths:` frontmatter is set) or globally (if not). Use the `rule-curator` skill to add or update rules; new rules go in `claude/rules/`, not `claude/skills/`.
 
+Rules are read at runtime, while the work is being done, so each one describes what it does concretely and on its own terms. A cross-reference is appropriate when it tells Claude what to *do* next ("confirm nothing mutates it, see the verify-empirically rule").
+
+A cross-reference describing which rule owns which topic is not. That's maintenance guidance for whoever edits the corpus, it goes stale the moment a rule is split or renamed, and it costs context in every session that loads it. Keep that kind of guidance here instead.
+
+Several rules govern prose, and they split by *axis* rather than by document type, so more than one usually applies at once:
+
+- **`writing.md`**: argument, evidence, and scope. How to make a case and back it
+  up, in any prose.
+- **`durable-docs.md`**: how a durable doc addresses time. Tense and voice,
+  replacing obsolete text instead of accreting corrections, keeping volatile
+  metrics out.
+- **`blameless.md`**: how failures and past decisions get framed, including in the
+  documents whose whole job is history.
+- **`comments.md`**: prose addressed to the next person reading an implementation.
+- **`markdown.md`**, **`latex.md`**: formatting and source conventions, scoped by
+  file type.
+- **`rfc2119.md`**: when normative keywords (MUST, SHOULD, MAY) carry weight.
+- **`claude-md.md`**: authoring `CLAUDE.md` files, including what belongs in one
+  versus in a rule.
+
+Language rules split the same way, source conventions in one file and project
+configuration in another: `rust.md` and `cargo.md`, `python.md` and
+`pyproject.md`. In both pairs the config rule's `paths:` are a subset of the
+source rule's, so the two are always in context together and neither needs to
+mention the other.
+
 ## Conventions
 
 - Python scripts in `bin/` run under `uv`, not the system interpreter. Use the

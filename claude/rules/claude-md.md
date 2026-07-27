@@ -37,4 +37,4 @@ with a rationale? Then it's a rule. Is it "how to work with me" or a
 harness-specific quirk? Then it belongs here. When two pieces of guidance share
 an instinct, keep the personal framing here and the citable doctrine in the
 rule: "don't cite volatile metrics in replies" lives here, while "don't bake
-volatile metrics into durable docs" lives in the documentation rule.
+volatile metrics into durable docs" lives in the durable-docs rule.
