@@ -1,8 +1,8 @@
 # Writing
 
 How to make a case in prose and back it up: argument, evidence, and scope. It
-applies to any prose you write, including docs, design docs, READMEs, PR and
-issue bodies, review comments, and commit messages.
+applies to any prose you write, including chat replies, docs, design docs,
+READMEs, PR and issue bodies, review comments, and commit messages.
 
 ## Argument
 
@@ -42,6 +42,20 @@ issue bodies, review comments, and commit messages.
   more convincing in good prose than in bad, and therefore worse. Check
   specifics against the source before writing them down, per the
   verify-empirically rule.
+
+## Diction
+
+- **Name the concrete thing.** Where a precise term exists, an evocative one is
+  a downgrade: `seam`, `surface`, `layer`, and `boundary` all read as insight
+  while telling the reader less than `trait`, `function signature`,
+  `constructor argument`, or `the HTTP handler` would. Reach for the
+  abstraction only when you mean several concrete things at once and the
+  generalization is the point.
+- **A term of art brings its condition with it.** Michael Feathers defines a
+  `seam` as a place where you can alter behavior without editing in that place,
+  and every seam has an enabling point. Using it for any interface, type, or
+  module boundary asserts that condition where it doesn't hold, so the reader
+  who knows the term is misled and the one who doesn't learns nothing.
 
 ## Scope and register
 
