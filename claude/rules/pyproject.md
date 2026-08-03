@@ -5,6 +5,41 @@ paths:
 
 # pyproject.toml Style Guide
 
+## Version Constraints
+
+`uv add` writes a floor and no ceiling (`rich>=15.0.0`), and `uv init` writes an
+uncapped `requires-python`. Leave both alone: caps arrive by hand, or from
+Poetry's `^1.2`, which means `<2`.
+
+Never cap `requires-python`. `>=3.13` says which Pythons are too old, which is
+knowable; `<4` claims a Python nobody has seen will break the package.
+
+Exclude a specific broken release rather than everything after it, and say when
+it goes:
+
+```toml
+dependencies = [
+    "somelib>=2.1,!=2.4.0",  # 2.4.0 regressed X; drop once 2.4.1 is out
+]
+```
+
+`[build-system] requires` is the one place a cap is cheap, since it resolves in a
+throwaway environment that never has to satisfy anyone else's constraints.
+
+To hold a dependency back locally without publishing that opinion, use a
+constraints file (`uv pip compile --constraints`, or `UV_CONSTRAINT` /
+`PIP_CONSTRAINT`) so the limit stays out of package metadata.
+
+Uncapped dependencies make CI the early-warning system, so let warnings fail:
+
+```toml
+[tool.pytest.ini_options]
+filterwarnings = ["error"]
+```
+
+Add a narrow `"ignore::SomeWarning:module"` entry when a dependency's warning is
+outside your control; don't relax the `error` default to silence one case.
+
 ## uv Cooldown
 
 Set an `exclude-newer` cooldown (a relative duration) under `[tool.uv]` as a
