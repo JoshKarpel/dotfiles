@@ -8,16 +8,24 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 
 ## Repository Structure
 
-- **`dotrc/`** — Files symlinked as `~/.<filename>` (bashrc, zshrc, commonrc, gitconfig, etc.)
+- **`dotrc/`** — Files symlinked as `~/.<filename>` (bashrc, zshrc, commonrc-pre, commonrc-post, gitconfig, etc.)
 - **`config/`** — Entries symlinked into `~/.config/`: directories (`git/`, `bottom/`, `mise/`, `zellij/`) and the single file `starship.toml` (symlinked as `~/.config/starship.toml`, not `~/.config/starship/`)
 - **`claude/`** — Source files symlinked into `~/.claude/` via `bin/link-claude`: the global `CLAUDE.md`, `settings.json`, `skills/`, `rules/`, and `commands/` (personal slash commands, invoked only when explicitly run, e.g. `/disco`). Edit these here, not the symlinks in `~/.claude/`.
-- **`sources/`** — Shell scripts sourced by `commonrc` at shell startup (aliases, git helpers, path management, etc.)
+- **`sources/`** — Shell scripts sourced by `commonrc-pre` at shell startup (aliases, git helpers, path management, etc.)
 - **`targets/`** — Package lists for apt and brew (one package per line, kept sorted by pre-commit)
 - **`bin/`** — Scripts added to PATH via `dotfiles/bin`; add any executable scripts here and they will be available in the shell (e.g., for Claude Code hooks)
 
 ## Shell Startup Chain
 
-`bashrc`/`zshrc` → sources `~/.commonrc` → sources every file in `sources/` → adds `bin/` to PATH → activates mise (node + CLI tools), starship, gh, and cargo
+`bashrc`/`zshrc` → `~/.commonrc-pre` (sources every file in `sources/`, adds `bin/`
+to PATH) → shell-specific setup → `~/.commonrc-post <shell>` (activates mise,
+starship, gh, cargo, then `start_zellij_welcome`)
+
+The split exists because the two ends of startup have different constraints.
+`commonrc-pre` runs early, before mise puts its tools on PATH. `commonrc-post` runs
+last and takes the shell's name as an argument, since everything in it is either
+shell-parameterised or has to come after the rest of startup — `start_zellij_welcome`
+`exec`s zellij on exe.dev VMs, so nothing after it would run.
 
 ## Key Commands
 
@@ -31,6 +39,10 @@ pre-commit run
 # Count Claude tokens in files/dirs via the Anthropic count_tokens API
 # (needs ANTHROPIC_API_KEY). Run with --help for usage and flags.
 count-claude-tokens --help
+
+# Create an exe.dev dev box from this repo, or cut a new one over to an
+# existing name. Run with --help for subcommands and flags.
+exe-dev --help
 ```
 
 ## Claude Code Hooks

@@ -21,6 +21,11 @@ export CDPATH=".:$HOME:$HOME/projects:$HOME/work"
 # default options for less
 export LESS="--no-init -R"
 
+# teach less to page non-text input (archives, images); lesspipe emits the
+# LESSOPEN/LESSCLOSE exports, so this is shell-agnostic despite the SHELL= it
+# wants for its own subprocesses
+[ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
+
 # docker options
 export DOCKER_BUILDKIT=1
 export DOCKER_SCAN_SUGGEST=false

@@ -29,16 +29,9 @@ shopt -s cdspell
 # only auto-complete directory names for cd
 complete -d cd
 
-# make less more friendly for non-text input files, see lesspipe(1)
-[ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
-
 [ -f /usr/share/doc/fzf/examples/key-bindings.bash ] && . /usr/share/doc/fzf/examples/key-bindings.bash
 [ -f /usr/share/doc/fzf/examples/completion.bash ] && . /usr/share/doc/fzf/examples/completion.bash
 
-. "$HOME/.commonrc"
+. "$HOME/.commonrc-pre"
 
-activate_if_available mise mise activate bash
-activate_if_available starship starship init bash
-activate_if_available gh gh completion -s bash
-
-. "$HOME/.cargo/env"
+. "$HOME/.commonrc-post" bash

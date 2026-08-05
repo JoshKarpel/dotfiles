@@ -1,0 +1,169 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["typer"]
+# ///
+"""Create and cut over to exe.dev dev boxes built from this dotfiles repo."""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+import time
+from datetime import UTC, datetime
+from typing import Annotated
+
+import typer
+
+# Integrations attach by tag, so this tag is what wires a fresh box up to the
+# dotfiles and GitHub integrations without any per-VM setup.
+TAG = "dev-box"
+
+LOG = "bootstrap.log"
+
+# The line the bootstrap's EXIT trap writes. A follower needs it to know the
+# run is over, and it carries the status because a failed run exits there too.
+MARKER = "BOOTSTRAP EXIT "
+
+# Runs once at first boot, unattended and without a TTY. exe.dev caps setup
+# scripts at 10KiB, so this stays a bootstrap: clone the repo, hand off to
+# install.sh.
+BOOTSTRAP = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+exec </dev/null >>"$HOME/{LOG}" 2>&1
+
+trap 'echo "{MARKER}$?"' EXIT
+
+# apt prompts on config conflicts otherwise, and nothing is here to answer.
+export DEBIAN_FRONTEND=noninteractive
+
+git clone https://github.int.exe.xyz/JoshKarpel/dotfiles.git "$HOME/dotfiles"
+"$HOME/dotfiles/install.sh"
+"""
+
+app = typer.Typer(no_args_is_help=True, add_completion=False, help=__doc__)
+
+
+def create_args(name: str, cpu: int, memory: str, disk: str) -> list[str]:
+    return [
+        "ssh",
+        "exe.dev",
+        "new",
+        f"--name={name}",
+        f"--tag={TAG}",
+        f"--cpu={cpu}",
+        f"--memory={memory}",
+        f"--disk={disk}",
+        "--setup-script=/dev/stdin",
+    ]
+
+
+def retired_name(canonical: str, when: datetime) -> str:
+    """Where CANONICAL's box goes when a new one takes its name.
+
+    Timestamped so repeated cutovers don't collide on the name, since the
+    previous retiree may still be around pending a rollback.
+    """
+    return f"{canonical}-retired-{when:%Y%m%d-%H%M%S}"
+
+
+def marker_status(line: str) -> int | None:
+    """The exit status the bootstrap reported, or None if this isn't the marker."""
+    if not line.startswith(MARKER):
+        return None
+    try:
+        return int(line.removeprefix(MARKER).strip())
+    except ValueError:
+        return None
+
+
+def wait_for_ssh(host: str) -> None:
+    """Block until the VM answers. First boot has no bounded duration, so the
+    only sensible ceiling is the operator's patience."""
+    while True:
+        reachable = subprocess.run(
+            ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=5", host, "true"],
+            capture_output=True,
+        )
+        if reachable.returncode == 0:
+            return
+        time.sleep(2)
+
+
+def follow_bootstrap(host: str) -> int:
+    """Stream the bootstrap log until it reports an exit status, and return it."""
+    # -F keeps retrying until first boot creates the log. Nothing writes after
+    # the marker, so a pipe close would never be noticed; kill tail explicitly.
+    tail = subprocess.Popen(
+        ["ssh", host, f"tail -n +1 -F {LOG} 2>/dev/null"],
+        stdout=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    try:
+        for line in tail.stdout:  # type: ignore[union-attr]
+            typer.echo(line.rstrip("\n"))
+            status = marker_status(line)
+            if status is not None:
+                return status
+    finally:
+        tail.terminate()
+        tail.wait()
+
+    typer.echo(f"log ended without a status marker; check `ssh {host} cat {LOG}`", err=True)
+    return 1
+
+
+@app.command()
+def create_devbox(
+    name: Annotated[str, typer.Argument(help="Name for the new VM.")],
+    cpu: Annotated[int, typer.Option(help="vCPUs to allocate.")] = 2,
+    memory: Annotated[str, typer.Option(help="Memory to allocate.")] = "8GB",
+    disk: Annotated[str, typer.Option(help="Disk to allocate.")] = "25GB",
+) -> None:
+    """Create a devbox, install the dotfiles on it, and follow the bootstrap.
+
+    Resources come from a pool shared across every VM on the account, so
+    `ssh exe.dev billing plan` is the real ceiling, not these defaults.
+    """
+    subprocess.run(create_args(name, cpu, memory, disk), input=BOOTSTRAP, text=True, check=True)
+
+    host = f"{name}.exe.xyz"
+    typer.echo(f"\nwaiting for {host} to accept ssh...")
+    wait_for_ssh(host)
+
+    status = follow_bootstrap(host)
+    if status != 0:
+        typer.echo(f"\nbootstrap failed with status {status}", err=True)
+        raise typer.Exit(status)
+
+    typer.echo(f"\n{name} is ready: ssh {host}")
+
+
+@app.command()
+def promote(
+    incoming: Annotated[str, typer.Argument(help="The freshly built VM.")],
+    canonical: Annotated[str, typer.Argument(help="The name it should take over.")],
+) -> None:
+    """Hand CANONICAL's name to INCOMING, retiring the old box for rollback."""
+    retired = retired_name(canonical, datetime.now(UTC))
+
+    typer.echo(f"rename {canonical} -> {retired}")
+    typer.echo(f"rename {incoming} -> {canonical}")
+    if not typer.confirm("proceed?"):
+        raise typer.Exit(1)
+
+    # Back to back: the name is unclaimed between these two calls, and exe.dev
+    # names are globally unique, so anyone could take it in the gap.
+    subprocess.run(["ssh", "exe.dev", "rename", canonical, retired], check=True)
+    subprocess.run(["ssh", "exe.dev", "rename", incoming, canonical], check=True)
+
+    typer.echo("\nRoll back with:")
+    typer.echo(f"  ssh exe.dev rename {canonical} {incoming} && ssh exe.dev rename {retired} {canonical}")
+    typer.echo("Or finish with:")
+    typer.echo(f"  ssh exe.dev rm {retired}")
+
+
+if __name__ == "__main__":
+    sys.exit(app())

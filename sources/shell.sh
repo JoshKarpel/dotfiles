@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
 
 function shell() {
-  ps -p $$ -o comm -h | tail -n 1 | sed 's/-//'
+  # Ask the shell to identify itself rather than reading the process table:
+  # `ps -o comm` disagrees across GNU and BSD about whether it prints a bare
+  # name or a full path, and callers match these strings exactly, so a full
+  # path makes every branch fall through in silence.
+  if [[ -n ${ZSH_VERSION:-} ]]; then
+    echo zsh
+  elif [[ -n ${BASH_VERSION:-} ]]; then
+    echo bash
+  else
+    return 1
+  fi
 }
 
 function activate_if_available() {

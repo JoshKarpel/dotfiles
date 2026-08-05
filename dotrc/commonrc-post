@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+# The tail of shell startup, shared by bashrc and zshrc. Source it last, with
+# the shell's own name as the argument:
+#
+#   . "$HOME/.commonrc-post" bash
+#
+# This can't fold into commonrc-pre, which runs too early: mise has to activate
+# before anything can find a mise-installed tool on PATH, and the zellij
+# handoff has to come after everything because it replaces the shell.
+#
+# The shell name is passed in rather than detected: each rc file already knows
+# which shell it is, so injecting it keeps this file free of any dependency on
+# detection working.
+
+activate_if_available mise mise activate "$1"
+activate_if_available starship starship init "$1"
+activate_if_available gh gh completion -s "$1"
+
+. "$HOME/.cargo/env"
+
+# Keep last: on exe.dev VMs this execs zellij, replacing the shell, so anything
+# below it would never run. Defined in sources/exe.sh, absent everywhere else.
+if exists start_zellij_welcome; then
+  start_zellij_welcome
+fi

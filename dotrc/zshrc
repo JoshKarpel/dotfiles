@@ -30,12 +30,8 @@ zle -N down-line-or-beginning-search
 bindkey "^[[A" up-line-or-beginning-search # Up
 bindkey "^[[B" down-line-or-beginning-search # Down
 
-. "$HOME/.commonrc"
+. "$HOME/.commonrc-pre"
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
-activate_if_available mise mise activate zsh
-activate_if_available starship starship init zsh
-activate_if_available gh gh completion -s zsh
-
-. "$HOME/.cargo/env"
+. "$HOME/.commonrc-post" zsh

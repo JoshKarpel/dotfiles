@@ -118,7 +118,7 @@ function do_mise() {
 
 do_config
 
-. "$HOME/.commonrc"
+. "$HOME/.commonrc-pre"
 
 do_apt
 do_locale
