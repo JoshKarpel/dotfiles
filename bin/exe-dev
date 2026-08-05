@@ -26,13 +26,23 @@ LOBBY = "exe.dev"
 # fingerprint rather than a key, so this is the trust anchor: a scanned key is
 # checked against it once, and ssh enforces the pinned result from then on.
 #
-# It covers `<vm>.exe.xyz` as well as the lobby. VMs get no public IP of their
-# own; exe.dev terminates SSH for every VM hostname at the same front door and
-# proxies inward, so all of them present this one key. A VM's own sshd key sits
-# behind that hop and is never what a client sees.
+# It covers `<vm>.exe.xyz` as well as the lobby. Each VM hostname resolves to a
+# public address of its own, but exe.dev terminates SSH for all of them at the
+# same front door and proxies inward, so one key answers everywhere. A VM's own
+# sshd sits behind that hop and admits only the front door, so its key is never
+# what a client sees.
 PUBLISHED_FINGERPRINT = "SHA256:JJOP/lwiBGOMilfONPWZCXUrfK154cnJFXcqlsi6lPo"
 
 KNOWN_HOSTS = Path.home() / ".ssh" / "known_hosts"
+
+VM_SUFFIX = ".exe.xyz"
+
+# The one place a VM hostname sidesteps the front door: exe.dev points a box's
+# own name here at the box itself, so a client running on it meets that VM's
+# own sshd rather than the proxy, and a key the published fingerprint will
+# never match. Reading the override is what settles which box this is, since
+# the override is also what creates the exception.
+HOSTS = Path("/etc/hosts")
 
 # Completion runs on every TAB, where a lobby round trip is an order of
 # magnitude too slow to sit in the path, so names come from a short-lived cache
@@ -114,6 +124,29 @@ def control_plane_command(vm: str, *args: str) -> list[str]:
     return lobby_command("ssh", vm, *args)
 
 
+def vm_host(vm: str) -> str:
+    return f"{vm}{VM_SUFFIX}"
+
+
+def vm_name_in_hosts(hosts: str) -> str | None:
+    """The VM whose own name HOSTS points at the box itself, if any."""
+    for line in hosts.splitlines():
+        if line.startswith("#"):
+            continue
+        for name in line.split()[1:]:
+            if name.endswith(VM_SUFFIX):
+                return name.removesuffix(VM_SUFFIX)
+    return None
+
+
+def local_vm() -> str | None:
+    """The VM this is running on, or None anywhere else."""
+    try:
+        return vm_name_in_hosts(HOSTS.read_text())
+    except OSError:
+        return None
+
+
 def fingerprint(public_key: str) -> str:
     out = subprocess.run(
         ["ssh-keygen", "-lf", "-"], input=public_key, text=True, capture_output=True, check=True
@@ -148,7 +181,13 @@ def public_key_in(output: str) -> str | None:
 
 def pinned_fingerprint(host: str) -> str | None:
     """What known_hosts already records for HOST, if anything."""
-    out = subprocess.run(["ssh-keygen", "-F", host, "-l"], capture_output=True, text=True)
+    # Named rather than left to the default, which ssh-keygen resolves from the
+    # passwd entry while `pin` writes to $HOME, so the two disagree wherever
+    # $HOME is overridden. A file that doesn't exist yet reports on stderr and
+    # yields no fingerprint, which is the answer wanted anyway.
+    out = subprocess.run(
+        ["ssh-keygen", "-F", host, "-l", "-f", str(KNOWN_HOSTS)], capture_output=True, text=True
+    )
     for line in out.stdout.splitlines():
         if line.startswith("#") or not line.strip():
             continue
@@ -190,6 +229,10 @@ def pin_published(host: str) -> None:
         typer.echo(
             f"{host} is pinned to {pinned}, not the published {PUBLISHED_FINGERPRINT}", err=True
         )
+        # ssh-keygen rewrites the whole file, so it refuses outright while any
+        # line in it is malformed, and says so without naming the line.
+        typer.echo(f"  drop the stale entry with: ssh-keygen -R {host}", err=True)
+        typer.echo(f"  if that reports errors, fix the offending lines in {KNOWN_HOSTS}", err=True)
         raise typer.Exit(1)
 
     key = scanned_key_matching(host, PUBLISHED_FINGERPRINT)
@@ -336,7 +379,10 @@ def cached_vm_names() -> list[str]:
 
 
 def complete_vm(incomplete: str) -> list[str]:
-    return [name for name in cached_vm_names() if name.startswith(incomplete)]
+    # The box's own name is the one this cannot reach, so offering it would
+    # only ever complete into an error.
+    here = local_vm()
+    return [name for name in cached_vm_names() if name.startswith(incomplete) and name != here]
 
 
 def list_key_labels() -> list[str]:
@@ -413,7 +459,7 @@ def follow_bootstrap(vm: str) -> int:
         tail.terminate()
         tail.wait()
 
-    typer.echo(f"log ended without a status marker; check `ssh {vm}.exe.xyz cat {LOG}`", err=True)
+    typer.echo(f"log ended without a status marker; check `ssh {vm_host(vm)} cat {LOG}`", err=True)
     return 1
 
 
@@ -452,14 +498,21 @@ def ssh(
     with exe.dev's published key, so this settles it the same way the lobby is
     settled, after which ordinary `ssh <vm>.exe.xyz` works.
 
+    A box's own name is the exception, and is refused: exe.dev points it at
+    that box's own sshd, which admits nothing but the front door.
+
     Anything after VM runs on the box instead of opening a shell.
     """
-    pin_published(f"{vm}.exe.xyz")
+    if vm == local_vm():
+        typer.echo(f"already on {vm}", err=True)
+        raise typer.Exit(1)
+
+    pin_published(vm_host(vm))
 
     # Ordinary ssh straight at the hostname, which is what allocates the
     # terminal an interactive shell needs without being asked for one. Going
     # through the lobby instead would hand ssh a command and get no terminal.
-    command = ["ssh", "-o", "StrictHostKeyChecking=yes", f"{vm}.exe.xyz", *ctx.args]
+    command = ["ssh", "-o", "StrictHostKeyChecking=yes", vm_host(vm), *ctx.args]
     os.execvp(command[0], command)
 
 
@@ -481,7 +534,7 @@ def create_devbox(
 
     typer.echo(f"\nwaiting for {name} to answer...")
     wait_for_vm(name)
-    pin_published(f"{name}.exe.xyz")
+    pin_published(vm_host(name))
 
     status = follow_bootstrap(name)
     if status != 0:
@@ -490,7 +543,7 @@ def create_devbox(
 
     register_key(name)
 
-    typer.echo(f"\n{name} is ready: ssh {name}.exe.xyz")
+    typer.echo(f"\n{name} is ready: ssh {vm_host(name)}")
 
 
 @app.command()

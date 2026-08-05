@@ -82,9 +82,14 @@ they are the same two destinations. Prefer the `exe-dev` forms, from this
 dotfiles repo, which check the key the far end presents against the
 fingerprint exe.dev publishes before connecting, where plain `ssh` from a
 machine that has not reached that host before offers an unrecognised key and
-takes a yes for verification. One published fingerprint covers both, since VMs
-get no public IP and exe.dev terminates SSH for every `<vm>.exe.xyz` at the
-same front door.
+takes a yes for verification. One published fingerprint covers both, since
+exe.dev terminates SSH for every `<vm>.exe.xyz` at the same front door and
+proxies inward, whichever public address the hostname resolves to.
+
+A box's own name is the exception, and `exe-dev ssh` refuses it. On a VM,
+`/etc/hosts` points that one hostname at the box itself, so it reaches the VM's
+own sshd rather than the front door, and that sshd authorizes only exe.dev's
+proxy. Every other VM is reached the same way from a VM as from a laptop.
 
 Both forward their trailing arguments verbatim, so anything a doc page writes
 as `ssh exe.dev X` runs as `exe-dev lobby X`, and `ssh <vm>.exe.xyz X` runs as
