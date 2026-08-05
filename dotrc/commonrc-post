@@ -13,9 +13,15 @@
 # which shell it is, so injecting it keeps this file free of any dependency on
 # detection working.
 
+# Unguarded where the rest are not: a non-interactive `ssh <host> <command>`
+# needs the tools this puts on PATH as much as an interactive shell does.
 activate_if_available mise mise activate "$1"
-activate_if_available starship starship init "$1"
-activate_if_available gh gh completion -s "$1"
+
+activate_if_interactive starship starship init "$1"
+activate_if_interactive gh gh completion -s "$1"
+
+# exe-dev works out the shell for itself rather than taking it as an argument.
+activate_if_interactive exe-dev exe-dev --show-completion
 
 . "$HOME/.cargo/env"
 

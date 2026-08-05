@@ -12,7 +12,7 @@ description: >
   service on one, wiring up a custom domain or integration, debugging SSH,
   scp, proxy, or dev-server-host errors against a VM, or writing scripts
   against the exe.dev CLI or HTTPS API.
-allowed-tools: Bash(curl -sS https://exe.dev/*) Bash(ssh exe.dev help*) WebFetch
+allowed-tools: Bash(curl -sS https://exe.dev/*) Bash(exe-dev lobby help*) WebFetch
 ---
 
 # exe.dev
@@ -57,8 +57,8 @@ found. That is the entire point of this skill.
 The lobby prints its own current surface, which beats any page describing it:
 
 ```bash
-ssh exe.dev help
-ssh exe.dev help <command>
+exe-dev lobby help
+exe-dev lobby help <command>
 ```
 
 Many commands take `--json`, which is the right form when the output feeds a
@@ -68,14 +68,27 @@ script or another command.
 
 The single most common source of confusion, and worth knowing before any fetch:
 
-- `ssh exe.dev <command>` reaches the lobby, which manages VM lifecycle,
+- `exe-dev lobby <command>` reaches the lobby, which manages VM lifecycle,
   sharing, integrations, and billing. It runs its own command set, not a shell,
   and does not support `scp` or `sftp`.
-- `ssh <vm>.exe.xyz` reaches a VM. It is ordinary SSH: shell, `scp`, `sftp`,
-  port forwarding.
+- `exe-dev ssh <vm>` reaches a VM. It is ordinary SSH: shell, `scp`, `sftp`,
+  port forwarding, all against the hostname `<vm>.exe.xyz`.
 
 An `scp` or "command not found" failure against `exe.dev` is almost always a
 command aimed at the wrong one of those two.
+
+The docs write those as `ssh exe.dev <command>` and `ssh <vm>.exe.xyz`, and
+they are the same two destinations. Prefer the `exe-dev` forms, from this
+dotfiles repo, which check the key the far end presents against the
+fingerprint exe.dev publishes before connecting, where plain `ssh` from a
+machine that has not reached that host before offers an unrecognised key and
+takes a yes for verification. One published fingerprint covers both, since VMs
+get no public IP and exe.dev terminates SSH for every `<vm>.exe.xyz` at the
+same front door.
+
+Both forward their trailing arguments verbatim, so anything a doc page writes
+as `ssh exe.dev X` runs as `exe-dev lobby X`, and `ssh <vm>.exe.xyz X` runs as
+`exe-dev ssh <vm> X`.
 
 ## Confirm before mutating
 
@@ -101,5 +114,8 @@ The index carries the full map. These three are worth knowing without it:
 ## Non-interactive SSH
 
 Agents run SSH without a TTY, where a host key prompt hangs with no output.
-Use `-o StrictHostKeyChecking=accept-new` on the first connection to a new VM,
-and pass an explicit `timeout` to any `ssh` call that might block.
+`exe-dev ssh <vm> <command>` settles the key against the published fingerprint
+instead of prompting, which is why it is the form to reach a VM with here
+rather than `-o StrictHostKeyChecking=accept-new`, which accepts whatever the
+far end happens to offer. Pass an explicit `timeout` to any `ssh` call that
+might block regardless.

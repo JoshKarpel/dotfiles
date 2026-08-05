@@ -3,17 +3,18 @@
 # requires-python = ">=3.11"
 # dependencies = ["typer"]
 # ///
-"""Create and cut over to exe.dev dev boxes built from this dotfiles repo."""
+"""Reach exe.dev and its VMs over checked host keys, with dev boxes built from this repo."""
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
 import time
 import urllib.request
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -24,14 +25,20 @@ LOBBY = "exe.dev"
 # Published at https://exe.dev/docs/faq/host-key. exe.dev publishes a
 # fingerprint rather than a key, so this is the trust anchor: a scanned key is
 # checked against it once, and ssh enforces the pinned result from then on.
-LOBBY_FINGERPRINT = "SHA256:JJOP/lwiBGOMilfONPWZCXUrfK154cnJFXcqlsi6lPo"
-
-# Every VM generates its own host key at first boot and exe.dev publishes it
-# nowhere, so there is nothing to pin a fresh box against. Reading it off the
-# box over the already-pinned control plane avoids trusting it on first sight.
-VM_HOST_KEY_PATH = "/exe.dev/etc/ssh/ssh_host_ed25519_key.pub"
+#
+# It covers `<vm>.exe.xyz` as well as the lobby. VMs get no public IP of their
+# own; exe.dev terminates SSH for every VM hostname at the same front door and
+# proxies inward, so all of them present this one key. A VM's own sshd key sits
+# behind that hop and is never what a client sees.
+PUBLISHED_FINGERPRINT = "SHA256:JJOP/lwiBGOMilfONPWZCXUrfK154cnJFXcqlsi6lPo"
 
 KNOWN_HOSTS = Path.home() / ".ssh" / "known_hosts"
+
+# Completion runs on every TAB, where a lobby round trip is an order of
+# magnitude too slow to sit in the path, so names come from a short-lived cache
+# and a stale entry costs at most a name typed out in full.
+VM_CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "exe-dev" / "vms"
+VM_CACHE_TTL = timedelta(minutes=5)
 
 # Integrations attach by tag, so this tag is what wires a fresh box up to the
 # dotfiles and GitHub integrations without any per-VM setup. Scoping the box's
@@ -80,13 +87,20 @@ git clone https://github.int.exe.xyz/JoshKarpel/dotfiles.git "$dotfiles"
 "$HOME/.local/bin/mise" exec -- "$dotfiles/bin/exe-dev" clone-repos
 """
 
-app = typer.Typer(no_args_is_help=True, add_completion=False, help=__doc__)
+app = typer.Typer(no_args_is_help=True, help=__doc__)
 
 
-def lobby_command(*args: str) -> list[str]:
+def lobby_command(*args: str, pty: bool = False) -> list[str]:
     # Never accept-new: the whole point is that exe.dev's key is published, so
     # an unrecognised one is a reason to stop rather than to learn.
-    return ["ssh", "-o", "StrictHostKeyChecking=yes", LOBBY, *args]
+    options = ["-o", "StrictHostKeyChecking=yes"]
+
+    # ssh allocates no terminal when it is handed a command, and every lobby
+    # call is one, so the lobby's interactive commands have to ask for it.
+    if pty:
+        options.append("-t")
+
+    return ["ssh", *options, LOBBY, *args]
 
 
 def control_plane_command(vm: str, *args: str) -> list[str]:
@@ -112,6 +126,26 @@ def known_hosts_entry(host: str, public_key: str) -> str:
     return f"{host} {algorithm} {material}\n"
 
 
+def public_key_in(output: str) -> str | None:
+    """The public key somewhere in OUTPUT, or None if there isn't one.
+
+    A VM's login shell writes its own startup chatter to the same stream as the
+    command's result, so the key arrives with company. Asking ssh-keygen which
+    line parses as a key beats trusting the stream to carry nothing else, and
+    beats matching key types this has to keep a list of.
+    """
+    for line in output.splitlines():
+        candidate = line.strip()
+        if not candidate:
+            continue
+        parsed = subprocess.run(
+            ["ssh-keygen", "-lf", "-"], input=candidate, text=True, capture_output=True
+        )
+        if parsed.returncode == 0:
+            return candidate
+    return None
+
+
 def pinned_fingerprint(host: str) -> str | None:
     """What known_hosts already records for HOST, if anything."""
     out = subprocess.run(["ssh-keygen", "-F", host, "-l"], capture_output=True, text=True)
@@ -129,7 +163,10 @@ def pin(host: str, public_key: str) -> None:
 
 
 def scanned_key_matching(host: str, want: str) -> str | None:
-    scan = subprocess.run(["ssh-keyscan", host], capture_output=True, text=True, check=True)
+    # Unreachable and offering-nothing-that-matches are the same answer here,
+    # and a machine with no exe.dev account hits the first one, so it gets the
+    # caller's message rather than a traceback out of ssh-keyscan.
+    scan = subprocess.run(["ssh-keyscan", host], capture_output=True, text=True)
     for line in scan.stdout.splitlines():
         if line.startswith("#") or not line.strip():
             continue
@@ -139,41 +176,29 @@ def scanned_key_matching(host: str, want: str) -> str | None:
     return None
 
 
-def pin_lobby() -> None:
-    """Make sure known_hosts agrees with the fingerprint exe.dev publishes."""
-    pinned = pinned_fingerprint(LOBBY)
-    if pinned == LOBBY_FINGERPRINT:
+def pin_published(host: str) -> None:
+    """Make sure known_hosts agrees with the fingerprint exe.dev publishes.
+
+    Works for `<vm>.exe.xyz` as much as for the lobby, since one front door
+    answers for all of them, so a VM needs nothing read off the box itself.
+    """
+    pinned = pinned_fingerprint(host)
+    if pinned == PUBLISHED_FINGERPRINT:
         return
 
     if pinned is not None:
-        typer.echo(f"{LOBBY} is pinned to {pinned}, not the published {LOBBY_FINGERPRINT}", err=True)
+        typer.echo(
+            f"{host} is pinned to {pinned}, not the published {PUBLISHED_FINGERPRINT}", err=True
+        )
         raise typer.Exit(1)
 
-    key = scanned_key_matching(LOBBY, LOBBY_FINGERPRINT)
+    key = scanned_key_matching(host, PUBLISHED_FINGERPRINT)
     if key is None:
-        typer.echo(f"{LOBBY} presented no key matching {LOBBY_FINGERPRINT}", err=True)
+        typer.echo(f"{host} presented no key matching {PUBLISHED_FINGERPRINT}", err=True)
         raise typer.Exit(1)
 
-    pin(LOBBY, key)
-    typer.echo(f"pinned {LOBBY} ({LOBBY_FINGERPRINT})")
-
-
-def pin_vm(vm: str) -> None:
-    """Record a new box's host key, read over the pinned control plane.
-
-    Nothing here connects to the box directly, but doing this means the first
-    ordinary `ssh <vm>.exe.xyz` is checked against a key that was learned
-    through a verified channel rather than accepted on sight.
-    """
-    host = f"{vm}.exe.xyz"
-    if pinned_fingerprint(host) is not None:
-        return
-
-    out = subprocess.run(
-        control_plane_command(vm, "cat", VM_HOST_KEY_PATH), capture_output=True, text=True, check=True
-    )
-    pin(host, out.stdout.strip())
-    typer.echo(f"pinned {host} ({fingerprint(out.stdout)})")
+    pin(host, key)
+    typer.echo(f"pinned {host} ({PUBLISHED_FINGERPRINT})", err=True)
 
 
 def register_key(vm: str) -> None:
@@ -186,7 +211,10 @@ def register_key(vm: str) -> None:
     out = subprocess.run(
         control_plane_command(vm, "cat", ".ssh/id_ed25519.pub"), capture_output=True, text=True, check=True
     )
-    public_key = out.stdout.strip()
+    public_key = public_key_in(out.stdout)
+    if public_key is None:
+        typer.echo(f"{vm} returned no public key for .ssh/id_ed25519.pub", err=True)
+        raise typer.Exit(1)
 
     subprocess.run(lobby_command("ssh-key", "add", f"--tag={TAG}", public_key), check=True)
     typer.echo(f"registered {public_key.split()[-1]} scoped to tag {TAG}")
@@ -259,14 +287,56 @@ def invert(plan: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
     return [(kind, new, old) for kind, old, new in reversed(plan)]
 
 
-def rename_command(kind: str, old: str, new: str) -> list[str]:
+def rename_args(kind: str, old: str, new: str) -> list[str]:
     verb = ["rename"] if kind == "vm" else ["ssh-key", "rename"]
-    return lobby_command(*verb, old, new)
+    return [*verb, old, new]
 
 
-def list_vm_names() -> list[str]:
-    out = subprocess.run(lobby_command("ls", "--json"), capture_output=True, text=True, check=True)
+def rename_command(kind: str, old: str, new: str) -> list[str]:
+    return lobby_command(*rename_args(kind, old, new))
+
+
+def lobby_hint(*args: str) -> str:
+    """A lobby command written for a human to paste back, rather than to run here."""
+    return f"exe-dev lobby {' '.join(args)}"
+
+
+def list_vm_names(timeout: float | None = None) -> list[str]:
+    out = subprocess.run(
+        lobby_command("ls", "--json"), capture_output=True, text=True, check=True, timeout=timeout
+    )
     return [vm["vm_name"] for vm in json.loads(out.stdout)["vms"]]
+
+
+def cached_vm_names() -> list[str]:
+    """VM names for completion, refreshed once the cache has aged out.
+
+    Completion must not fail or stall the shell it runs in, so a lobby that is
+    unreachable or slow yields no names at all and the name gets typed in full.
+    """
+    if VM_CACHE.exists():
+        age = datetime.now(UTC) - datetime.fromtimestamp(VM_CACHE.stat().st_mtime, UTC)
+        if age < VM_CACHE_TTL:
+            return VM_CACHE.read_text().split()
+
+    # These dotfiles land on machines with no exe.dev account, where pressing
+    # TAB should not be what first calls out to it. A pinned lobby is the mark
+    # of a machine where that contact has already been made deliberately.
+    if pinned_fingerprint(LOBBY) is None:
+        return []
+
+    try:
+        names = list_vm_names(timeout=5)
+    except (subprocess.SubprocessError, OSError, ValueError, KeyError):
+        return []
+
+    VM_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    VM_CACHE.write_text("\n".join(names))
+    return names
+
+
+def complete_vm(incomplete: str) -> list[str]:
+    return [name for name in cached_vm_names() if name.startswith(incomplete)]
 
 
 def list_key_labels() -> list[str]:
@@ -347,6 +417,52 @@ def follow_bootstrap(vm: str) -> int:
     return 1
 
 
+@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def lobby(ctx: typer.Context) -> None:
+    """Run a lobby command, checking exe.dev's host key first.
+
+    Stands in for `ssh exe.dev ...` on a machine that has never reached the
+    lobby before, where plain ssh would offer an unrecognised key and take a
+    yes for verification. Once known_hosts holds the published key ssh does
+    the checking itself, so from then on this only forwards.
+
+    Anything after `lobby` goes to the lobby verbatim; `exe-dev lobby help`
+    lists what it accepts.
+    """
+    pin_published(LOBBY)
+
+    # Forward a terminal only when there is one to forward: under a pipe or a
+    # redirect a PTY would fold the driver's CRLF translation into `--json`.
+    command = lobby_command(*ctx.args, pty=sys.stdin.isatty() and sys.stdout.isatty())
+
+    # exec so the lobby gets the real terminal: its interactive commands page,
+    # prompt, and draw, none of which survive being piped through a parent.
+    os.execvp(command[0], command)
+
+
+@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def ssh(
+    ctx: typer.Context,
+    vm: Annotated[str, typer.Argument(help="VM to connect to.", autocompletion=complete_vm)],
+) -> None:
+    """Connect to VM, checking its host key against the published one first.
+
+    For the first connection to a VM from a machine, where plain ssh has only
+    the key the far end offers and no way to judge it. `<vm>.exe.xyz` answers
+    with exe.dev's published key, so this settles it the same way the lobby is
+    settled, after which ordinary `ssh <vm>.exe.xyz` works.
+
+    Anything after VM runs on the box instead of opening a shell.
+    """
+    pin_published(f"{vm}.exe.xyz")
+
+    # Ordinary ssh straight at the hostname, which is what allocates the
+    # terminal an interactive shell needs without being asked for one. Going
+    # through the lobby instead would hand ssh a command and get no terminal.
+    command = ["ssh", "-o", "StrictHostKeyChecking=yes", f"{vm}.exe.xyz", *ctx.args]
+    os.execvp(command[0], command)
+
+
 @app.command()
 def create_devbox(
     name: Annotated[str, typer.Argument(help="Name for the new VM.")],
@@ -357,15 +473,15 @@ def create_devbox(
     """Create a devbox, install the dotfiles on it, and follow the bootstrap.
 
     Resources come from a pool shared across every VM on the account, so
-    `ssh exe.dev billing plan` is the real ceiling, not these defaults.
+    `exe-dev lobby billing plan` is the real ceiling, not these defaults.
     """
-    pin_lobby()
+    pin_published(LOBBY)
 
     subprocess.run(create_args(name, cpu, memory, disk), input=BOOTSTRAP, text=True, check=True)
 
     typer.echo(f"\nwaiting for {name} to answer...")
     wait_for_vm(name)
-    pin_vm(name)
+    pin_published(f"{name}.exe.xyz")
 
     status = follow_bootstrap(name)
     if status != 0:
@@ -418,7 +534,7 @@ def promote(
         typer.echo(f"{incoming} already holds that name", err=True)
         raise typer.Exit(1)
 
-    pin_lobby()
+    pin_published(LOBBY)
 
     vm_names = list_vm_names()
     if incoming not in vm_names:
@@ -440,11 +556,11 @@ def promote(
 
     typer.echo("\nRoll back with:")
     for kind, old, new in invert(plan):
-        typer.echo(f"  {' '.join(rename_command(kind, old, new))}")
+        typer.echo(f"  {lobby_hint(*rename_args(kind, old, new))}")
 
     if canonical in vm_names:
         typer.echo("Or finish with:")
-        typer.echo(f"  ssh exe.dev rm {retired}")
+        typer.echo(f"  {lobby_hint('rm', retired)}")
 
 
 if __name__ == "__main__":

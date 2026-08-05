@@ -18,8 +18,8 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 ## Shell Startup Chain
 
 `bashrc`/`zshrc` → `~/.commonrc-pre` (sources every file in `sources/`, adds `bin/`
-to PATH) → shell-specific setup → `~/.commonrc-post <shell>` (activates mise,
-starship, gh, cargo, then `start_zellij_welcome`)
+to PATH) → shell-specific setup → `~/.commonrc-post <shell>` (tool, prompt, and
+completion integrations, then `start_zellij_welcome`)
 
 The split exists because the two ends of startup have different constraints.
 `commonrc-pre` runs early, before mise puts its tools on PATH. `commonrc-post` runs
@@ -40,7 +40,8 @@ pre-commit run
 # (needs ANTHROPIC_API_KEY). Run with --help for usage and flags.
 count-claude-tokens --help
 
-# Create an exe.dev dev box from this repo, or cut a new one over to an
+# Reach exe.dev and its VMs over checked host keys: run lobby commands, open a
+# shell on a box, create one from this repo, or cut a new one over to an
 # existing name. Run with --help for subcommands and flags.
 exe-dev --help
 ```
