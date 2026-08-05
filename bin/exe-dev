@@ -16,7 +16,7 @@ import time
 import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -122,6 +122,18 @@ def control_plane_command(vm: str, *args: str) -> list[str]:
     devbox, and keeps every hop on the one channel that can be pinned.
     """
     return lobby_command("ssh", vm, *args)
+
+
+def run_without_stdin(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[Any]:
+    """Run COMMAND with the caller's stdin held back.
+
+    The lobby reads stdin to end before it answers, so a terminal inherited
+    from here is one it waits on forever: `ssh-key add` given a valid key hangs
+    instead of adding it. No lobby command run as a subprocess has anything to
+    send, bar `new`, which supplies its setup script and so runs on its own.
+    The interactive pair keep the terminal by exec'ing into ssh, never here.
+    """
+    return subprocess.run(command, stdin=subprocess.DEVNULL, **kwargs)
 
 
 def vm_host(vm: str) -> str:
@@ -251,7 +263,7 @@ def register_key(vm: str) -> None:
     credential, and a fresh box has none. So it happens from here, which is
     authenticated by definition, and only the public half ever moves.
     """
-    out = subprocess.run(
+    out = run_without_stdin(
         control_plane_command(vm, "cat", ".ssh/id_ed25519.pub"), capture_output=True, text=True, check=True
     )
     public_key = public_key_in(out.stdout)
@@ -259,7 +271,7 @@ def register_key(vm: str) -> None:
         typer.echo(f"{vm} returned no public key for .ssh/id_ed25519.pub", err=True)
         raise typer.Exit(1)
 
-    subprocess.run(lobby_command("ssh-key", "add", f"--tag={TAG}", public_key), check=True)
+    run_without_stdin(lobby_command("ssh-key", "add", f"--tag={TAG}", public_key), check=True)
     typer.echo(f"registered {public_key.split()[-1]} scoped to tag {TAG}")
 
 
@@ -345,7 +357,7 @@ def lobby_hint(*args: str) -> str:
 
 
 def list_vm_names(timeout: float | None = None) -> list[str]:
-    out = subprocess.run(
+    out = run_without_stdin(
         lobby_command("ls", "--json"), capture_output=True, text=True, check=True, timeout=timeout
     )
     return [vm["vm_name"] for vm in json.loads(out.stdout)["vms"]]
@@ -386,7 +398,7 @@ def complete_vm(incomplete: str) -> list[str]:
 
 
 def list_key_labels() -> list[str]:
-    out = subprocess.run(
+    out = run_without_stdin(
         lobby_command("ssh-key", "list", "--json"), capture_output=True, text=True, check=True
     )
     return [key["name"] for key in json.loads(out.stdout)["ssh_keys"]]
@@ -433,7 +445,7 @@ def wait_for_vm(vm: str) -> None:
     on first sight. First boot has no bounded duration, so the only sensible
     ceiling is the operator's patience."""
     while True:
-        reachable = subprocess.run(control_plane_command(vm, "true"), capture_output=True)
+        reachable = run_without_stdin(control_plane_command(vm, "true"), capture_output=True)
         if reachable.returncode == 0:
             return
         time.sleep(2)
@@ -442,9 +454,12 @@ def wait_for_vm(vm: str) -> None:
 def follow_bootstrap(vm: str) -> int:
     """Stream the bootstrap log until it reports an exit status, and return it."""
     # -F keeps retrying until first boot creates the log. Nothing writes after
-    # the marker, so a pipe close would never be noticed; kill tail explicitly.
+    # the marker, so the stream never ends on its own and the client has to be
+    # killed. Only the local end goes: the lobby holds the VM-side session open,
+    # so the remote tail outlives the run.
     tail = subprocess.Popen(
         control_plane_command(vm, f"tail -n +1 -F {LOG} 2>/dev/null"),
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         text=True,
         bufsize=1,
@@ -605,7 +620,7 @@ def promote(
     # Run back to back: a name is unclaimed between the two VM renames, and
     # exe.dev names are globally unique, so anyone could take it in the gap.
     for kind, old, new in plan:
-        subprocess.run(rename_command(kind, old, new), check=True)
+        run_without_stdin(rename_command(kind, old, new), check=True)
 
     typer.echo("\nRoll back with:")
     for kind, old, new in invert(plan):
