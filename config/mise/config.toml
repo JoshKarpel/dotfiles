@@ -13,16 +13,10 @@ corepack = true
 
 [tools]
 ast-grep = "latest"
-aws-cli = "latest"
 bottom = "latest"
 "cargo:cargo-edit" = "latest"
-"cargo:cargo-expand" = "latest"
 "cargo:claude-scriptorium" = "latest"
-conftest = "latest"
 dust = "latest"
-dyff = "latest"
-elixir = "latest"
-erlang = "latest"
 fd = "latest"
 gh = "latest"
 # Prebuilt binary rather than `cargo:`, which builds samply from source.
@@ -35,10 +29,9 @@ k9s = "latest"
 kubectl = "latest"
 node = "lts"
 ripgrep = "latest"
-rust = ["stable", "nightly"]
+rust = "stable"
 sd = "latest"
 starship = "latest"
-terraform = "latest"
 tokei = "latest"
 uv = "latest"
 yq = "latest"
