@@ -1,0 +1,4 @@
+// Only the deviations from zellij's defaults, so upgrades bring new defaults
+// with them. Run `zellij setup --dump-config` to see the full set.
+
+show_startup_tips false

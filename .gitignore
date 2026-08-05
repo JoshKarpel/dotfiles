@@ -7,6 +7,9 @@
 # Claude Code settings (user-specific)
 claude/settings.json
 
+# Machine-local zellij layouts, which reference paths that only exist here
+config/zellij/layouts/
+
 /bin/mc
 /bin/amm
 /bin/kubeseal
