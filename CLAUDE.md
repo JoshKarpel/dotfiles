@@ -44,6 +44,10 @@ count-claude-tokens --help
 # shell on a box, create one from this repo, or cut a new one over to an
 # existing name. Run with --help for subcommands and flags.
 exe-dev --help
+
+# Install Tailscale and join this machine to the tailnet. Run per-machine, not
+# from install.sh: it leaves a daemon running and joins a private network.
+setup-tailscale
 ```
 
 ## Claude Code Hooks

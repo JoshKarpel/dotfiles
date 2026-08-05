@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Install Tailscale and join this machine to the tailnet.
+# Usage: setup-tailscale [<tailscale up flags>...]
+#
+# Kept out of install.sh on purpose. The rest of the toolchain is commands and
+# libraries that sit there until something runs them; this leaves a daemon
+# running and puts the machine on a private network, so which machines get it
+# is a per-machine decision rather than a default.
+
+set -euo pipefail
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  echo "usage: setup-tailscale [<tailscale up flags>...]"
+  exit 0
+fi
+
+if [[ "$(uname)" != "Linux" ]]; then
+  echo "setup-tailscale: Linux only; on macOS or Windows, install the Tailscale app" >&2
+  exit 1
+fi
+
+if ! command -v tailscale >/dev/null 2>&1; then
+  echo "Installing tailscale..."
+  # The installer adds Tailscale's package repository, so the apt upgrade in
+  # install.sh keeps it current from here on.
+  curl -fsSL https://tailscale.com/install.sh | sh
+fi
+
+# The package enables tailscaled itself, so this is for the machine that has
+# tailscale installed with the daemon stopped: `tailscale up` can't reach it.
+sudo systemctl enable --now tailscaled
+
+# `tailscale up` fails rather than silently dropping flags a previous run set,
+# so only reach for it when this machine isn't on the tailnet yet.
+if tailscale status >/dev/null 2>&1; then
+  echo "Already on the tailnet."
+else
+  # --operator is what lets the rest of the tailscale CLI run without sudo.
+  sudo tailscale up --operator="$(id -un)" "$@"
+fi
+
+tailscale status
