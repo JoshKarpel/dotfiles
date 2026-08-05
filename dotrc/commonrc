@@ -30,6 +30,9 @@ export DO_NOT_TRACK=1          # universal opt-out (consoledonottrack.com)
 export CHECKPOINT_DISABLE=1    # HashiCorp version checks + checkpoint telemetry
 export HOMEBREW_NO_ANALYTICS=1 # Homebrew analytics (macOS)
 
+# skip Homebrew's confirmation prompt on install/upgrade/reinstall
+export HOMEBREW_NO_ASK=1
+
 d="$HOME/.dircolors"
 [[ $(uname) != "Darwin" && -r "$d" ]] && eval "$(dircolors "$d")"
 
