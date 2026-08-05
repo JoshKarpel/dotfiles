@@ -35,10 +35,11 @@ function start_zellij_session() {
       exec zellij attach "$session"
     fi
 
-    # --new-session-with-layout, not --layout: with --session set, --layout
-    # means "add these tabs to that running session" and fails when it isn't
-    # there yet, which is exactly the first-login case.
-    exec zellij --session "$session" --new-session-with-layout "$session"
+    # No --layout: the built-in default is what a bare `zellij` gives, and it
+    # tracks upstream as zellij is upgraded. A custom layout here is a dumped
+    # copy of today's default, so it would freeze that and needs shipping to
+    # every VM to work at all.
+    exec zellij --session "$session"
   fi
 
   return 0
