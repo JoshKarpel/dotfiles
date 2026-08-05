@@ -113,6 +113,7 @@ function do_mise() {
 
   "$HOME/.local/bin/mise" install
   "$HOME/.local/bin/mise" upgrade
+  "$HOME/.local/bin/mise" prune --yes
 }
 
 do_config
