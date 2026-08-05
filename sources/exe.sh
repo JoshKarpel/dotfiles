@@ -32,6 +32,24 @@ function start_zellij_session() {
 
   if [[ $- == *i* && -z ${ZELLIJ:-} && -t 0 && -t 1 ]] && exists zellij; then
     if zellij list-sessions --short --no-formatting 2>/dev/null | grep -qx "$session"; then
+      # Zellij sizes a session to the smallest attached client and keeps a
+      # client registered until its process dies, so a window that is gone but
+      # unreaped (a dropped ssh, a closed exe.dev web terminal) silently shrinks
+      # the session for whoever is actually looking at it. Zellij has no
+      # `attach --detach-others` and no per-client action at all, so evict them
+      # here. This is not destructive: the server and every pane outlive their
+      # clients, and a live login that gets kicked just reconnects.
+      #
+      # Both invocations have to match, since whoever created the session is
+      # running `--session` while everyone who came after runs `attach`.
+      #
+      # SIGKILL rather than SIGTERM: a client whose terminal is already gone
+      # blocks forever writing to it on the way out, so SIGTERM leaves the
+      # process alive to accumulate, which is precisely the case being cleaned
+      # up here. Either way the server drops the client and the panes are
+      # untouched, and a kicked login's terminal is restored by its own ssh.
+      pkill -9 -u "$(id -u)" -f "^zellij (attach|--session) $session\$" || true
+
       exec zellij attach "$session"
     fi
 
