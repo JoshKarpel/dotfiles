@@ -262,6 +262,9 @@
     "command": "claude-statusline",
     "refreshInterval": 10
   },
+  "enabledPlugins": {
+    "rust-analyzer-lsp@claude-plugins-official": true
+  },
   "feedbackSurveyRate": 0,
   "effortLevel": "high",
   "askUserQuestionTimeout": "never",
@@ -270,13 +273,10 @@
     "mode": "hold",
     "autoSubmit": false
   },
+  "autoMemoryEnabled": false,
   "showThinkingSummaries": true,
   "skipWorkflowUsageWarning": true,
   "theme": "dark",
   "autoCompactEnabled": true,
-  "autoMemoryEnabled": false,
-  "skipAutoPermissionPrompt": true,
-  "enabledPlugins": {
-    "rust-analyzer-lsp@claude-plugins-official": true
-  }
+  "skipAutoPermissionPrompt": true
 }
