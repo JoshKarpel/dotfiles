@@ -39,3 +39,6 @@ alias j="just"
 
 # watchfiles
 alias w="uvx watchfiles"
+
+# zellij
+alias z="zellij -l welcome"
