@@ -71,12 +71,21 @@ function do_apt() {
 
   log "Updating apt targets..."
 
-  sudo apt update -y
-  xargs -r -a "$BASEDIR/targets/apt.txt" -- sudo apt install -y
-  sudo apt update -y
-  sudo add-apt-repository ppa:git-core/ppa -y
-  sudo apt upgrade -y
-  sudo apt autoremove -y
+  sudo apt-get update
+
+  # add-apt-repository ships in software-properties-common, which is itself one
+  # of the targets, so the PPA can only be added once the targets are in.
+  xargs -r -a "$BASEDIR/targets/apt.txt" -- sudo apt-get install -y
+
+  # add-apt-repository refreshes the package lists itself (that's what makes the
+  # newer git visible to the upgrade below), so re-adding a PPA that's already
+  # configured buys a full refresh and nothing else.
+  if ! grep -rqs "git-core/ppa" /etc/apt/sources.list /etc/apt/sources.list.d/; then
+    sudo add-apt-repository ppa:git-core/ppa -y
+  fi
+
+  sudo apt-get upgrade -y
+  sudo apt-get autoremove -y
 }
 
 function do_locale() {
