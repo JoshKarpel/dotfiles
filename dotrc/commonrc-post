@@ -27,6 +27,6 @@ activate_if_interactive exe-dev exe-dev --show-completion
 
 # Keep last: on exe.dev VMs this execs zellij, replacing the shell, so anything
 # below it would never run. Defined in sources/exe.sh, absent everywhere else.
-if exists start_zellij_welcome; then
-  start_zellij_welcome
+if exists start_zellij_session; then
+  start_zellij_session
 fi

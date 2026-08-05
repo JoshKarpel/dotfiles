@@ -36,3 +36,11 @@ function activate_if_interactive() {
 
   activate_if_available "$@"
 }
+
+# Ctrl+d on an empty prompt exits the shell, which in the last pane of a
+# multiplexer takes the whole session with it. Requiring `exit` costs one word
+# and removes a keystroke's worth of blast radius. Interactive only: a script
+# reading stdin still needs EOF to mean EOF.
+if [[ $- == *i* ]]; then
+  set -o ignoreeof
+fi

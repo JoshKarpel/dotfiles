@@ -2,3 +2,14 @@
 // with them. Run `zellij setup --dump-config` to see the full set.
 
 show_startup_tips false
+
+keybinds {
+    // Quit tears the session down along with everything running in it, and
+    // recovery isn't guaranteed: a short-lived session that exits can vanish
+    // outright rather than landing in the resurrectable list. Detach
+    // (Ctrl+o d) is what's meant nearly every time, and `zellij
+    // delete-session` covers the rest.
+    shared_except "locked" {
+        unbind "Ctrl q"
+    }
+}

@@ -19,12 +19,12 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 
 `bashrc`/`zshrc` → `~/.commonrc-pre` (sources every file in `sources/`, adds `bin/`
 to PATH) → shell-specific setup → `~/.commonrc-post <shell>` (tool, prompt, and
-completion integrations, then `start_zellij_welcome`)
+completion integrations, then `start_zellij_session`)
 
 The split exists because the two ends of startup have different constraints.
 `commonrc-pre` runs early, before mise puts its tools on PATH. `commonrc-post` runs
 last and takes the shell's name as an argument, since everything in it is either
-shell-parameterised or has to come after the rest of startup — `start_zellij_welcome`
+shell-parameterised or has to come after the rest of startup: `start_zellij_session`
 `exec`s zellij on exe.dev VMs, so nothing after it would run.
 
 ## Key Commands
