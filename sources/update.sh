@@ -2,8 +2,8 @@
 
 function update() {
   (
-    cd ~/dotfiles/ || {
-      echo "ERROR: Could not cd to ~/dotfiles/" >&2
+    cd "$DOTFILES" || {
+      echo "ERROR: Could not cd to $DOTFILES" >&2
       return 1
     }
     echo "Pulling latest changes..."
@@ -12,7 +12,7 @@ function update() {
       return 1
     }
     echo "Running install.sh..."
-    bash ~/dotfiles/install.sh || {
+    bash "$DOTFILES/install.sh" || {
       echo "ERROR: install.sh failed" >&2
       return 1
     }

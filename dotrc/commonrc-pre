@@ -41,7 +41,10 @@ export HOMEBREW_NO_ASK=1
 d="$HOME/.dircolors"
 [[ $(uname) != "Darwin" && -r "$d" ]] && eval "$(dircolors "$d")"
 
-DOTFILES="$HOME/dotfiles"
+# Recovered from the symlink install.sh made, so the repo works wherever it is
+# checked out: ~/dotfiles on a laptop, ~/projects/dotfiles on an exe.dev VM.
+# Read off the known symlink path rather than $BASH_SOURCE, which zsh lacks.
+export DOTFILES="$(dirname "$(dirname "$(realpath "$HOME/.commonrc-pre")")")"
 
 . "$DOTFILES/sources/shell.sh"
 . "$DOTFILES/sources/exists.sh"

@@ -8,9 +8,11 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import time
+import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -42,6 +44,19 @@ LOG = "bootstrap.log"
 # run is over, and it carries the status because a failed run exits there too.
 MARKER = "BOOTSTRAP EXIT "
 
+# Every repo on a box lives under ~/projects, and dotfiles is no exception:
+# CDPATH already reaches there, one place for checkouts beats a special case at
+# the top of $HOME, and it puts the bootstrap's own clone where `clone-repos`
+# will find it rather than duplicate it. The bootstrap writes $HOME rather than
+# an expanded path, since it runs as the VM's user, not as whoever ran this.
+PROJECTS_DIR = "projects"
+PROJECTS = Path.home() / PROJECTS_DIR
+
+# Served only inside a VM, which is also the only place these clones belong.
+REFLECTION_INTEGRATIONS = "https://reflection.int.exe.xyz/integrations"
+
+CLONE_URL = re.compile(r"https://github\.int\.exe\.xyz/[\w.-]+/([\w.-]+?)\.git")
+
 # Runs once at first boot, unattended and without a TTY. exe.dev caps setup
 # scripts at 10KiB, so this stays a bootstrap: clone the repo, hand off to
 # install.sh, which is what generates this box's own SSH key.
@@ -55,8 +70,14 @@ trap 'echo "{MARKER}$?"' EXIT
 # apt prompts on config conflicts otherwise, and nothing is here to answer.
 export DEBIAN_FRONTEND=noninteractive
 
-git clone https://github.int.exe.xyz/JoshKarpel/dotfiles.git "$HOME/dotfiles"
-"$HOME/dotfiles/install.sh"
+dotfiles="$HOME/{PROJECTS_DIR}/dotfiles"
+
+git clone https://github.int.exe.xyz/JoshKarpel/dotfiles.git "$dotfiles"
+"$dotfiles/install.sh"
+
+# install.sh installs uv through mise, and nothing has activated mise in this
+# shell, so uv reaches exe-dev's shebang only by way of mise's own exec.
+"$HOME/.local/bin/mise" exec -- "$dotfiles/bin/exe-dev" clone-repos
 """
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help=__doc__)
@@ -255,6 +276,32 @@ def list_key_labels() -> list[str]:
     return [key["name"] for key in json.loads(out.stdout)["ssh_keys"]]
 
 
+def clone_targets(integrations: list[dict]) -> list[tuple[str, str]]:
+    """(clone URL, directory name) for every repo the VM can reach on GitHub.
+
+    Reflection describes a GitHub integration only by the clone command it
+    would print, so the URL comes out of that help text rather than a field of
+    its own, and every match counts because one integration may cover several
+    repos. Two integrations naming the same repo is ordinary rather than an
+    error, hence the dedupe.
+    """
+    targets = [
+        (match.group(0), match.group(1))
+        for integration in integrations
+        if integration["type"] == "github"
+        for match in CLONE_URL.finditer(integration["help"])
+    ]
+    return list(dict.fromkeys(targets))
+
+
+def origin_url(repo: Path) -> str | None:
+    """Where REPO's origin points, or None when it isn't a git repo at all."""
+    out = subprocess.run(
+        ["git", "-C", str(repo), "remote", "get-url", "origin"], capture_output=True, text=True
+    )
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
 def marker_status(line: str) -> int | None:
     """The exit status the bootstrap reported, or None if this isn't the marker."""
     if not line.startswith(MARKER):
@@ -328,6 +375,32 @@ def create_devbox(
     register_key(name)
 
     typer.echo(f"\n{name} is ready: ssh {name}.exe.xyz")
+
+
+@app.command()
+def clone_repos() -> None:
+    """Clone every repo this VM reaches through a GitHub integration.
+
+    Runs on the VM, where reflection resolves. Cloning is skipped for anything
+    already checked out, so this is both the last step of the bootstrap and the
+    way an older box picks up repos granted access after it was built.
+    """
+    with urllib.request.urlopen(REFLECTION_INTEGRATIONS) as response:
+        integrations = json.load(response)["integrations"]
+
+    for url, name in clone_targets(integrations):
+        destination = PROJECTS / name
+        if not destination.exists():
+            subprocess.run(["git", "clone", url, str(destination)], check=True)
+            continue
+
+        # Repos are keyed on bare name, so two owners' repos can collide here.
+        # Saying so beats silently counting the collision as already cloned.
+        origin = origin_url(destination)
+        if origin == url:
+            typer.echo(f"{destination} is already cloned")
+        else:
+            typer.echo(f"leaving {url} uncloned: {destination} is {origin or 'not a git repo'}")
 
 
 @app.command()
