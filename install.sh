@@ -46,6 +46,24 @@ function do_config() {
   "$BASEDIR/bin/link-claude"
 }
 
+function do_ssh_key() {
+  local key=~/.ssh/id_ed25519
+
+  if [[ -f $key ]]; then
+    echo "SSH key already exists at $key"
+    return 0
+  fi
+
+  log "Generating SSH key..."
+
+  mkdir -p ~/.ssh
+  chmod 700 ~/.ssh
+
+  # No passphrase: this key is used unattended (git over SSH, exe.dev), and a
+  # prompt would hang the first-boot bootstrap that has no terminal to ask on.
+  ssh-keygen -t ed25519 -N "" -C "$(whoami)@$(hostname)" -f "$key"
+}
+
 function do_apt() {
   if ! exists apt-get; then
     return 0
@@ -120,6 +138,7 @@ do_config
 
 . "$HOME/.commonrc-pre"
 
+do_ssh_key
 do_apt
 do_locale
 do_brew

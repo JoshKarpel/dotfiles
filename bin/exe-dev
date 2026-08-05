@@ -7,16 +7,33 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated
 
 import typer
 
+LOBBY = "exe.dev"
+
+# Published at https://exe.dev/docs/faq/host-key. exe.dev publishes a
+# fingerprint rather than a key, so this is the trust anchor: a scanned key is
+# checked against it once, and ssh enforces the pinned result from then on.
+LOBBY_FINGERPRINT = "SHA256:JJOP/lwiBGOMilfONPWZCXUrfK154cnJFXcqlsi6lPo"
+
+# Every VM generates its own host key at first boot and exe.dev publishes it
+# nowhere, so there is nothing to pin a fresh box against. Reading it off the
+# box over the already-pinned control plane avoids trusting it on first sight.
+VM_HOST_KEY_PATH = "/exe.dev/etc/ssh/ssh_host_ed25519_key.pub"
+
+KNOWN_HOSTS = Path.home() / ".ssh" / "known_hosts"
+
 # Integrations attach by tag, so this tag is what wires a fresh box up to the
-# dotfiles and GitHub integrations without any per-VM setup.
+# dotfiles and GitHub integrations without any per-VM setup. Scoping the box's
+# own account key to it means a compromised box can only see tagged VMs.
 TAG = "dev-box"
 
 LOG = "bootstrap.log"
@@ -27,7 +44,7 @@ MARKER = "BOOTSTRAP EXIT "
 
 # Runs once at first boot, unattended and without a TTY. exe.dev caps setup
 # scripts at 10KiB, so this stays a bootstrap: clone the repo, hand off to
-# install.sh.
+# install.sh, which is what generates this box's own SSH key.
 BOOTSTRAP = f"""#!/usr/bin/env bash
 set -euo pipefail
 
@@ -45,10 +62,117 @@ git clone https://github.int.exe.xyz/JoshKarpel/dotfiles.git "$HOME/dotfiles"
 app = typer.Typer(no_args_is_help=True, add_completion=False, help=__doc__)
 
 
+def lobby_command(*args: str) -> list[str]:
+    # Never accept-new: the whole point is that exe.dev's key is published, so
+    # an unrecognised one is a reason to stop rather than to learn.
+    return ["ssh", "-o", "StrictHostKeyChecking=yes", LOBBY, *args]
+
+
+def control_plane_command(vm: str, *args: str) -> list[str]:
+    """Reach a VM by way of the lobby, whose host key is pinned.
+
+    VMs are isolated from each other with no private network, so a direct
+    connection needs a key already registered on the account. Going through
+    the lobby works the same whether this runs from a laptop or from another
+    devbox, and keeps every hop on the one channel that can be pinned.
+    """
+    return lobby_command("ssh", vm, *args)
+
+
+def fingerprint(public_key: str) -> str:
+    out = subprocess.run(
+        ["ssh-keygen", "-lf", "-"], input=public_key, text=True, capture_output=True, check=True
+    )
+    return out.stdout.split()[1]
+
+
+def known_hosts_entry(host: str, public_key: str) -> str:
+    algorithm, material = public_key.split()[:2]
+    return f"{host} {algorithm} {material}\n"
+
+
+def pinned_fingerprint(host: str) -> str | None:
+    """What known_hosts already records for HOST, if anything."""
+    out = subprocess.run(["ssh-keygen", "-F", host, "-l"], capture_output=True, text=True)
+    for line in out.stdout.splitlines():
+        if line.startswith("#") or not line.strip():
+            continue
+        return line.split()[2]
+    return None
+
+
+def pin(host: str, public_key: str) -> None:
+    KNOWN_HOSTS.parent.mkdir(mode=0o700, exist_ok=True)
+    with KNOWN_HOSTS.open("a") as known_hosts:
+        known_hosts.write(known_hosts_entry(host, public_key))
+
+
+def scanned_key_matching(host: str, want: str) -> str | None:
+    scan = subprocess.run(["ssh-keyscan", host], capture_output=True, text=True, check=True)
+    for line in scan.stdout.splitlines():
+        if line.startswith("#") or not line.strip():
+            continue
+        key = line.split(" ", 1)[1]
+        if fingerprint(key) == want:
+            return key
+    return None
+
+
+def pin_lobby() -> None:
+    """Make sure known_hosts agrees with the fingerprint exe.dev publishes."""
+    pinned = pinned_fingerprint(LOBBY)
+    if pinned == LOBBY_FINGERPRINT:
+        return
+
+    if pinned is not None:
+        typer.echo(f"{LOBBY} is pinned to {pinned}, not the published {LOBBY_FINGERPRINT}", err=True)
+        raise typer.Exit(1)
+
+    key = scanned_key_matching(LOBBY, LOBBY_FINGERPRINT)
+    if key is None:
+        typer.echo(f"{LOBBY} presented no key matching {LOBBY_FINGERPRINT}", err=True)
+        raise typer.Exit(1)
+
+    pin(LOBBY, key)
+    typer.echo(f"pinned {LOBBY} ({LOBBY_FINGERPRINT})")
+
+
+def pin_vm(vm: str) -> None:
+    """Record a new box's host key, read over the pinned control plane.
+
+    Nothing here connects to the box directly, but doing this means the first
+    ordinary `ssh <vm>.exe.xyz` is checked against a key that was learned
+    through a verified channel rather than accepted on sight.
+    """
+    host = f"{vm}.exe.xyz"
+    if pinned_fingerprint(host) is not None:
+        return
+
+    out = subprocess.run(
+        control_plane_command(vm, "cat", VM_HOST_KEY_PATH), capture_output=True, text=True, check=True
+    )
+    pin(host, out.stdout.strip())
+    typer.echo(f"pinned {host} ({fingerprint(out.stdout)})")
+
+
+def register_key(vm: str) -> None:
+    """Register the box's own public key so it can drive exe.dev itself.
+
+    The box cannot do this for itself: adding a key needs an already-trusted
+    credential, and a fresh box has none. So it happens from here, which is
+    authenticated by definition, and only the public half ever moves.
+    """
+    out = subprocess.run(
+        control_plane_command(vm, "cat", ".ssh/id_ed25519.pub"), capture_output=True, text=True, check=True
+    )
+    public_key = out.stdout.strip()
+
+    subprocess.run(lobby_command("ssh-key", "add", f"--tag={TAG}", public_key), check=True)
+    typer.echo(f"registered {public_key.split()[-1]} scoped to tag {TAG}")
+
+
 def create_args(name: str, cpu: int, memory: str, disk: str) -> list[str]:
-    return [
-        "ssh",
-        "exe.dev",
+    return lobby_command(
         "new",
         f"--name={name}",
         f"--tag={TAG}",
@@ -56,7 +180,7 @@ def create_args(name: str, cpu: int, memory: str, disk: str) -> list[str]:
         f"--memory={memory}",
         f"--disk={disk}",
         "--setup-script=/dev/stdin",
-    ]
+    )
 
 
 def retired_name(canonical: str, when: datetime) -> str:
@@ -66,6 +190,69 @@ def retired_name(canonical: str, when: datetime) -> str:
     previous retiree may still be around pending a rollback.
     """
     return f"{canonical}-retired-{when:%Y%m%d-%H%M%S}"
+
+
+def key_label_for_vm(labels: list[str], vm: str) -> str | None:
+    """The account key belonging to VM, or None when that can't be settled.
+
+    Keys are labelled from their SSH comment, which install.sh sets to
+    `user@hostname`, and a VM's hostname follows its exe.dev name. Two keys
+    claiming one VM is ambiguous rather than an error, so leave both alone.
+    """
+    matches = [label for label in labels if label.endswith(f"@{vm}")]
+    return matches[0] if len(matches) == 1 else None
+
+
+def relabel(label: str, new_vm: str) -> str:
+    return f"{label.rsplit('@', 1)[0]}@{new_vm}"
+
+
+def promotion_plan(
+    incoming: str,
+    canonical: str,
+    retired: str,
+    vm_names: list[str],
+    key_labels: list[str],
+) -> list[tuple[str, str, str]]:
+    """The renames to run, in order, as (kind, from, to).
+
+    Retiring comes first so the incoming VM and its key find both the name and
+    the label free. When nothing holds CANONICAL this degrades to a plain
+    rename, which is the whole point of using it that way.
+    """
+    plan: list[tuple[str, str, str]] = []
+
+    if canonical in vm_names:
+        plan.append(("vm", canonical, retired))
+        if (label := key_label_for_vm(key_labels, canonical)) is not None:
+            plan.append(("key", label, relabel(label, retired)))
+
+    plan.append(("vm", incoming, canonical))
+    if (label := key_label_for_vm(key_labels, incoming)) is not None:
+        plan.append(("key", label, relabel(label, canonical)))
+
+    return plan
+
+
+def invert(plan: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
+    return [(kind, new, old) for kind, old, new in reversed(plan)]
+
+
+def rename_command(kind: str, old: str, new: str) -> list[str]:
+    verb = ["rename"] if kind == "vm" else ["ssh-key", "rename"]
+    return lobby_command(*verb, old, new)
+
+
+def list_vm_names() -> list[str]:
+    out = subprocess.run(lobby_command("ls", "--json"), capture_output=True, text=True, check=True)
+    return [vm["vm_name"] for vm in json.loads(out.stdout)["vms"]]
+
+
+def list_key_labels() -> list[str]:
+    out = subprocess.run(
+        lobby_command("ssh-key", "list", "--json"), capture_output=True, text=True, check=True
+    )
+    return [key["name"] for key in json.loads(out.stdout)["ssh_keys"]]
 
 
 def marker_status(line: str) -> int | None:
@@ -78,25 +265,23 @@ def marker_status(line: str) -> int | None:
         return None
 
 
-def wait_for_ssh(host: str) -> None:
-    """Block until the VM answers. First boot has no bounded duration, so the
-    only sensible ceiling is the operator's patience."""
+def wait_for_vm(vm: str) -> None:
+    """Block until the VM answers, over the control plane so nothing is trusted
+    on first sight. First boot has no bounded duration, so the only sensible
+    ceiling is the operator's patience."""
     while True:
-        reachable = subprocess.run(
-            ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=5", host, "true"],
-            capture_output=True,
-        )
+        reachable = subprocess.run(control_plane_command(vm, "true"), capture_output=True)
         if reachable.returncode == 0:
             return
         time.sleep(2)
 
 
-def follow_bootstrap(host: str) -> int:
+def follow_bootstrap(vm: str) -> int:
     """Stream the bootstrap log until it reports an exit status, and return it."""
     # -F keeps retrying until first boot creates the log. Nothing writes after
     # the marker, so a pipe close would never be noticed; kill tail explicitly.
     tail = subprocess.Popen(
-        ["ssh", host, f"tail -n +1 -F {LOG} 2>/dev/null"],
+        control_plane_command(vm, f"tail -n +1 -F {LOG} 2>/dev/null"),
         stdout=subprocess.PIPE,
         text=True,
         bufsize=1,
@@ -111,7 +296,7 @@ def follow_bootstrap(host: str) -> int:
         tail.terminate()
         tail.wait()
 
-    typer.echo(f"log ended without a status marker; check `ssh {host} cat {LOG}`", err=True)
+    typer.echo(f"log ended without a status marker; check `ssh {vm}.exe.xyz cat {LOG}`", err=True)
     return 1
 
 
@@ -127,18 +312,22 @@ def create_devbox(
     Resources come from a pool shared across every VM on the account, so
     `ssh exe.dev billing plan` is the real ceiling, not these defaults.
     """
+    pin_lobby()
+
     subprocess.run(create_args(name, cpu, memory, disk), input=BOOTSTRAP, text=True, check=True)
 
-    host = f"{name}.exe.xyz"
-    typer.echo(f"\nwaiting for {host} to accept ssh...")
-    wait_for_ssh(host)
+    typer.echo(f"\nwaiting for {name} to answer...")
+    wait_for_vm(name)
+    pin_vm(name)
 
-    status = follow_bootstrap(host)
+    status = follow_bootstrap(name)
     if status != 0:
         typer.echo(f"\nbootstrap failed with status {status}", err=True)
         raise typer.Exit(status)
 
-    typer.echo(f"\n{name} is ready: ssh {host}")
+    register_key(name)
+
+    typer.echo(f"\n{name} is ready: ssh {name}.exe.xyz")
 
 
 @app.command()
@@ -146,23 +335,43 @@ def promote(
     incoming: Annotated[str, typer.Argument(help="The freshly built VM.")],
     canonical: Annotated[str, typer.Argument(help="The name it should take over.")],
 ) -> None:
-    """Hand CANONICAL's name to INCOMING, retiring the old box for rollback."""
-    retired = retired_name(canonical, datetime.now(UTC))
+    """Give INCOMING the name CANONICAL, retiring whatever holds it now.
 
-    typer.echo(f"rename {canonical} -> {retired}")
-    typer.echo(f"rename {incoming} -> {canonical}")
+    When nothing holds CANONICAL this is a plain rename, so it doubles as the
+    way to rename a box without leaving its account SSH key labelled for the
+    old name.
+    """
+    if incoming == canonical:
+        typer.echo(f"{incoming} already holds that name", err=True)
+        raise typer.Exit(1)
+
+    pin_lobby()
+
+    vm_names = list_vm_names()
+    if incoming not in vm_names:
+        typer.echo(f"no VM named {incoming}", err=True)
+        raise typer.Exit(1)
+
+    retired = retired_name(canonical, datetime.now(UTC))
+    plan = promotion_plan(incoming, canonical, retired, vm_names, list_key_labels())
+
+    for kind, old, new in plan:
+        typer.echo(f"{kind:>4} {old} -> {new}")
     if not typer.confirm("proceed?"):
         raise typer.Exit(1)
 
-    # Back to back: the name is unclaimed between these two calls, and exe.dev
-    # names are globally unique, so anyone could take it in the gap.
-    subprocess.run(["ssh", "exe.dev", "rename", canonical, retired], check=True)
-    subprocess.run(["ssh", "exe.dev", "rename", incoming, canonical], check=True)
+    # Run back to back: a name is unclaimed between the two VM renames, and
+    # exe.dev names are globally unique, so anyone could take it in the gap.
+    for kind, old, new in plan:
+        subprocess.run(rename_command(kind, old, new), check=True)
 
     typer.echo("\nRoll back with:")
-    typer.echo(f"  ssh exe.dev rename {canonical} {incoming} && ssh exe.dev rename {retired} {canonical}")
-    typer.echo("Or finish with:")
-    typer.echo(f"  ssh exe.dev rm {retired}")
+    for kind, old, new in invert(plan):
+        typer.echo(f"  {' '.join(rename_command(kind, old, new))}")
+
+    if canonical in vm_names:
+        typer.echo("Or finish with:")
+        typer.echo(f"  ssh exe.dev rm {retired}")
 
 
 if __name__ == "__main__":

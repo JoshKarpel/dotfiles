@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Personal dotfiles repository. The `install.sh` script symlinks configs into place and installs toolchain dependencies (apt, brew, mise). mise manages node, rust (wrapping rustup), uv, cargo plugins (via the `cargo:` backend), and most standalone CLI tools; see `config/mise/config.toml`.
+Personal dotfiles repository. The `install.sh` script symlinks configs into place, generates an SSH key if one is missing, and installs toolchain dependencies (apt, brew, mise). mise manages node, rust (wrapping rustup), uv, cargo plugins (via the `cargo:` backend), and most standalone CLI tools; see `config/mise/config.toml`.
 
 ## Repository Structure
 
