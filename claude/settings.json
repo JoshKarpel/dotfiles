@@ -129,6 +129,7 @@
       "Bash(sort *)",
       "Bash(uniq *)",
       "Bash(pre-commit run*)",
+      "Bash(pre-commit-autofix*)",
       "Bash(kubectl get *)",
       "Bash(kubectl describe *)",
       "Bash(kubectl logs *)",
