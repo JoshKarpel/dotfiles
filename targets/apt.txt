@@ -26,6 +26,8 @@ net-tools
 parallel
 pass
 pkg-config
+podman
+podman-compose
 pulseaudio-utils
 python3
 software-properties-common

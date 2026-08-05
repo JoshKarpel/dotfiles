@@ -9,7 +9,7 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 ## Repository Structure
 
 - **`dotrc/`** — Files symlinked as `~/.<filename>` (bashrc, zshrc, commonrc-pre, commonrc-post, gitconfig, etc.)
-- **`config/`** — Entries symlinked into `~/.config/`: directories (`git/`, `bottom/`, `mise/`, `zellij/`) and the single file `starship.toml` (symlinked as `~/.config/starship.toml`, not `~/.config/starship/`)
+- **`config/`** — Top-level entries symlinked into `~/.config/` under their own names. An entry that is a file lands as a file, so `starship.toml` becomes `~/.config/starship.toml`, not `~/.config/starship/`. Adding a tool's config needs no change to `install.sh`.
 - **`claude/`** — Source files symlinked into `~/.claude/` via `bin/link-claude`: the global `CLAUDE.md`, `settings.json`, `skills/`, `rules/`, and `commands/` (personal slash commands, invoked only when explicitly run, e.g. `/disco`). Edit these here, not the symlinks in `~/.claude/`.
 - **`sources/`** — Shell scripts sourced by `commonrc-pre` at shell startup (aliases, git helpers, path management, etc.)
 - **`targets/`** — Package lists for apt and brew (one package per line, kept sorted by pre-commit)
