@@ -14,7 +14,6 @@ corepack = true
 [tools]
 ast-grep = "latest"
 bottom = "latest"
-"cargo:cargo-edit" = "latest"
 "cargo:claude-scriptorium" = "latest"
 dust = "latest"
 fd = "latest"
