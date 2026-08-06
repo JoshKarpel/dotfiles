@@ -6,6 +6,10 @@ set -euo pipefail
 
 role="${1:-stop}"
 
+# A player that is installed but can't reach an audio server fails at playback rather
+# than at `command -v`, which is every headless VM (no PulseAudio). This runs as a hook,
+# where stderr shows up in the TUI and a non-zero exit reads as a hook error, so a
+# missing pair of speakers must stay silent in both senses.
 case "$(uname -s)" in
   Darwin)
     command -v afplay >/dev/null 2>&1 || exit 0
@@ -21,4 +25,4 @@ case "$(uname -s)" in
       notify) paplay /usr/share/sounds/freedesktop/stereo/message.oga ;;
     esac
     ;;
-esac
+esac 2>/dev/null || true

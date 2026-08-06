@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Exit 0 when nobody is sitting at the terminal, non-zero when someone is.
+#
+# Presence is read from the controlling terminal's access time: reads from a tty
+# advance atime, so it tracks the last keystroke while mtime tracks whatever the
+# program printed. `who`/`w` can't answer this on an exe.dev VM, which has no
+# utmp entries. A disconnected client is just a terminal nobody has typed into,
+# so this covers walking away and detaching alike, at the cost of making a
+# deliberate detach wait out the same threshold.
+
+set -euo pipefail
+
+IDLE_THRESHOLD="${CLAUDE_AWAY_IDLE_SECONDS:-300}"
+
+# A hook subprocess has no controlling terminal of its own; the tty belongs to an
+# ancestor (the claude process), so walk up until one turns up.
+controlling_tty() {
+  local pid="$$" depth=0 ppid tty
+  while [[ "$pid" != "1" && $depth -lt 10 ]]; do
+    read -r ppid tty < <(ps -o ppid=,tty= -p "$pid" 2>/dev/null) || return 1
+    [[ -n "${tty:-}" ]] || return 1
+    if [[ "$tty" != "?" ]]; then
+      printf '/dev/%s\n' "$tty"
+      return 0
+    fi
+    pid="$ppid"
+    depth=$((depth + 1))
+  done
+  return 1
+}
+
+# No terminal anywhere up the tree means nothing is displaying a TUI to miss.
+TTY_PATH=$(controlling_tty) || exit 0
+[[ -e "$TTY_PATH" ]] || exit 0
+ATIME=$(stat -c %X "$TTY_PATH" 2>/dev/null) || exit 0
+
+IDLE=$(( $(date +%s) - ATIME ))
+[[ $IDLE -ge $IDLE_THRESHOLD ]]

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-# exe.dev VMs carry the platform's own tooling at /exe.dev, which makes its
-# presence the cheapest offline test for "am I on a VM rather than a laptop".
-[[ -d /exe.dev ]] || return 0
+# By absolute path, not by name: sources/ loads before commonrc-pre puts bin/ on
+# PATH, so nothing here can call a bin script the way a hook or a prompt would.
+"$DOTFILES/bin/is-exe-dev" || return 0
 
 # Route gh through the GitHub integration so private repos work without a
 # token ever landing on the VM.

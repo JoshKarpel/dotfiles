@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Check if this machine is an exe.dev VM rather than a laptop
+
+set -euo pipefail
+
+# exe.dev VMs carry the platform's own tooling at /exe.dev, which makes its
+# presence the cheapest test: no DNS, no network round trip, and no dependence on
+# which integrations happen to be attached.
+[[ -d /exe.dev ]]

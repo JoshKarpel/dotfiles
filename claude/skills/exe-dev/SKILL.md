@@ -116,6 +116,31 @@ The index carries the full map. These three are worth knowing without it:
 - `https://exe.dev/docs/api.md` and `https://exe.dev/docs/https-api.md` for
   programmatic access, over screen-scraping the CLI.
 
+## Deploying a service, and redeploying it
+
+exe.dev has no CD product: a VM is a persistent computer, so deployment is
+whatever it would be on a box you own. The docs cover the pieces (`--setup-script`
+at first boot, `share port`, custom domains, VM bearer tokens from
+`ssh-key generate-api-key --vm`); what no page states is how a *change* reaches a
+box that is already running.
+
+Prefer pulling on a timer over pushing from CI. A systemd timer on the VM polls
+the remote ref and, when it has moved, pulls, reinstalls, and restarts the
+service unit. The alternative, a CI job that reaches in over SSH or POSTs to a
+deploy endpoint, puts a credential for the VM into CI and converges only when CI
+happens to run. The poll converges from any starting state, needs no inbound
+credential, and keeps the deploy machinery off whatever the service itself is
+doing.
+
+Two details make it cheap. A GitHub integration attached to the VM serves the
+repo at `https://github.int.exe.xyz/<owner>/<repo>.git`, so the pull needs no
+token on the VM. And systemd is PID 1 on the exeuntu image, so the timer and the
+service are both units and "redeploy" is `systemctl restart`.
+
+Put the same clone-and-install in `new --setup-script` so a fresh VM, or a `cp`
+of an existing one, comes up already running instead of needing a first deploy by
+hand.
+
 ## Non-interactive SSH
 
 Agents run SSH without a TTY, where a host key prompt hangs with no output.

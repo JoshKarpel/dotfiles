@@ -236,6 +236,15 @@
             "command": "claude-awk-check"
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion|ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-notify-push question"
+          }
+        ]
       }
     ],
     "Stop": [
@@ -254,6 +263,15 @@
           {
             "type": "command",
             "command": "claude-sound notify"
+          }
+        ]
+      },
+      {
+        "matcher": "permission_prompt|elicitation_dialog|agent_needs_input",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-notify-push permission"
           }
         ]
       }

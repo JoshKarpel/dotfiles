@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Push a Claude Code event to the exe.dev mobile app, but only when nobody is at
+# the terminal to see the TUI. Reads the hook payload on stdin.
+# Usage: claude-notify-push <stop|permission|question>
+
+set -uo pipefail
+
+ENDPOINT="https://notify.int.exe.xyz/"
+ROLE="${1:-stop}"
+
+INPUT=$(cat)
+
+# The endpoint is an exe.dev integration hostname, which resolves only from a VM.
+# Checking locally means everywhere else costs nothing instead of a DNS timeout on
+# every stop.
+is-exe-dev || exit 0
+
+command -v curl >/dev/null 2>&1 || exit 0
+command -v jq >/dev/null 2>&1 || exit 0
+claude-user-away || exit 0
+
+# Which box, and where on it: enough to walk back to the right pane from a phone.
+# The pane is named only when its tab holds more than one, since otherwise the tab
+# already identifies it.
+where() {
+  local host="${HOSTNAME:-$(hostname 2>/dev/null)}"
+  local pane
+
+  if [[ -n "${ZELLIJ:-}" && "${ZELLIJ_PANE_ID:-}" =~ ^[0-9]+$ ]]; then
+    pane=$(zellij action list-panes --tab --json 2>/dev/null | jq -r --argjson id "$ZELLIJ_PANE_ID" '
+      (map(select(.is_plugin == false))) as $terms
+      | ($terms | map(select(.id == $id)) | first) as $me
+      | if $me == null then empty
+        else
+          ($terms | map(select(.tab_id == $me.tab_id)) | length) as $siblings
+          | $me.tab_name + (if $siblings > 1 then "/pane " + ($me.id | tostring) else "" end)
+        end')
+    [[ -n "$pane" ]] && pane="${ZELLIJ_SESSION_NAME:-zellij}/$pane"
+  fi
+
+  printf '%s' "${host:-unknown}${pane:+ · $pane}"
+}
+
+CWD=$(jq -r '.cwd // ""' <<<"$INPUT")
+[[ -n "$CWD" ]] || CWD="$PWD"
+
+LABEL=$(basename "$CWD")
+BRANCH=$(git -C "$CWD" rev-parse --abbrev-ref HEAD 2>/dev/null) || BRANCH=""
+[[ -n "$BRANCH" ]] && LABEL="$LABEL ($BRANCH)"
+
+case "$ROLE" in
+  permission)
+    TITLE="Claude needs you · $LABEL"
+    DETAIL=$(jq -r '.message // ""' <<<"$INPUT")
+    ;;
+  question)
+    # Fires from PreToolUse, so the prompt Claude is about to raise is in the payload.
+    if [[ "$(jq -r '.tool_name // ""' <<<"$INPUT")" == "ExitPlanMode" ]]; then
+      TITLE="Claude needs you · $LABEL"
+      DETAIL="A plan is ready for your review."
+    else
+      TITLE="Claude has a question · $LABEL"
+      DETAIL=$(jq -r '[.tool_input.questions[]?.question] | join(" / ")' <<<"$INPUT")
+    fi
+    ;;
+  *)
+    TITLE="Claude finished · $LABEL"
+    DETAIL=$(jq -r '.last_assistant_message // ""' <<<"$INPUT" | tr '\n\t' '  ')
+    ;;
+esac
+
+if [[ ${#DETAIL} -gt 180 ]]; then
+  DETAIL="${DETAIL:0:179}…"
+fi
+
+BODY="$(where)"
+[[ -n "$DETAIL" ]] && BODY="$BODY"$'\n'"$DETAIL"
+
+jq -n --arg title "$TITLE" --arg body "$BODY" '{title: $title, body: $body}' \
+  | curl -sS --max-time 5 --json @- "$ENDPOINT" >/dev/null 2>&1
+
+exit 0

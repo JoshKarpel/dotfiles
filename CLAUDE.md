@@ -27,6 +27,11 @@ last and takes the shell's name as an argument, since everything in it is either
 shell-parameterised or has to come after the rest of startup: `start_zellij_session`
 `exec`s zellij on exe.dev VMs, so nothing after it would run.
 
+Within `commonrc-pre`, `sources/` loads before `bin/` joins PATH, so a file there
+reaches a bin script only by absolute path through `$DOTFILES` (`sources/exe.sh`
+calling `is-exe-dev`). Everything downstream of startup, hooks and prompts included,
+can just use the name.
+
 ## Key Commands
 
 ```bash
@@ -63,8 +68,8 @@ does. What follows is only what neither source states.
   be a standalone script in `bin/`, not a sourced function.
 - Hooks registered together in one group run in parallel, with no guaranteed order.
   `claude-stop` is therefore an orchestrator rather than a group: it runs its checks
-  in sequence and plays the stop sound only when none of them blocked, so the sound
-  means Claude is actually stopping rather than retrying after a block.
+  in sequence and announces the stop only when none of them blocked, so an
+  announcement means Claude is actually stopping rather than retrying after a block.
 - Stop hooks return JSON: `additionalContext` carries a message to Claude without
   displaying it in the TUI, `systemMessage` shows a brief visible indicator.
 - A hook that auto-approves has to prove the _whole_ command is safe, while one that
@@ -75,6 +80,15 @@ does. What follows is only what neither source states.
 - `claude-changeset-guard` is the shared helper for firing at most once per
   change-set. It fingerprints the working diff plus untracked files, keys the result
   per branch, and stores state under the git directory.
+- A hook whose only job is a side effect still has to keep all three channels clean:
+  the event decides how stdout is read (on `PreToolUse` a JSON object there is a
+  permission decision), stderr surfaces in the TUI, and a non-zero exit reads as a
+  hook error. `claude-notify-push` therefore discards what `curl` and `jq` would
+  print, and `claude-sound` swallows the failure of a player that is installed but
+  has no audio server to reach, which is every headless VM.
+- `claude-notify-push` gates itself on `claude-user-away` and `is-exe-dev`, rather
+  than on where it's registered. Every caller can therefore fire unconditionally, and
+  the same config stays correct on a laptop, where it does nothing.
 - The `deny` list in `settings.json` stays thin on purpose. `claude-rm-scope-check`
   decides whether an `rm` escapes the work area, so `deny` keeps only the
   never-in-scope catastrophic backstops it can't reason about.
@@ -106,8 +120,8 @@ tests can't run exits non-zero.
   or filesystem. See `claude-rm-scope-check`.
 - A hook whose result depends on external state is **not** self-tested this way
   (`claude-uv-check` needs a uv project, `claude-git-dash-c-check` needs a specific
-  git repo). A black-box self-test can't set that up deterministically without a
-  fixture.
+  git repo, `claude-user-away` needs a terminal someone has typed into). A black-box
+  self-test can't set that up deterministically without a fixture.
 
 ## Claude Code Skills
 

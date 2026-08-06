@@ -1,19 +1,25 @@
 #!/usr/bin/env bash
-# Stop hook orchestrator: run the blocking checks in sequence, then play the stop sound
-# only if neither blocked — so the sound means Claude is actually stopping, not retrying
-# after a block. (Hooks within a single Stop group run in parallel, so a separate sound
-# hook can't know whether a sibling is about to block this same attempt.)
+# Stop hook orchestrator: run the blocking checks in sequence, then announce the stop
+# only if neither blocked, so an announcement means Claude is actually stopping rather
+# than retrying after a block. (Hooks within a single Stop group run in parallel, so a
+# separate announcing hook can't know whether a sibling is about to block this attempt.)
 
 set -uo pipefail
 
 INPUT=$(cat)
 
+# Both announcements, together, so the two stop paths below can't drift apart.
+announce() {
+  claude-sound stop || true
+  echo "$INPUT" | claude-notify-push stop || true
+}
+
 # If Claude's last message looks like a question, it's handing control back to the user.
 # Don't let any check block the stop and force it to keep working — Claude is genuinely
-# stopping to await a reply, so play the stop sound and let it stop.
+# stopping to await a reply, so announce it and let it stop.
 LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // ""')
 if [[ "$LAST_MESSAGE" == *"?"* ]]; then
-  claude-sound stop || true
+  announce
   exit 0
 fi
 
@@ -29,5 +35,5 @@ for check in claude-stop-precommit claude-stop-finish; do
   fi
 done
 
-claude-sound stop || true
+announce
 exit 0
