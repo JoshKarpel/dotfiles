@@ -7,9 +7,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -44,11 +47,13 @@ VM_SUFFIX = ".exe.xyz"
 # the override is also what creates the exception.
 HOSTS = Path("/etc/hosts")
 
-# Completion runs on every TAB, where a lobby round trip is an order of
+# Completion runs on every TAB, where an SSH round trip is an order of
 # magnitude too slow to sit in the path, so names come from a short-lived cache
 # and a stale entry costs at most a name typed out in full.
-VM_CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "exe-dev" / "vms"
-VM_CACHE_TTL = timedelta(minutes=5)
+CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "exe-dev"
+VM_CACHE = CACHE / "vms"
+DIR_CACHE = CACHE / "dirs"
+CACHE_TTL = timedelta(minutes=5)
 
 # Integrations attach by tag, so this tag is what wires a fresh box up to the
 # dotfiles and GitHub integrations without any per-VM setup. Scoping the box's
@@ -73,6 +78,15 @@ PROJECTS = Path.home() / PROJECTS_DIR
 REFLECTION_INTEGRATIONS = "https://reflection.int.exe.xyz/integrations"
 
 CLONE_URL = re.compile(r"https://github\.int\.exe\.xyz/[\w.-]+/([\w.-]+?)\.git")
+
+# The desktop launcher on the machine VS Code is installed on, and inside a
+# VS Code terminal the shim it puts on PATH, which forwards to the window that
+# opened the terminal. Either way the window opens where the person is sitting.
+CODE = "code"
+
+# What the box's answer to "where is this directory" is labelled with, so it
+# can be told apart from anything else the login shell puts on the stream.
+PWD_MARKER = "exe-dev-pwd:"
 
 # Runs once at first boot, unattended and without a TTY. exe.dev caps setup
 # scripts at 10KiB, so this stays a bootstrap: clone the repo, hand off to
@@ -138,6 +152,17 @@ def run_without_stdin(command: list[str], **kwargs: Any) -> subprocess.Completed
 
 def vm_host(vm: str) -> str:
     return f"{vm}{VM_SUFFIX}"
+
+
+def vm_command(vm: str, *args: str) -> list[str]:
+    """Reach a VM directly at `<vm>.exe.xyz`, on the front door's pinned key.
+
+    The hop VS Code's Remote-SSH makes as well, so what this settles is the
+    connection VS Code is about to open rather than a channel of its own. It is
+    also the only form that gets a terminal, since the lobby route reaches a VM
+    by handing ssh a command, and ssh allocates no terminal for one.
+    """
+    return ["ssh", "-o", "StrictHostKeyChecking=yes", vm_host(vm), *args]
 
 
 def vm_name_in_hosts(hosts: str) -> str | None:
@@ -371,7 +396,7 @@ def cached_vm_names() -> list[str]:
     """
     if VM_CACHE.exists():
         age = datetime.now(UTC) - datetime.fromtimestamp(VM_CACHE.stat().st_mtime, UTC)
-        if age < VM_CACHE_TTL:
+        if age < CACHE_TTL:
             return VM_CACHE.read_text().split()
 
     # These dotfiles land on machines with no exe.dev account, where pressing
@@ -395,6 +420,101 @@ def complete_vm(incomplete: str) -> list[str]:
     # only ever complete into an error.
     here = local_vm()
     return [name for name in cached_vm_names() if name.startswith(incomplete) and name != here]
+
+
+def folder_uri(vm: str, directory: str) -> str:
+    """The workspace VS Code opens for DIRECTORY on VM.
+
+    Same authority the dashboard's `vscode://vscode-remote/...` links carry,
+    since both name the VM by the hostname Remote-SSH connects to.
+    """
+    return f"vscode-remote://ssh-remote+{vm_host(vm)}{directory}"
+
+
+def resolve_dir_command(directory: str) -> str:
+    """Print DIRECTORY's absolute path on the box, and nothing if it isn't one."""
+    # cd writes the directory it landed in to stdout whenever CDPATH is what
+    # found it, which these dotfiles set, so dropping cd's own output is what
+    # leaves the answer alone on the stream.
+    return f'cd -- {shlex.quote(directory)} >/dev/null && echo "{PWD_MARKER}$PWD"'
+
+
+def resolved_path_in(output: str) -> str | None:
+    """The path a resolve reported, or None when it reported none.
+
+    The answer is marked rather than picked out by shape, because a VM's login
+    shell writes its own startup chatter to the stream the result arrives on,
+    and a shell's own error message about a missing directory names it by an
+    absolute path too. Whether a marked path came back is also what settles
+    success, rather than an exit status, which the lobby answers 0 for even
+    where the remote command failed.
+    """
+    for line in reversed(output.splitlines()):
+        if line.startswith(PWD_MARKER):
+            return line.removeprefix(PWD_MARKER)
+    return None
+
+
+def list_dirs_command(parent: str) -> str:
+    """List the directories directly under PARENT, named as they were typed."""
+    # An ssh command starts in $HOME, so a relative pattern completes what a
+    # relative path means on the box. bash leaves an unmatched glob standing as
+    # a literal and zsh errors on it, so the -d test is what keeps the pattern
+    # itself from being offered as a name. echo rather than printf because a
+    # command reaching a VM by way of the lobby is parsed by a second shell,
+    # which eats the backslash a format string would need. Discarding stderr
+    # keeps a shell's complaint about a missing directory from coming back as
+    # a name, on a channel that may merge the two streams.
+    return (
+        f"""{{ for d in {shlex.quote(parent)}*/; do [ -d "$d" ] && echo "${{d%/}}"; done; }} """
+        "2>/dev/null"
+    )
+
+
+def cached_remote_dirs(vm: str, parent: str) -> list[str]:
+    """Directories under PARENT on VM, refreshed once the cache has aged out.
+
+    Keyed on the directory being listed rather than on what has been typed so
+    far, so narrowing the last segment costs nothing and only descending into a
+    new directory pays for a round trip. A directory name is not a filename, so
+    the key is a digest of it.
+    """
+    cache = DIR_CACHE / vm / hashlib.sha256(parent.encode()).hexdigest()[:16]
+    if cache.exists():
+        age = datetime.now(UTC) - datetime.fromtimestamp(cache.stat().st_mtime, UTC)
+        if age < CACHE_TTL:
+            return cache.read_text().splitlines()
+
+    try:
+        listed = run_without_stdin(
+            vm_command(vm, list_dirs_command(parent)), capture_output=True, text=True, timeout=5
+        )
+    except (subprocess.SubprocessError, OSError):
+        return []
+
+    dirs = listed.stdout.splitlines()
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text("\n".join(dirs))
+    return dirs
+
+
+def complete_dir(ctx: typer.Context, incomplete: str) -> list[str]:
+    vm = ctx.params.get("vm")
+    if vm is None:
+        return []
+
+    # Pressing TAB is not the moment to meet a VM for the first time: an
+    # unpinned host is one ssh stops to ask about, and completion has nowhere
+    # to put the question. Connecting once is what makes the paths complete.
+    if pinned_fingerprint(vm_host(vm)) is None:
+        return []
+
+    head, slash, _ = incomplete.rpartition("/")
+    return [
+        directory
+        for directory in cached_remote_dirs(vm, head + slash)
+        if directory.startswith(incomplete)
+    ]
 
 
 def list_key_labels() -> list[str]:
@@ -524,10 +644,49 @@ def ssh(
 
     pin_published(vm_host(vm))
 
-    # Ordinary ssh straight at the hostname, which is what allocates the
-    # terminal an interactive shell needs without being asked for one. Going
-    # through the lobby instead would hand ssh a command and get no terminal.
-    command = ["ssh", "-o", "StrictHostKeyChecking=yes", vm_host(vm), *ctx.args]
+    command = vm_command(vm, *ctx.args)
+    os.execvp(command[0], command)
+
+
+@app.command()
+def code(
+    vm: Annotated[str, typer.Argument(help="VM to open.", autocompletion=complete_vm)],
+    directory: Annotated[
+        str,
+        typer.Argument(help="Directory on the VM, relative to $HOME.", autocompletion=complete_dir),
+    ] = ".",
+) -> None:
+    """Open DIRECTORY on VM as a VS Code workspace, over a checked host key.
+
+    VS Code's Remote-SSH opens its own connection to `<vm>.exe.xyz`, and offers
+    an unrecognised key as a dialog to click through, so pinning the published
+    key first is what settles that connection before VS Code makes it.
+
+    DIRECTORY is resolved on the box, which is also what keeps a mistyped path
+    from opening a window on nothing.
+    """
+    if vm == local_vm():
+        typer.echo(f"already on {vm}; open it with: {CODE} {directory}", err=True)
+        raise typer.Exit(1)
+
+    if shutil.which(CODE) is None:
+        typer.echo(f"no {CODE} on PATH; run this where VS Code is installed", err=True)
+        raise typer.Exit(1)
+
+    pin_published(vm_host(vm))
+
+    resolved = run_without_stdin(
+        vm_command(vm, resolve_dir_command(directory)), stdout=subprocess.PIPE, text=True
+    )
+    absolute = resolved_path_in(resolved.stdout)
+    if absolute is None:
+        typer.echo(f"{vm} has no directory {directory}", err=True)
+        raise typer.Exit(1)
+
+    # --folder-uri rather than --remote with a path, which leaves the path to
+    # be resolved against wherever `code` was run from, on the wrong machine.
+    command = [CODE, "--folder-uri", folder_uri(vm, absolute)]
+    typer.echo(command[-1])
     os.execvp(command[0], command)
 
 
