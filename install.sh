@@ -143,6 +143,65 @@ function do_mise() {
   "$HOME/.local/bin/mise" prune --yes
 }
 
+# Schedules bin/cloister-codex, which does the work of serving this machine's
+# sessions and is where the exe.dev guard lives. This only sets up the timer that
+# fires it once a day, then runs it once so the box is serving now rather than
+# whenever the timer first comes round.
+function do_cloister() {
+  local units=~/.config/systemd/user
+
+  # cloister-codex guards itself on the same test, which is what makes it safe to
+  # run by hand anywhere. This one is earlier because a laptop has neither
+  # systemctl nor loginctl for the rest of this function to call.
+  "$BASEDIR/bin/is-exe-dev" || return 0
+
+  # `systemctl --user` finds its manager through XDG_RUNTIME_DIR, which a login
+  # shell has and the first-boot bootstrap running install.sh over `ssh host
+  # <command>` does not. Without it every call below fails with "Failed to
+  # connect to bus: No medium found", which reads as systemd being absent and is
+  # really the environment being thin.
+  if [[ -z ${XDG_RUNTIME_DIR:-} ]]; then
+    export XDG_RUNTIME_DIR="$(loginctl show-user "$(id -un)" --value -p RuntimePath)"
+  fi
+
+  log "Scheduling the cloistered codex..."
+
+  mkdir -p "$units"
+
+  # Written rather than symlinked out of config/: the unit has to name the clone
+  # this ran from, and only install.sh knows where that is.
+  cat > "$units/cloister-codex.service" << EOF
+[Unit]
+Description=Update claude-scriptorium and converge the cloistered codex
+
+[Service]
+Type=oneshot
+ExecStart=$BASEDIR/bin/cloister-codex
+EOF
+
+  # Persistent catches up a run the box was shut down for, which is the ordinary
+  # case for a devbox rather than the exception. The randomised delay is why the
+  # window is a day rather than a fixed minute: every box would otherwise reach
+  # for the same release at the same instant.
+  cat > "$units/cloister-codex.timer" << EOF
+[Unit]
+Description=Keep the cloistered codex on the latest published claude-scriptorium
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl --user daemon-reload
+  systemctl --user enable --now cloister-codex.timer
+
+  "$BASEDIR/bin/cloister-codex"
+}
+
 do_config
 
 . "$HOME/.commonrc-pre"
@@ -152,3 +211,4 @@ do_apt
 do_locale
 do_brew
 do_mise
+do_cloister

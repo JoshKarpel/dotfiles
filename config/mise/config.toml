@@ -5,6 +5,12 @@
 [settings]
 # Supply-chain cooldown: ignore releases newer than this for fuzzy resolution.
 minimum_release_age = "7d"
+# The cooldown buys time for a compromised publish to be noticed by someone
+# else. That is worth a week of lag for a dependency, and nothing for a release
+# cut from an account whose compromise would already be my own problem to
+# notice. Exempted so a release is servable the day it ships: `cloister` on the
+# exe.dev boxes runs whatever version this resolves to.
+minimum_release_age_excludes = ["github:JoshKarpel/claude-scriptorium"]
 
 [settings.node]
 # Run `corepack enable` after installing node, activating the bundled
@@ -14,11 +20,15 @@ corepack = true
 [tools]
 ast-grep = "latest"
 bottom = "latest"
-"cargo:claude-scriptorium" = "latest"
 dust = "latest"
 fd = "latest"
 gh = "latest"
-# Prebuilt binary rather than `cargo:`, which builds samply from source.
+# Prebuilt binaries rather than `cargo:`, which builds from source. It matters
+# most for the scriptorium: under `cargo:` the timer that keeps it current would
+# rebuild on every release, spending minutes of a dev box's CPU on what a
+# download settles in seconds. `github:` also verifies GitHub artifact
+# attestations and SLSA provenance, which `cargo:` has no equivalent of.
+"github:JoshKarpel/claude-scriptorium" = "latest"
 "github:mstange/samply" = "latest"
 helm = "latest"
 hyperfine = "latest"

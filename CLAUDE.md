@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Personal dotfiles repository. The `install.sh` script symlinks configs into place, generates an SSH key if one is missing, and installs toolchain dependencies (apt, brew, mise). mise manages node, rust (wrapping rustup), uv, cargo plugins (via the `cargo:` backend), and most standalone CLI tools; see `config/mise/config.toml`.
+Personal dotfiles repository. The `install.sh` script symlinks configs into place, generates an SSH key if one is missing, and installs toolchain dependencies (apt, brew, mise). mise manages node, rust (wrapping rustup), uv, and most standalone CLI tools; see `config/mise/config.toml`.
 
 ## Repository Structure
 
@@ -14,6 +14,13 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 - **`sources/`** — Shell scripts sourced by `commonrc-pre` at shell startup (aliases, git helpers, path management, etc.)
 - **`targets/`** — Package lists for apt and brew (one package per line, kept sorted by pre-commit)
 - **`bin/`** — Scripts added to PATH via `dotfiles/bin`; add any executable scripts here and they will be available in the shell (e.g., for Claude Code hooks)
+
+Systemd user units are the exception to `config/`. `install.sh` writes
+`cloister-codex.{service,timer}` into `~/.config/systemd/user/` rather than
+symlinking them from here, because a unit has to name the absolute path of the
+clone it was installed from, and only `install.sh` knows where that is. The same
+directory is where `claude-scriptorium` writes the codex service it manages
+itself, so symlinking the tree in would point that tool's writes at this repo.
 
 ## Shell Startup Chain
 
@@ -53,6 +60,11 @@ exe-dev --help
 # Install Tailscale and join this machine to the tailnet. Run per-machine, not
 # from install.sh: it leaves a daemon running and joins a private network.
 setup-tailscale
+
+# Update claude-scriptorium and converge the systemd user service that serves
+# this machine's sessions. exe.dev VMs only; a no-op anywhere else. install.sh
+# schedules it daily, so running it by hand is only for wanting a release now.
+cloister-codex
 ```
 
 ## Claude Code Hooks

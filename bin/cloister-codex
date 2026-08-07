@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Serve this machine's recorded Claude Code sessions from a systemd user
+# service, running the latest published claude-scriptorium.
+#
+# Run by install.sh's do_cloister on every converge, and by cloister-codex.timer
+# once a day, so a release published today is being served tomorrow with nobody
+# touching the box. Both paths are the same three steps, and every one of them is
+# idempotent: `cloister install` rewrites the unit only when the binary or its
+# arguments changed, so an unchanged day does not interrupt whoever is reading.
+
+set -euo pipefail
+
+BASEDIR="$(dirname "$(realpath "$0")")"
+
+# A codex serves every session recorded on the machine, and `cloister install`
+# binds it to localhost. On an exe.dev VM that is reachable through the
+# platform's authenticated proxy, which is the point; on a laptop it is a daemon
+# nobody asked for.
+"$BASEDIR/is-exe-dev" || exit 0
+
+# By absolute path. This runs from a systemd user unit as readily as from a
+# shell, and that unit gets an environment with neither mise nor its shims on
+# PATH.
+MISE="$HOME/.local/bin/mise"
+
+# Named, rather than a bare `mise upgrade`, which would drag every other tool
+# along on a timer that was asked for one. It restates the id from
+# config/mise/config.toml, since mise offers no way to ask which entry provides a
+# given binary that is cheaper than the duplication.
+TOOL="github:JoshKarpel/claude-scriptorium"
+
+# install covers the machine that has never had it, upgrade the machine that has
+# an older one. Neither says anything when there is nothing to do.
+"$MISE" install "$TOOL"
+"$MISE" upgrade "$TOOL"
+
+# Through the resolved binary rather than the shim, which would need mise on PATH
+# to reach the same place. The unit this writes names the version-specific path
+# that `latest` currently points at, since the tool asks the kernel what it is
+# running as rather than how it was invoked; that is what turns tomorrow's
+# upgrade into a restart instead of a unit that looks unchanged.
+"$("$MISE" which claude-scriptorium)" cloister install
