@@ -23,6 +23,27 @@ activate_if_interactive gh gh completion -s "$1"
 # exe-dev works out the shell for itself rather than taking it as an argument.
 activate_if_interactive exe-dev exe-dev --show-completion
 
+# The `xd` alias wants the same completion. Reuse the function just defined
+# rather than emit a second copy under the alias's name: --show-completion is a
+# Python start, and the second copy would look for a `_XD_COMPLETE` variable
+# that only a binary called `xd` sets. zsh maps an alias to its target directly;
+# bash has no equivalent, and the generated completer runs whichever word was
+# typed, so the alias has to be swapped back out before handing over.
+if [[ $- == *i* ]] && exists exe-dev; then
+  case "$1" in
+    zsh)
+      compdef xd=exe-dev
+      ;;
+    bash)
+      _xd_completion() {
+        local COMP_WORDS=(exe-dev "${COMP_WORDS[@]:1}")
+        _exe_dev_completion exe-dev
+      }
+      complete -o default -F _xd_completion xd
+      ;;
+  esac
+fi
+
 . "$HOME/.cargo/env"
 
 # Keep last: on exe.dev VMs this execs zellij, replacing the shell, so anything

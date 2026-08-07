@@ -18,6 +18,7 @@ import sys
 import time
 import urllib.request
 from datetime import UTC, datetime, timedelta
+from enum import Enum, auto
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -54,6 +55,12 @@ CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "exe-
 VM_CACHE = CACHE / "vms"
 DIR_CACHE = CACHE / "dirs"
 CACHE_TTL = timedelta(minutes=5)
+
+# What a TAB press waits for the round trips filling that cache cannot avoid.
+# Bounded here rather than left to ssh's own defaults, which are measured in
+# minutes and would hang the shell on a network that blackholes rather than
+# refuses.
+COMPLETION_TIMEOUT = 5
 
 # Integrations attach by tag, so this tag is what wires a fresh box up to the
 # dotfiles and GitHub integrations without any per-VM setup. Scoping the box's
@@ -238,11 +245,12 @@ def pin(host: str, public_key: str) -> None:
         known_hosts.write(known_hosts_entry(host, public_key))
 
 
-def scanned_key_matching(host: str, want: str) -> str | None:
+def scanned_key_matching(host: str, want: str, timeout: int | None = None) -> str | None:
     # Unreachable and offering-nothing-that-matches are the same answer here,
     # and a machine with no exe.dev account hits the first one, so it gets the
     # caller's message rather than a traceback out of ssh-keyscan.
-    scan = subprocess.run(["ssh-keyscan", host], capture_output=True, text=True)
+    bound = ["-T", str(timeout)] if timeout is not None else []
+    scan = subprocess.run(["ssh-keyscan", *bound, host], capture_output=True, text=True)
     for line in scan.stdout.splitlines():
         if line.startswith("#") or not line.strip():
             continue
@@ -252,19 +260,61 @@ def scanned_key_matching(host: str, want: str) -> str | None:
     return None
 
 
-def pin_published(host: str) -> None:
-    """Make sure known_hosts agrees with the fingerprint exe.dev publishes.
+class Pin(Enum):
+    """How known_hosts answered a request to hold the published key for a host."""
+
+    ALREADY = auto()
+    WRITTEN = auto()
+    CONFLICT = auto()
+    UNOFFERED = auto()
+
+    @property
+    def is_pinned(self) -> bool:
+        return self in (Pin.ALREADY, Pin.WRITTEN)
+
+
+def hold_published_key(host: str, timeout: int | None = None) -> Pin:
+    """Make known_hosts hold the fingerprint exe.dev publishes for HOST.
 
     Works for `<vm>.exe.xyz` as much as for the lobby, since one front door
     answers for all of them, so a VM needs nothing read off the box itself.
+
+    Reports what happened rather than saying it, because the callers have very
+    different room for an answer: a command writes to a terminal someone is
+    watching, while completion runs in a subshell whose stdout is the list of
+    candidates and whose stderr lands in the middle of the line being typed.
     """
     pinned = pinned_fingerprint(host)
     if pinned == PUBLISHED_FINGERPRINT:
-        return
+        return Pin.ALREADY
 
     if pinned is not None:
+        return Pin.CONFLICT
+
+    key = scanned_key_matching(host, PUBLISHED_FINGERPRINT, timeout=timeout)
+    if key is None:
+        return Pin.UNOFFERED
+
+    pin(host, key)
+    return Pin.WRITTEN
+
+
+def pin_published(host: str) -> None:
+    """Make sure known_hosts agrees with the published fingerprint, or stop."""
+    held = hold_published_key(host)
+
+    if held is Pin.ALREADY:
+        return
+
+    if held is Pin.WRITTEN:
+        typer.echo(f"pinned {host} ({PUBLISHED_FINGERPRINT})", err=True)
+        return
+
+    if held is Pin.CONFLICT:
         typer.echo(
-            f"{host} is pinned to {pinned}, not the published {PUBLISHED_FINGERPRINT}", err=True
+            f"{host} is pinned to {pinned_fingerprint(host)}, "
+            f"not the published {PUBLISHED_FINGERPRINT}",
+            err=True,
         )
         # ssh-keygen rewrites the whole file, so it refuses outright while any
         # line in it is malformed, and says so without naming the line.
@@ -272,13 +322,8 @@ def pin_published(host: str) -> None:
         typer.echo(f"  if that reports errors, fix the offending lines in {KNOWN_HOSTS}", err=True)
         raise typer.Exit(1)
 
-    key = scanned_key_matching(host, PUBLISHED_FINGERPRINT)
-    if key is None:
-        typer.echo(f"{host} presented no key matching {PUBLISHED_FINGERPRINT}", err=True)
-        raise typer.Exit(1)
-
-    pin(host, key)
-    typer.echo(f"pinned {host} ({PUBLISHED_FINGERPRINT})", err=True)
+    typer.echo(f"{host} presented no key matching {PUBLISHED_FINGERPRINT}", err=True)
+    raise typer.Exit(1)
 
 
 def register_key(vm: str) -> None:
@@ -388,28 +433,39 @@ def list_vm_names(timeout: float | None = None) -> list[str]:
     return [vm["vm_name"] for vm in json.loads(out.stdout)["vms"]]
 
 
+def listed_vm_names() -> list[str]:
+    """VM names the lobby will name right now, or none if it won't name any.
+
+    Pinning here rather than leaving it to a command is what makes TAB work on
+    a machine that has only ever reached VMs by name, where nothing has cause
+    to mention the lobby and so nothing has pinned it. It takes on no trust a
+    command would not: the published fingerprint is the anchor either way, and
+    a front door offering anything else still yields nothing.
+    """
+    if not hold_published_key(LOBBY, timeout=COMPLETION_TIMEOUT).is_pinned:
+        return []
+
+    try:
+        return list_vm_names(timeout=COMPLETION_TIMEOUT)
+    except (subprocess.SubprocessError, OSError, ValueError, KeyError):
+        return []
+
+
 def cached_vm_names() -> list[str]:
     """VM names for completion, refreshed once the cache has aged out.
 
     Completion must not fail or stall the shell it runs in, so a lobby that is
-    unreachable or slow yields no names at all and the name gets typed in full.
+    unreachable, slow, or answering to nobody yields no names at all and the
+    name gets typed in full. That empty answer is cached like any other, since
+    these dotfiles land on machines with no exe.dev account, which would
+    otherwise pay for the round trips they just failed on at every TAB.
     """
     if VM_CACHE.exists():
         age = datetime.now(UTC) - datetime.fromtimestamp(VM_CACHE.stat().st_mtime, UTC)
         if age < CACHE_TTL:
             return VM_CACHE.read_text().split()
 
-    # These dotfiles land on machines with no exe.dev account, where pressing
-    # TAB should not be what first calls out to it. A pinned lobby is the mark
-    # of a machine where that contact has already been made deliberately.
-    if pinned_fingerprint(LOBBY) is None:
-        return []
-
-    try:
-        names = list_vm_names(timeout=5)
-    except (subprocess.SubprocessError, OSError, ValueError, KeyError):
-        return []
-
+    names = listed_vm_names()
     VM_CACHE.parent.mkdir(parents=True, exist_ok=True)
     VM_CACHE.write_text("\n".join(names))
     return names
@@ -471,6 +527,29 @@ def list_dirs_command(parent: str) -> str:
     )
 
 
+def listed_remote_dirs(vm: str, parent: str) -> list[str]:
+    """Directories the box will name under PARENT right now, or none if it won't.
+
+    Pinned on the same terms as the lobby: the front door answers for a VM's
+    hostname with the published key, so TAB can settle the box's key without
+    anyone having connected to it before and without a question to ask.
+    """
+    if not hold_published_key(vm_host(vm), timeout=COMPLETION_TIMEOUT).is_pinned:
+        return []
+
+    try:
+        listed = run_without_stdin(
+            vm_command(vm, list_dirs_command(parent)),
+            capture_output=True,
+            text=True,
+            timeout=COMPLETION_TIMEOUT,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return []
+
+    return listed.stdout.splitlines()
+
+
 def cached_remote_dirs(vm: str, parent: str) -> list[str]:
     """Directories under PARENT on VM, refreshed once the cache has aged out.
 
@@ -485,14 +564,7 @@ def cached_remote_dirs(vm: str, parent: str) -> list[str]:
         if age < CACHE_TTL:
             return cache.read_text().splitlines()
 
-    try:
-        listed = run_without_stdin(
-            vm_command(vm, list_dirs_command(parent)), capture_output=True, text=True, timeout=5
-        )
-    except (subprocess.SubprocessError, OSError):
-        return []
-
-    dirs = listed.stdout.splitlines()
+    dirs = listed_remote_dirs(vm, parent)
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text("\n".join(dirs))
     return dirs
@@ -501,12 +573,6 @@ def cached_remote_dirs(vm: str, parent: str) -> list[str]:
 def complete_dir(ctx: typer.Context, incomplete: str) -> list[str]:
     vm = ctx.params.get("vm")
     if vm is None:
-        return []
-
-    # Pressing TAB is not the moment to meet a VM for the first time: an
-    # unpinned host is one ssh stops to ask about, and completion has nowhere
-    # to put the question. Connecting once is what makes the paths complete.
-    if pinned_fingerprint(vm_host(vm)) is None:
         return []
 
     head, slash, _ = incomplete.rpartition("/")
