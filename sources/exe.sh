@@ -14,10 +14,14 @@ export GH_HOST=github.int.exe.xyz
 # PATH yet because mise activates after commonrc-pre returns. commonrc-post
 # calls this as its last line instead.
 #
-# One fixed session name, attached rather than created. A dropped connection
+# One session name per VM, attached rather than created. A dropped connection
 # detaches instead of quitting, so the session outlives it; starting a fresh one
 # per login would leave the surviving session behind with nothing pointing at
 # it. Attaching also resurrects a session that did exit.
+#
+# The name is the VM's short hostname, which zellij renders in the top-left
+# corner, so every window says which box it is on. It also reaches the push
+# notifications, which title themselves after $ZELLIJ_SESSION_NAME.
 #
 # Every guard is load-bearing:
 #   - bash sources this file for remote `ssh host <command>` runs too, so
@@ -28,9 +32,11 @@ export GH_HOST=github.int.exe.xyz
 # If zellij is ever broken, interactive logins die with it; `ssh <vm> <command>`
 # skips this and is the way back in to edit it.
 function start_zellij_session() {
-  local session=dev
+  local session
 
   if [[ $- == *i* && -z ${ZELLIJ:-} && -t 0 && -t 1 ]] && exists zellij; then
+    session=$(hostname -s)
+
     if zellij list-sessions --short --no-formatting 2>/dev/null | grep -qx "$session"; then
       # Zellij sizes a session to the smallest attached client and keeps a
       # client registered until its process dies, so a window that is gone but
