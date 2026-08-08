@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Run Claude Code against exe.dev's LLM integration instead of the claude.ai subscription
+
+set -euo pipefail
+
+# The default `llm` integration, which exe.dev attaches to auto:all. Resolvable
+# only from a VM the integration is attached to, and only over the integration
+# hostname: no provider key ever lands on the box.
+BASE_URL="https://llm.int.exe.xyz"
+
+if ! is-exe-dev; then
+  echo "claude-exe-dev: not an exe.dev VM, so $BASE_URL does not resolve" >&2
+  exit 1
+fi
+
+# --settings takes a JSON string and merges it over the settings files, so the
+# gateway stays scoped to this invocation. Putting either key in
+# ~/.claude/settings.json would redirect every `claude` on the box, and exporting
+# ANTHROPIC_BASE_URL would leak into everything the session spawns.
+#
+# apiKeyHelper rather than ANTHROPIC_API_KEY: the gateway authenticates the VM by
+# its integration attachment and ignores the value, but Claude Code still demands
+# one, and an env-var key triggers a first-run approval prompt that the helper
+# skips.
+exec claude \
+  --settings "{\"apiKeyHelper\": \"printf exe-gateway\", \"env\": {\"ANTHROPIC_BASE_URL\": \"$BASE_URL\"}}" \
+  "$@"

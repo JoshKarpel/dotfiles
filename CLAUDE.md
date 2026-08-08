@@ -57,6 +57,10 @@ count-claude-tokens --help
 # one over to an existing name. Run with --help for subcommands and flags.
 exe-dev --help
 
+# Run Claude Code billed against exe.dev's LLM allocation rather than the
+# claude.ai subscription. exe.dev VMs only. Takes claude's own flags.
+claude-exe-dev --model opus
+
 # Install Tailscale and join this machine to the tailnet. Run per-machine, not
 # from install.sh: it leaves a daemon running and joins a private network.
 setup-tailscale
