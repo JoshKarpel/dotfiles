@@ -104,14 +104,16 @@ does. What follows is only what neither source states.
   has no audio server to reach, which is every headless VM.
 - `claude-notify-push` gates itself on `claude-user-away` and `is-exe-dev`, rather
   than on where it's registered. Every caller can therefore fire unconditionally, and
-  the same config stays correct on a laptop, where it does nothing.
+  the same config stays correct on a laptop, where it does nothing. An unattended
+  caller that provides its own completion notification sets
+  `CLAUDE_NOTIFY_PUSH_DISABLED=1` to suppress only the exe.dev push.
 - The `deny` list in `settings.json` stays thin on purpose. `claude-rm-scope-check`
   decides whether an `rm` escapes the work area, so `deny` keeps only the
   never-in-scope catastrophic backstops it can't reason about.
 
 ### Hook Self-Tests
 
-A hook with non-trivial matching carries its own tests, gated on the
+A hook with non-trivial matching or side effects carries its own tests, gated on the
 `CLAUDE_HOOK_SELFTEST` environment variable so nothing pollutes its real arguments.
 Run a hook's tests with `CLAUDE_HOOK_SELFTEST=1 <hook-name>`; it prints results and
 exits 0 (pass) or 1 (fail). Keep the harness embedded in the hook rather than
@@ -126,18 +128,26 @@ markers, so there's no separate list to drift. It's wired into pre-commit
 `python3`) surfaces as a failed run rather than a silent pass, since the hook whose
 tests can't run exits non-zero.
 
-- **Bash hooks** embed a ~10-line block right after `set -euo pipefail` (before
-  reading stdin). It defines a `t <want-exit> <command>` helper that re-invokes the
-  hook (`CLAUDE_HOOK_SELFTEST= "$0"`) with a crafted `{tool_input:{command:…}}`
-  payload and asserts the exit code. See `claude-http-server-bind-check` for the
-  copy-paste template.
+- **Bash hooks** embed a block right after the `set` line, before reading stdin. A
+  matching hook defines a `t <want-exit> <command>` helper that re-invokes the hook
+  (`CLAUDE_HOOK_SELFTEST= "$0"`) with a crafted `{tool_input:{command:…}}` payload and
+  asserts the exit code; `claude-http-server-bind-check` is the copy-paste template.
+  A hook that always exits 0 has no exit code to assert, so it asserts the side effect
+  instead: `claude-notify-push` stubs its downstream commands on PATH and compares the
+  set that recorded a call, which is what distinguishes an early exit from a hook that
+  did the work and returned 0 anyway.
 - **Python hooks** check the env var in `main()` and run an embedded case matrix
   against a pure `(command, cwd, repo_root) -> …` function, so the tests need no git
   or filesystem. See `claude-rm-scope-check`.
-- A hook whose result depends on external state is **not** self-tested this way
-  (`claude-uv-check` needs a uv project, `claude-git-dash-c-check` needs a specific
-  git repo, `claude-user-away` needs a terminal someone has typed into). A black-box
-  self-test can't set that up deterministically without a fixture.
+- External state is a reason to stub, not a reason to skip. Where a hook consults the
+  world through PATH, a stub directory prepended to PATH is enough, and any variable
+  whose ambient value would decide a case has to be unset in the test environment
+  (`claude-notify-push` unsets `CLAUDE_NOTIFY_PUSH_DISABLED` and `ZELLIJ`, both of
+  which are set in a real session). What stays un-self-tested is state no stub stands
+  in for: `claude-uv-check` needs a uv project, `claude-git-dash-c-check` a specific
+  git repo, `claude-user-away` a terminal someone has typed into.
+- A passing self-test that cannot fail is worth nothing, so confirm a new case catches
+  a deliberately broken copy of the hook before trusting it.
 
 ## Claude Code Skills
 

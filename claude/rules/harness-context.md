@@ -8,6 +8,7 @@ paths:
   - ".github/{instructions,prompts}/**"
   - "**/{rules,commands,skills}/*.md"
   - "**/SKILL.md"
+  - "claude/**"
 ---
 
 # Harness Context Loading

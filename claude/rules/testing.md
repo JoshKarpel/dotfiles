@@ -34,11 +34,20 @@ just arguments, so tests pass in whatever they need without patching.
 - **Test at the boundary the parser establishes.** Concentrate edge-case tests
   at the point where external input is parsed into internal types. Once data is
   internal, trust the types: don't re-test the parser in every downstream unit.
-- **When a check fails, suspect the check.** A probe can quietly measure the
-  platform's own behavior instead of the thing under test: a browser restoring
-  scroll position, a same-document navigation that never re-runs the script, a
-  default that masks the branch you meant to exercise. Confirm the probe reaches
-  the path you think it does before concluding the code is broken.
+- **Suspect the check on a pass as well as a failure.** A probe can quietly
+  measure the platform's own behavior instead of the thing under test: a browser
+  restoring scroll position, a same-document navigation that never re-runs the
+  script, a default that masks the branch you meant to exercise. A pass is no
+  safer than a failure: a probe asking whether a permission allows a shell
+  command teaches nothing if the subject satisfies the request another way and
+  never attempts that command. Confirm the probe reached the path you think it
+  did before concluding anything from either outcome.
+- **Prove a new test can fail.** A test that passes on its first run may be
+  incapable of failing. Break the code deliberately, or run the test against a
+  knowingly-broken copy, and confirm it fails before trusting it. This matters
+  most where the obvious signal is constant: a script that always exits 0 has to
+  assert a side effect instead, and an assertion on a side effect is easy to
+  write in a form that holds either way.
 - **Substring assertions match the whole artifact.** Generated output that embeds
   a script's own source will contain every selector that script mentions, and a
   negative assertion (`!output.contains("x")`) is satisfied by your own comment

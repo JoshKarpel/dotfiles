@@ -5,6 +5,51 @@
 
 set -uo pipefail
 
+# CLAUDE_HOOK_SELFTEST: set this env var to run the hook's embedded self-tests. This
+# marker line is how `claude-hook-selftests` discovers participating hooks. The hook
+# always exits 0, so the tests assert on which downstream commands it reached: stubs on
+# PATH record their own invocation, and the unset case is the positive control proving
+# the probe reaches the endpoint when the guard is absent.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  fails=0
+  t() {
+    local want="$1" stubs got=""
+    shift
+    stubs=$(mktemp -d)
+    for name in is-exe-dev claude-user-away curl; do
+      printf '#!/bin/sh\n: >"%s/%s.called"\nexit 0\n' "$stubs" "$name" >"$stubs/$name"
+      chmod +x "$stubs/$name"
+    done
+    # ZELLIJ is unset so where() can't reach the real zellij, and the disable variable
+    # so an ambient run's own environment can't decide the unset case for us.
+    env -u ZELLIJ -u ZELLIJ_PANE_ID -u CLAUDE_NOTIFY_PUSH_DISABLED "$@" \
+      PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$0" stop \
+      <<<'{"cwd":"/tmp","last_assistant_message":"selftest"}' >/dev/null 2>&1
+    for name in is-exe-dev curl; do
+      [[ -e "$stubs/$name.called" ]] && got+="${got:+,}$name"
+    done
+    rm -rf "$stubs"
+    [[ "$got" == "$want" ]] ||
+    { printf 'FAIL want=%s got=%s :: env %s\n' "$want" "${got:-none}" "${*:-<none>}"; fails=1; }
+  }
+  t 'is-exe-dev,curl'                                     # positive control: reaches the POST
+  t '' CLAUDE_NOTIFY_PUSH_DISABLED=1                      # exits before anything downstream
+  t 'is-exe-dev,curl' CLAUDE_NOTIFY_PUSH_DISABLED=0       # only an exact "1" disables
+  t 'is-exe-dev,curl' CLAUDE_NOTIFY_PUSH_DISABLED=true
+  t 'is-exe-dev,curl' CLAUDE_NOTIFY_PUSH_DISABLED=
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+# Unattended callers may provide their own completion notification while keeping
+# the rest of the Stop hook's finishing and verification behavior.
+if [[ ${CLAUDE_NOTIFY_PUSH_DISABLED:-} == "1" ]]; then
+  cat >/dev/null
+  exit 0
+fi
+
 ENDPOINT="https://notify.int.exe.xyz/"
 ROLE="${1:-stop}"
 
