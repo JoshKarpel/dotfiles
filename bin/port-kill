@@ -3,6 +3,7 @@
 # Usage: port-kill [-9|--force] <port>
 # Sends SIGTERM by default; pass -9/--force for SIGKILL. Reports each PID it
 # signals. Exits 1 if nothing is using the port.
+# Requires lsof; exits 2 if it is missing.
 
 set -euo pipefail
 
@@ -21,6 +22,11 @@ fi
 PORT="$1"
 if ! [[ "$PORT" =~ ^[0-9]+$ ]] || ((PORT < 1 || PORT > 65535)); then
   echo "port-kill: invalid port: $PORT" >&2
+  exit 2
+fi
+
+if ! command -v lsof >/dev/null 2>&1; then
+  echo "port-kill: lsof is not installed, so port usage can't be checked. Install it (apt install lsof) and retry." >&2
   exit 2
 fi
 

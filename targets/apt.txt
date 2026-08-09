@@ -20,6 +20,7 @@ libsqlite3-dev
 libssl-dev
 locales
 lsb-release
+lsof
 m4
 ncdu
 net-tools
