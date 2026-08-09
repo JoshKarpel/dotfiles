@@ -20,6 +20,6 @@ jq -n \
   --arg subject "$ESCAPEMENT_SUBJECT" \
   --arg body "$ESCAPEMENT_BODY" \
   '{to: $to, subject: $subject, body: $body}' |
-  curl -sf http://169.254.169.254/gateway/email/send \
-    -H 'content-type: application/json' \
-    --data-binary @-
+curl -sf http://169.254.169.254/gateway/email/send \
+  -H 'content-type: application/json' \
+  --data-binary @-
