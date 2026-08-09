@@ -23,6 +23,12 @@ prompt: |
   argument is not worth relitigating. And every `bin/` script is on PATH for interactive sessions,
   so a change to one takes effect immediately for a person, not just for a run.
 
+  Verify with `pre-commit-autofix`, and with `CLAUDE_HOOK_SELFTEST=1 claude-hook-selftests` when
+  you touched a hook that carries them. Both are on PATH. A `bin/` script is live for the person
+  at this machine the moment you change it, so exercise what you changed rather than reasoning
+  about it: drive it in a directory you made for the purpose, never against this machine's own
+  state, and never against a port, process, or service you did not start yourself.
+
   Avoid: new tools nobody asked for, moving files between directories, dependency upgrades, and
   broad rewrites of documents that are merely opinionated.
 
@@ -37,16 +43,9 @@ max_active_runs: 1
 
 harness:
   kind: claude-code
-  args: ["--model", "opus", "--effort", "high"]
+  args: ["--model", "sonnet", "--effort", "high"]
   budget_usd: 5.0
   timeout: PT60M
-  # Read, edit, and git are already permitted. This adds what this repository verifies itself
-  # with, which is what the `Stop` hooks will ask the session to satisfy before it finishes.
-  allowed_tools:
-    - "Bash(pre-commit-autofix*)"
-    - "Bash(pre-commit-run*)"
-    - "Bash(claude-hook-selftests*)"
-    - "Bash(bash -n *)"
 
 hooks:
   notify: ["./.escapement/notify.sh"]
