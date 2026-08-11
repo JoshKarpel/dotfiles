@@ -46,6 +46,3 @@ harness:
   args: ["--model", "sonnet", "--effort", "high"]
   budget_usd: 5.0
   timeout: PT60M
-
-hooks:
-  notify: ["./.escapement/notify.sh"]
