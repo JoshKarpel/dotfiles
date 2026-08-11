@@ -3,6 +3,49 @@
 
 set -euo pipefail
 
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
+# line is how `claude-hook-selftests` discovers participating hooks. A safety hook
+# without a test is theater; run these with `CLAUDE_HOOK_SELFTEST=1 claude-uv-check`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  # In a real session `bin/` is on PATH, so the hook reaches `is-uv-project` by name. A CI
+  # checkout has no such PATH, and without this the guard would silently pass every case.
+  PATH="$(dirname "$SELF"):$PATH"
+  export PATH
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+
+  uv_project="$workdir/uv_project"
+  plain_project="$workdir/plain_project"
+  mkdir -p "$uv_project" "$plain_project"
+  git init -q "$uv_project"
+  git init -q "$plain_project"
+  touch "$uv_project/uv.lock"
+
+  t() {
+    local desc="$1" cwd="$2" command="$3" want_exit="$4" got_exit=0
+    jq -n --arg cmd "$command" '{tool_input: {command: $cmd}}' \
+      | (cd "$cwd" && CLAUDE_HOOK_SELFTEST= "$SELF") >/dev/null 2>&1 || got_exit=$?
+    [[ "$got_exit" == "$want_exit" ]] ||
+    { printf 'FAIL %s: want_exit=%s got_exit=%s :: %s (cwd=%s)\n' \
+      "$desc" "$want_exit" "$got_exit" "$command" "$cwd"; fails=1; }
+  }
+
+  t "plain python blocked in uv project"        "$uv_project"    "python foo.py"                        2
+  t "python3 blocked in uv project"             "$uv_project"    "python3 foo.py"                       2
+  t "uv run python allowed in uv project"       "$uv_project"    "uv run python foo.py"                 0
+  t "python after && blocked"                   "$uv_project"    "echo hi && python foo.py"             2
+  t "python in package name allowed"            "$uv_project"    "uv pip install python-dotenv"         0
+  t "quoted python in grep pattern allowed"     "$uv_project"    'grep "requires-python\|python" x.toml' 0
+  t "plain python allowed outside uv project"   "$plain_project" "python foo.py"                        0
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 

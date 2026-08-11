@@ -147,9 +147,17 @@ tests can't run exits non-zero.
   building one with `git init` in a `mktemp -d` sandbox and `cd`-ing into it before
   re-invoking the hook is enough: `claude-git-dash-c-check` does this to test
   blocking on the repo root, on `.`, and from a subdirectory, while allowing a
-  different repo. What stays un-self-tested is state no stub stands in for:
-  `claude-uv-check` needs a uv project, `claude-user-away` a terminal someone has
-  typed into.
+  different repo. `claude-uv-check` uses the same sandbox, `touch`-ing a `uv.lock`
+  in one repo and not the other so the fixture covers both the "not a uv project"
+  and "python invoked directly" branches. What stays un-self-tested is state no
+  stub stands in for: `claude-user-away` needs a terminal someone has typed into.
+- The installed environment is ambient state too, and CI has none of it: no `dotfiles/bin`
+  on PATH and no gitconfig, so a hook that calls a sibling script by name reaches nothing
+  and its guard clause passes every case. A hook that shells out to `bin/` prepends its own
+  directory to PATH in the self-test (`claude-uv-check`), and a `bin/` script spells out the
+  git plumbing rather than using a gitconfig alias (`is-uv-project`, `is-pre-commit-project`
+  call `git rev-parse --show-toplevel`, not `git root`). Both failures are invisible locally,
+  where PATH and gitconfig are installed, so a green local run says nothing about either.
 - A passing self-test that cannot fail is worth nothing, so confirm a new case catches
   a deliberately broken copy of the hook before trusting it.
 
