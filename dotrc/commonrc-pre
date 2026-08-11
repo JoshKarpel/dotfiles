@@ -63,11 +63,6 @@ path_postfix "$HOME/.cargo/bin"
 # repository-local node modules binaries
 export PATH="$PATH:./node_modules/.bin"
 
-# override some BSD utils with GNU utils from the brew findutils package
-if [[ $(uname) == "Darwin" ]]; then
-  path_prefix "$(brew --prefix)/opt/findutils/libexec/gnubin"
-fi
-
 # add any local config, letting it overwrite if necessary
 for file in "$HOME"/.bashrc{.,_}local; do
   [[ -f $file ]] && . "$file"

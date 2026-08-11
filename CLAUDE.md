@@ -26,7 +26,7 @@ itself, so symlinking the tree in would point that tool's writes at this repo.
 
 `bashrc`/`zshrc` → `~/.commonrc-pre` (sources every file in `sources/`, adds `bin/`
 to PATH) → shell-specific setup → `~/.commonrc-post <shell>` (tool, prompt, and
-completion integrations, then `start_zellij_session`)
+completion integrations, late PATH overrides, then `start_zellij_session`)
 
 The split exists because the two ends of startup have different constraints.
 `commonrc-pre` runs early, before mise puts its tools on PATH. `commonrc-post` runs

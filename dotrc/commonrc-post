@@ -44,6 +44,20 @@ if [[ $- == *i* ]] && exists exe-dev; then
   esac
 fi
 
+# Override some BSD utils with GNU utils from the brew findutils package. This
+# has to come after commonrc-pre, which is where brew itself joins PATH, and
+# nothing sourced during startup needs the GNU versions anyway. The prefix is
+# probed rather than asked of `brew --prefix`, which would cost a subprocess on
+# every shell start.
+for prefix in /opt/homebrew /usr/local; do
+  gnubin="$prefix/opt/findutils/libexec/gnubin"
+  if [[ -d $gnubin ]]; then
+    path_prefix "$gnubin"
+    break
+  fi
+done
+unset prefix gnubin
+
 . "$HOME/.cargo/env"
 
 # Keep last: on exe.dev VMs this execs zellij, replacing the shell, so anything
