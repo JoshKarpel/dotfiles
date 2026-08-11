@@ -147,9 +147,10 @@ tests can't run exits non-zero.
   building one with `git init` in a `mktemp -d` sandbox and `cd`-ing into it before
   re-invoking the hook is enough: `claude-git-dash-c-check` does this to test
   blocking on the repo root, on `.`, and from a subdirectory, while allowing a
-  different repo. What stays un-self-tested is state no stub stands in for:
-  `claude-uv-check` needs a uv project, `claude-user-away` a terminal someone has
-  typed into.
+  different repo. `claude-uv-check` uses the same sandbox, `touch`-ing a `uv.lock`
+  in one repo and not the other so the fixture covers both the "not a uv project"
+  and "python invoked directly" branches. What stays un-self-tested is state no
+  stub stands in for: `claude-user-away` needs a terminal someone has typed into.
 - A passing self-test that cannot fail is worth nothing, so confirm a new case catches
   a deliberately broken copy of the hook before trusting it.
 
