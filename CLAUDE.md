@@ -143,9 +143,13 @@ tests can't run exits non-zero.
   world through PATH, a stub directory prepended to PATH is enough, and any variable
   whose ambient value would decide a case has to be unset in the test environment
   (`claude-notify-push` unsets `CLAUDE_NOTIFY_PUSH_DISABLED` and `ZELLIJ`, both of
-  which are set in a real session). What stays un-self-tested is state no stub stands
-  in for: `claude-uv-check` needs a uv project, `claude-git-dash-c-check` a specific
-  git repo, `claude-user-away` a terminal someone has typed into.
+  which are set in a real session). Where a hook needs a specific git repo,
+  building one with `git init` in a `mktemp -d` sandbox and `cd`-ing into it before
+  re-invoking the hook is enough: `claude-git-dash-c-check` does this to test
+  blocking on the repo root, on `.`, and from a subdirectory, while allowing a
+  different repo. What stays un-self-tested is state no stub stands in for:
+  `claude-uv-check` needs a uv project, `claude-user-away` a terminal someone has
+  typed into.
 - A passing self-test that cannot fail is worth nothing, so confirm a new case catches
   a deliberately broken copy of the hook before trusting it.
 
