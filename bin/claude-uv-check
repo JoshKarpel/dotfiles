@@ -8,6 +8,10 @@ set -euo pipefail
 # without a test is theater; run these with `CLAUDE_HOOK_SELFTEST=1 claude-uv-check`.
 if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   SELF=$(realpath "$0")
+  # In a real session `bin/` is on PATH, so the hook reaches `is-uv-project` by name. A CI
+  # checkout has no such PATH, and without this the guard would silently pass every case.
+  PATH="$(dirname "$SELF"):$PATH"
+  export PATH
   fails=0
   workdir=$(realpath "$(mktemp -d)")
   trap 'rm -rf "$workdir"' EXIT

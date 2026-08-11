@@ -3,4 +3,6 @@
 
 set -euo pipefail
 
-[[ -f "$(git root)/uv.lock" ]]
+# Spelled out rather than via the `root` gitconfig alias: this runs from hook subprocesses
+# and CI, neither of which is guaranteed to have the dotfiles' gitconfig installed.
+[[ -f "$(git rev-parse --show-toplevel)/uv.lock" ]]
