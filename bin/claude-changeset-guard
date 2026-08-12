@@ -6,6 +6,141 @@
 
 set -euo pipefail
 
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
+# line is how `claude-hook-selftests` discovers participating hooks. A guard without a
+# test is theater; run these with `CLAUDE_HOOK_SELFTEST=1 claude-changeset-guard`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+
+  mkrepo() {
+    local dir="$1"
+    mkdir -p "$dir"
+    git init -q "$dir"
+    git -C "$dir" config user.email "test@example.com"
+    git -C "$dir" config user.name "test"
+    echo "base" >"$dir/file"
+    git -C "$dir" add file
+    git -C "$dir" commit -q -m init
+  }
+
+  # call() sets EXIT/OUT as globals rather than returning them, since a subshell can't
+  # hand back both an exit code and captured output at once.
+  call() {
+    local cwd="$1" ns="$2"
+    EXIT=0
+    OUT=$(cd "$cwd" && CLAUDE_HOOK_SELFTEST= "$SELF" "$ns" 2>&1) || EXIT=$?
+  }
+
+  check() {
+    local desc="$1" want_exit="$2"
+    [[ "$EXIT" == "$want_exit" ]] ||
+    { printf 'FAIL %s: want_exit=%s got_exit=%s :: %s\n' "$desc" "$want_exit" "$EXIT" "$OUT"; fails=1; }
+  }
+
+  # --- core nudge/suppress cycle, plus merge/rebase suppression ---
+  repo="$workdir/repo"
+  mkrepo "$repo"
+
+  call "$workdir" test
+  check "outside any repo does not nudge" 1
+
+  call "$repo" test
+  check "clean tree does not nudge" 1
+
+  echo more >>"$repo/file"
+  call "$repo" test
+  check "first dirty change nudges" 0
+  [[ "$OUT" == *file* ]] || { printf 'FAIL first dirty change: output missing porcelain :: %s\n' "$OUT"; fails=1; }
+
+  call "$repo" test
+  check "same change-set is suppressed on repeat" 1
+
+  echo more2 >>"$repo/file"
+  call "$repo" test
+  check "a further change re-nudges" 0
+
+  git -C "$repo" checkout -q -- file
+  call "$repo" test
+  check "reverting to clean does not nudge" 1
+
+  echo more3 >>"$repo/file"
+  call "$repo" test
+  check "dirty again after clean nudges fresh (fingerprint dropped on clean)" 0
+  git -C "$repo" checkout -q -- file
+
+  touch "$repo/.git/MERGE_HEAD"
+  echo mid-merge >>"$repo/file"
+  call "$repo" test
+  check "merge in progress suppresses even a dirty tree" 1
+  rm -f "$repo/.git/MERGE_HEAD"
+  git -C "$repo" checkout -q -- file
+
+  mkdir -p "$repo/.git/rebase-merge"
+  echo mid-rebase >>"$repo/file"
+  call "$repo" test
+  check "rebase in progress suppresses even a dirty tree" 1
+  rm -rf "$repo/.git/rebase-merge"
+  git -C "$repo" checkout -q -- file
+
+  # --- per-branch fingerprint keying ---
+  repo2="$workdir/repo2"
+  mkrepo "$repo2"
+  main2=$(git -C "$repo2" branch --show-current)
+
+  git -C "$repo2" checkout -q -b branch-a
+  echo same-diff >>"$repo2/file"
+  call "$repo2" test
+  check "branch-a's change nudges" 0
+  call "$repo2" test
+  check "branch-a's change-set is then suppressed" 1
+
+  git -C "$repo2" checkout -q "$main2"
+  git -C "$repo2" checkout -q -- file # discard the edit carried over from branch-a
+  echo same-diff >>"$repo2/file"
+  call "$repo2" test
+  check "the identical diff on a different branch nudges independently" 0
+
+  # --- per-namespace isolation ---
+  git -C "$repo2" checkout -q -- file
+  echo iso >>"$repo2/file"
+  call "$repo2" alpha
+  check "namespace alpha nudges" 0
+  call "$repo2" beta
+  check "namespace beta nudges independently of alpha" 0
+  call "$repo2" alpha
+  check "namespace alpha is suppressed on repeat" 1
+
+  # --- stale-branch fingerprint GC on a clean tree ---
+  repo3="$workdir/repo3"
+  mkrepo "$repo3"
+  main3=$(git -C "$repo3" branch --show-current)
+
+  git -C "$repo3" checkout -q -b throwaway
+  echo x >>"$repo3/file"
+  call "$repo3" test
+  check "throwaway branch nudges" 0
+
+  git -C "$repo3" checkout -q "$main3"
+  git -C "$repo3" checkout -q -- file # discard the edit carried over from throwaway
+  git -C "$repo3" branch -D throwaway >/dev/null
+
+  throwaway_key=$(printf '%s' throwaway | sha1sum | cut -d' ' -f1)
+  fp="$repo3/.git/claude-test/$throwaway_key"
+  [[ -f "$fp" ]] || { printf 'FAIL setup: throwaway fingerprint missing before GC\n'; fails=1; }
+
+  call "$repo3" test
+  check "clean tree on main does not nudge" 1
+  [[ -f "$fp" ]] && { printf 'FAIL stale fingerprint for a deleted branch was not garbage-collected\n'; fails=1; }
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
 NAMESPACE="$1"
 
 git rev-parse --show-toplevel >/dev/null 2>&1 || exit 1
