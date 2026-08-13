@@ -6,6 +6,107 @@
 
 set -uo pipefail
 
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
+# line is how `claude-hook-selftests` discovers participating hooks. This hook decides
+# what happens at stop time (announce immediately, run a check that blocks, propagate a
+# check's error, or announce after both checks pass) from branches real Claude output
+# never exercises directly; run these with `CLAUDE_HOOK_SELFTEST=1 claude-stop`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  stubs=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$stubs"' EXIT
+
+  # Fixed stub scripts, driven by env vars set per-call in t(), so no test's expected
+  # JSON output has to survive being spliced into a generated script's own quoting.
+  cat >"$stubs/claude-sound" <<'EOF'
+#!/bin/sh
+: > "$STUB_DIR/sound.called"
+exit 0
+EOF
+  cat >"$stubs/claude-notify-push" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+: > "$STUB_DIR/notify.called"
+exit 0
+EOF
+  cat >"$stubs/claude-stop-precommit" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+: > "$STUB_DIR/precommit.called"
+printf '%s' "$STUB_PRECOMMIT_OUT"
+exit "$STUB_PRECOMMIT_EXIT"
+EOF
+  cat >"$stubs/claude-stop-finish" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+: > "$STUB_DIR/finish.called"
+printf '%s' "$STUB_FINISH_OUT"
+exit "$STUB_FINISH_EXIT"
+EOF
+  chmod +x "$stubs"/claude-sound "$stubs"/claude-notify-push "$stubs"/claude-stop-precommit "$stubs"/claude-stop-finish
+
+  t() {
+    local desc="$1" precommit_exit="$2" precommit_out="$3" finish_exit="$4" finish_out="$5"
+    local message="$6" want_exit="$7" want_out="$8" want_called="$9"
+
+    rm -f "$stubs"/*.called
+    local out exit_code=0
+    out=$(env STUB_DIR="$stubs" \
+        STUB_PRECOMMIT_EXIT="$precommit_exit" STUB_PRECOMMIT_OUT="$precommit_out" \
+        STUB_FINISH_EXIT="$finish_exit" STUB_FINISH_OUT="$finish_out" \
+      PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" <<<"$message" 2>&1) || exit_code=$?
+
+    local got=""
+    [[ -e "$stubs/precommit.called" ]] && got+="${got:+,}precommit"
+    [[ -e "$stubs/finish.called" ]] && got+="${got:+,}finish"
+    [[ -e "$stubs/sound.called" ]] && got+="${got:+,}sound"
+    [[ -e "$stubs/notify.called" ]] && got+="${got:+,}notify"
+
+    [[ "$exit_code" == "$want_exit" ]] ||
+    { printf 'FAIL %s: want_exit=%s got_exit=%s :: %s\n' "$desc" "$want_exit" "$exit_code" "$out"; fails=1; }
+    [[ "$out" == "$want_out" ]] ||
+    { printf 'FAIL %s: want_out=%q got_out=%q\n' "$desc" "$want_out" "$out"; fails=1; }
+    [[ "$got" == "$want_called" ]] ||
+    { printf 'FAIL %s: want_called=%s got_called=%s\n' "$desc" "$want_called" "${got:-none}"; fails=1; }
+  }
+
+  # --- a question hands control back to the user: announce, never run the checks ---
+  t "question hand-back" \
+    0 "" 0 "" \
+    '{"last_assistant_message":"Should I proceed?"}' \
+    0 "" "sound,notify"
+
+  # --- neither check blocks: both run in order, then announce ---
+  t "nothing blocks" \
+    0 "" 0 "" \
+    '{"last_assistant_message":"Done."}' \
+    0 "" "precommit,finish,sound,notify"
+
+  # --- the first check blocks: its JSON surfaces, the second check and announce never run ---
+  t "first check blocks" \
+    0 '{"a":1}' 0 "" \
+    '{"last_assistant_message":"Done."}' \
+    0 '{"a":1}' "precommit"
+
+  # --- the second check blocks: its JSON surfaces, announce never runs ---
+  t "second check blocks" \
+    0 "" 0 '{"b":2}' \
+    '{"last_assistant_message":"Done."}' \
+    0 '{"b":2}' "precommit,finish"
+
+  # --- a check errors outright: its exit status propagates, nothing after it runs ---
+  t "a check errors" \
+    3 "" 0 "" \
+    '{"last_assistant_message":"Done."}' \
+    3 "" "precommit"
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
 INPUT=$(cat)
 
 # Both announcements, together, so the two stop paths below can't drift apart.
