@@ -3,6 +3,103 @@
 
 set -euo pipefail
 
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
+# line is how `claude-hook-selftests` discovers participating hooks. This hook decides
+# what Claude sees at stop time (nothing, an untracked-files nudge, or a pre-commit
+# failure) from three branches that never get exercised otherwise; run these with
+# `CLAUDE_HOOK_SELFTEST=1 claude-stop-precommit`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  BIN_DIR=$(dirname "$SELF")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+
+  mkrepo() {
+    local dir="$1"
+    mkdir -p "$dir"
+    git init -q "$dir"
+    git -C "$dir" config user.email "test@example.com"
+    git -C "$dir" config user.name "test"
+    echo base >"$dir/file"
+    git -C "$dir" add file
+    git -C "$dir" commit -q -m init
+  }
+
+  stub_autofix() {
+    local dir="$1" exit_code="$2" output="$3"
+    printf '#!/bin/sh\nprintf %%s "%s"\nexit %s\n' "$output" "$exit_code" >"$dir/pre-commit-autofix"
+    chmod +x "$dir/pre-commit-autofix"
+  }
+
+  call() {
+    local cwd="$1" path="$2"
+    EXIT=0
+    OUT=$(cd "$cwd" && PATH="$path" CLAUDE_HOOK_SELFTEST= "$SELF" </dev/null 2>&1) || EXIT=$?
+  }
+
+  check() {
+    local desc="$1" want_exit="$2" want_pattern="${3:-}"
+    [[ "$EXIT" == "$want_exit" ]] ||
+    { printf 'FAIL %s: want_exit=%s got_exit=%s :: %s\n' "$desc" "$want_exit" "$EXIT" "$OUT"; fails=1; }
+    if [[ -n "$want_pattern" ]]; then
+      [[ "$OUT" == *"$want_pattern"* ]] ||
+      { printf 'FAIL %s: output missing %q :: %s\n' "$desc" "$want_pattern" "$OUT"; fails=1; }
+    else
+      [[ -z "$OUT" ]] ||
+      { printf 'FAIL %s: expected no output :: %s\n' "$desc" "$OUT"; fails=1; }
+    fi
+  }
+
+  # --- outside any repo: no-op ---
+  call "$workdir" "$BIN_DIR:$PATH"
+  check "outside any repo is a no-op" 0
+
+  # --- untracked files: nudge, don't stage or run pre-commit ---
+  repo_untracked="$workdir/repo_untracked"
+  mkrepo "$repo_untracked"
+  touch "$repo_untracked/new_file.txt"
+  call "$repo_untracked" "$BIN_DIR:$PATH"
+  check "untracked files nudge" 0 "untracked files"
+  [[ "$OUT" == *"new_file.txt"* ]] ||
+  { printf 'FAIL untracked files nudge: output missing new_file.txt :: %s\n' "$OUT"; fails=1; }
+
+  # --- no untracked files, not a pre-commit project: stage tracked changes ---
+  repo_plain="$workdir/repo_plain"
+  mkrepo "$repo_plain"
+  echo modified >>"$repo_plain/file"
+  call "$repo_plain" "$BIN_DIR:$PATH"
+  check "plain project is a silent no-op" 0
+  STAGED=$(git -C "$repo_plain" diff --cached --name-only)
+  [[ "$STAGED" == "file" ]] ||
+  { printf 'FAIL plain project: tracked change was not staged :: %s\n' "$STAGED"; fails=1; }
+
+  # --- pre-commit project: passes through silently when autofix succeeds ---
+  repo_pc="$workdir/repo_pc"
+  mkrepo "$repo_pc"
+  echo "repos: []" >"$repo_pc/.pre-commit-config.yaml"
+  git -C "$repo_pc" add .pre-commit-config.yaml
+  git -C "$repo_pc" commit -q -m "add pre-commit config"
+
+  stubs_ok=$(mktemp -d)
+  stub_autofix "$stubs_ok" 0 ""
+  call "$repo_pc" "$stubs_ok:$BIN_DIR:$PATH"
+  check "pre-commit project with passing autofix is silent" 0
+
+  # --- pre-commit project: surfaces the failure when autofix still fails ---
+  stubs_fail=$(mktemp -d)
+  stub_autofix "$stubs_fail" 1 "trailing whitespace failed"
+  call "$repo_pc" "$stubs_fail:$BIN_DIR:$PATH"
+  check "pre-commit project with failing autofix reports it" 0 "pre-commit failing"
+  [[ "$OUT" == *"trailing whitespace failed"* ]] ||
+  { printf 'FAIL failing autofix: output missing pre-commit output :: %s\n' "$OUT"; fails=1; }
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
 git rev-parse --show-toplevel &>/dev/null || exit 0
 
 UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null)
