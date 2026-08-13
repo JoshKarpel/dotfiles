@@ -35,13 +35,16 @@ schedule:
 
 max_active_runs: 1
 
-publish: pull-request
-
-review:
+publish:
+  kind: pull-request
   assignees: ["JoshKarpel"]
+  fix_checks: true
+
+budget:
+  per_session: 5.0
+  extra_sessions: 3
 
 harness:
   kind: claude-code
   args: ["--model", "sonnet", "--effort", "high"]
-  budget_usd: 5.0
   timeout: PT60M
