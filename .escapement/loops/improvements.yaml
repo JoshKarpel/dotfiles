@@ -1,6 +1,3 @@
-# One standing direction for this repository, read by escapement at the commit each run cuts from.
-# The filename is the loop's name, so this one is `dotfiles/improvements`.
-
 prompt: |
   Make this dotfiles repository a little better in whatever way it most needs today. There is no
   single axis to push on: this is tooling that a person and an agent both use every day, and its
@@ -33,13 +30,15 @@ prompt: |
   broad rewrites of documents that are merely opinionated.
 
 schedule:
-  # 5am Chicago. A constraint rather than an alarm: the server sweeps on its own interval and
-  # starts a run at the first sweep after this has passed.
   cron: "0 5 * * *"
   timezone: America/Chicago
 
-# One run in flight at a time. Throughput is set by whoever reviews, not by the agent.
 max_active_runs: 1
+
+publish: pull-request
+
+review:
+  assignees: ["JoshKarpel"]
 
 harness:
   kind: claude-code
