@@ -5,6 +5,49 @@
 
 set -euo pipefail
 
+# CLAUDE_HOOK_SELFTEST: set this env var to run the hook's embedded self-tests. This
+# marker line is how `claude-hook-selftests` discovers participating hooks. The hook
+# always exits 0, so the tests assert on stdout instead: silence for a non-Python
+# project, and the right pinned/floor version surfacing for one.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+
+  plain="$workdir/plain"
+  pinned="$workdir/pinned"
+  floor="$workdir/floor"
+  both="$workdir/both"
+  mkdir -p "$plain" "$pinned" "$floor" "$both"
+  echo "3.12" >"$pinned/.python-version"
+  printf '[project]\nrequires-python = ">=3.11"\n' >"$floor/pyproject.toml"
+  echo "3.13.1" >"$both/.python-version"
+  printf '[project]\nrequires-python = ">=3.10"\n' >"$both/pyproject.toml"
+
+  t() {
+    local desc="$1" dir="$2" want="$3" out
+    out=$(cd "$dir" && CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1)
+    if [[ "$want" == "<empty>" ]]; then
+      [[ -z "$out" ]] || { printf 'FAIL %s: want empty, got:\n%s\n' "$desc" "$out"; fails=1; }
+    else
+      [[ "$out" =~ $want ]] || { printf 'FAIL %s: want match /%s/, got:\n%s\n' "$desc" "$want" "$out"; fails=1; }
+    fi
+  }
+
+  t "non-python project stays silent"      "$plain"  "<empty>"
+  t "pinned version surfaces"              "$pinned" 'Pinned interpreter \(\.python-version\): Python 3\.12'
+  t "pinned version links whatsnew"        "$pinned" 'whatsnew/3\.12\.html'
+  t "requires-python floor surfaces"       "$floor"  'requires-python = ">=3\.11"'
+  t "requires-python floor links whatsnew" "$floor"  'whatsnew/3\.11\.html'
+  t "pinned wins over floor for whatsnew"  "$both"   'whatsnew/3\.13\.html'
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
 root=$(git rev-parse --show-toplevel 2>/dev/null) || root="$PWD"
 
 pinned=""
