@@ -3,6 +3,72 @@
 
 set -euo pipefail
 
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
+# line is how `claude-hook-selftests` discovers participating hooks. The branch-vs-default
+# and ahead-vs-even branches are easy to get backwards silently; run these with
+# `CLAUDE_HOOK_SELFTEST=1 claude-git-status`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+
+  repo="$workdir/repo"
+  mkdir -p "$repo"
+  git init -q -b main "$repo"
+  git -C "$repo" config user.email "test@example.com"
+  git -C "$repo" config user.name "test"
+  echo base >"$repo/file"
+  git -C "$repo" add file
+  git -C "$repo" commit -q -m init
+
+  call() {
+    local cwd="$1"
+    OUT=$(cd "$cwd" && CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1)
+  }
+
+  check_contains() {
+    local desc="$1" needle="$2"
+    [[ "$OUT" == *"$needle"* ]] ||
+    { printf 'FAIL %s: expected output to contain %q :: %s\n' "$desc" "$needle" "$OUT"; fails=1; }
+  }
+
+  check_not_contains() {
+    local desc="$1" needle="$2"
+    [[ "$OUT" != *"$needle"* ]] ||
+    { printf 'FAIL %s: expected output to NOT contain %q :: %s\n' "$desc" "$needle" "$OUT"; fails=1; }
+  }
+
+  call "$workdir"
+  [[ -z "$OUT" ]] || { printf 'FAIL outside any repo: expected no output :: %s\n' "$OUT"; fails=1; }
+
+  call "$repo"
+  check_contains "on the default branch" "Current git status:"
+  check_not_contains "on the default branch" "Recent commits:"
+  check_not_contains "on the default branch" "Net changes vs."
+
+  git -C "$repo" checkout -q -b even
+  call "$repo"
+  check_contains "on a branch with no commits ahead" "Current git status:"
+  check_not_contains "on a branch with no commits ahead" "Recent commits:"
+  check_not_contains "on a branch with no commits ahead" "Net changes vs."
+
+  git -C "$repo" checkout -q -b ahead
+  echo more >>"$repo/file"
+  git -C "$repo" commit -q -am ahead
+  call "$repo"
+  check_contains "on a branch ahead of default" "Current git status:"
+  check_contains "on a branch ahead of default" "Recent commits:"
+  check_contains "on a branch ahead of default" "ahead"
+  check_contains "on a branch ahead of default" "Net changes vs. main (merge-base):"
+  check_contains "on a branch ahead of default" "file"
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
 STATUS=$(git status --short --branch 2>/dev/null) || exit 0
 
 CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null) || CURRENT_BRANCH=""
