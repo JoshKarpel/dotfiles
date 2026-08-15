@@ -9,6 +9,11 @@ set -euo pipefail
 # `CLAUDE_HOOK_SELFTEST=1 claude-git-status`.
 if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   SELF=$(realpath "$0")
+  # In a real session `bin/` is on PATH, so this hook reaches `git-default-branch` by
+  # name. A CI checkout has no such PATH, and without this the nested self-invocation
+  # below would die on "command not found" and the self-test would abort silently.
+  PATH="$(dirname "$SELF"):$PATH"
+  export PATH
   fails=0
   workdir=$(realpath "$(mktemp -d)")
   trap 'rm -rf "$workdir"' EXIT
