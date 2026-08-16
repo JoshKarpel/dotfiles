@@ -62,10 +62,24 @@ CACHE_TTL = timedelta(minutes=5)
 # refuses.
 COMPLETION_TIMEOUT = 5
 
-# Integrations attach by tag, so this tag is what wires a fresh box up to the
-# dotfiles and GitHub integrations without any per-VM setup. Scoping the box's
-# own account key to it means a compromised box can only see tagged VMs.
-TAG = "dev-box"
+# Integrations attach by tag, so the tag a box carries is what wires it up to the
+# dotfiles and GitHub integrations without any per-VM setup. It is also which
+# GitHub identity the box's writes take, since an integration authenticates
+# either as my user or as the exe.dev app and never both: the `dev-box`
+# integrations all carry `--act-as-user`, and the `bot-box` ones deliberately do
+# not. That is the whole of the difference between the two kinds of box.
+#
+# Scoping a box's own account key to its own tag means a compromised box reaches
+# only boxes of its own kind. Measured, and worth knowing before expecting
+# otherwise: a key carries exactly one tag (`--tag=a,b` is an invalid name and a
+# repeated `--tag` keeps the last), and a scoped key is refused both `tag` and
+# `ssh-key add --tag=<other>`. So there is no scope spanning both tags, and
+# neither kind of box can build or reach the other.
+DEV_BOX_TAG = "dev-box"
+BOT_BOX_TAG = "bot-box"
+
+# Named by both units the bot-box bootstrap writes.
+UPDATE = "update-dotfiles"
 
 LOG = "bootstrap.log"
 
@@ -117,6 +131,65 @@ git clone https://github.int.exe.xyz/JoshKarpel/dotfiles.git "$dotfiles"
 # shell, so uv reaches exe-dev's shebang only by way of mise's own exec.
 "$HOME/.local/bin/mise" exec -- "$dotfiles/bin/exe-dev" clone-repos
 """
+
+# Appended to that for a bot-box, which has to track this repository on its own:
+# an unattended session runs under the hooks, rules, and bin scripts checked out
+# here, and nobody logs into the box to pull them. A devbox needs none of this,
+# since the person typing on it is the one who runs the installer.
+#
+# The job is install.sh rather than a bare `git pull`, so a file that did not
+# exist before gets linked and the toolchain moves too. Daily rather than hourly
+# follows from that: it upgrades apt and mise, which is minutes of work, and
+# nothing about a dotfiles change needs to land within the hour on a box with
+# nobody waiting on it. `Persistent` catches up a day the box spent shut down,
+# and the randomised delay is why the window is a day rather than a fixed minute,
+# since every box would otherwise reach for the same mirrors at the same instant.
+#
+# `--ff-only` and no commit from here, so a checkout somebody has left dirty
+# stops the timer loudly in `systemctl --user status` rather than being reset out
+# from under them.
+BOT_BOX_UPDATE = f"""
+units="$HOME/.config/systemd/user"
+mkdir -p "$units"
+
+# systemctl --user finds its manager through XDG_RUNTIME_DIR, which a login shell
+# has and a setup script at first boot does not. Without it every call below
+# fails with "Failed to connect to bus: No medium found", which reads as systemd
+# being absent and is really the environment being thin.
+export XDG_RUNTIME_DIR="${{XDG_RUNTIME_DIR:-$(loginctl show-user "$(id -un)" --value -p RuntimePath)}}"
+
+# %h rather than $HOME, which systemd would also expand, but only because it
+# happens to carry it: a specifier is resolved by systemd itself wherever it
+# appears, quoting included.
+cat > "$units/{UPDATE}.service" << 'UNIT'
+[Unit]
+Description=Update the dotfiles checkout and re-run its installer
+
+[Service]
+Type=oneshot
+# A login shell, so the installer finds mise's tools where a person's shell finds
+# them. A user manager's own environment carries /usr/bin and little else.
+ExecStart=/bin/bash -lc 'cd %h/{PROJECTS_DIR}/dotfiles && git pull --ff-only && ./install.sh'
+UNIT
+
+cat > "$units/{UPDATE}.timer" << 'UNIT'
+[Unit]
+Description=Keep this box on the latest dotfiles
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+systemctl --user daemon-reload
+systemctl --user enable --now {UPDATE}.timer
+"""
+
+BOT_BOX_BOOTSTRAP = BOOTSTRAP + BOT_BOX_UPDATE
 
 app = typer.Typer(no_args_is_help=True, help=__doc__)
 
@@ -326,12 +399,15 @@ def pin_published(host: str) -> None:
     raise typer.Exit(1)
 
 
-def register_key(vm: str) -> None:
+def register_key(vm: str, tag: str) -> None:
     """Register the box's own public key so it can drive exe.dev itself.
 
     The box cannot do this for itself: adding a key needs an already-trusted
     credential, and a fresh box has none. So it happens from here, which is
     authenticated by definition, and only the public half ever moves.
+
+    Scoped to the tag the box was built with, which is what keeps a box's
+    authority to its own kind.
     """
     out = run_without_stdin(
         control_plane_command(vm, "cat", ".ssh/id_ed25519.pub"), capture_output=True, text=True, check=True
@@ -341,15 +417,15 @@ def register_key(vm: str) -> None:
         typer.echo(f"{vm} returned no public key for .ssh/id_ed25519.pub", err=True)
         raise typer.Exit(1)
 
-    run_without_stdin(lobby_command("ssh-key", "add", f"--tag={TAG}", public_key), check=True)
-    typer.echo(f"registered {public_key.split()[-1]} scoped to tag {TAG}")
+    run_without_stdin(lobby_command("ssh-key", "add", f"--tag={tag}", public_key), check=True)
+    typer.echo(f"registered {public_key.split()[-1]} scoped to tag {tag}")
 
 
-def create_args(name: str, cpu: int, memory: str, disk: str) -> list[str]:
+def create_args(name: str, tag: str, cpu: int, memory: str, disk: str) -> list[str]:
     return lobby_command(
         "new",
         f"--name={name}",
-        f"--tag={TAG}",
+        f"--tag={tag}",
         f"--cpu={cpu}",
         f"--memory={memory}",
         f"--disk={disk}",
@@ -756,6 +832,33 @@ def code(
     os.execvp(command[0], command)
 
 
+def build(name: str, tag: str, bootstrap: str, cpu: int, memory: str, disk: str) -> None:
+    """Create a VM carrying TAG, run BOOTSTRAP on it, and register its key.
+
+    One sequence for both kinds of box, because the only things that differ
+    between them are the tag and what first boot does with it. Everything around
+    that (pinning both ends, waiting for a box with no bounded first boot,
+    following the log to a status, registering the key that box cannot register
+    for itself) has nothing to vary and is worth having in one place.
+    """
+    pin_published(LOBBY)
+
+    subprocess.run(create_args(name, tag, cpu, memory, disk), input=bootstrap, text=True, check=True)
+
+    typer.echo(f"\nwaiting for {name} to answer...")
+    wait_for_vm(name)
+    pin_published(vm_host(name))
+
+    status = follow_bootstrap(name)
+    if status != 0:
+        typer.echo(f"\nbootstrap failed with status {status}", err=True)
+        raise typer.Exit(status)
+
+    register_key(name, tag)
+
+    typer.echo(f"\n{name} is ready: ssh {vm_host(name)}")
+
+
 @app.command()
 def create_devbox(
     name: Annotated[str, typer.Argument(help="Name for the new VM.")],
@@ -768,22 +871,35 @@ def create_devbox(
     Resources come from a pool shared across every VM on the account, so
     `exe-dev lobby billing plan` is the real ceiling, not these defaults.
     """
-    pin_published(LOBBY)
+    build(name, DEV_BOX_TAG, BOOTSTRAP, cpu, memory, disk)
 
-    subprocess.run(create_args(name, cpu, memory, disk), input=BOOTSTRAP, text=True, check=True)
 
-    typer.echo(f"\nwaiting for {name} to answer...")
-    wait_for_vm(name)
-    pin_published(vm_host(name))
+@app.command()
+def create_botbox(
+    name: Annotated[str, typer.Argument(help="Name for the new VM.")],
+    cpu: Annotated[int, typer.Option(help="vCPUs to allocate.")] = 2,
+    memory: Annotated[str, typer.Option(help="Memory to allocate.")] = "8GB",
+    disk: Annotated[str, typer.Option(help="Disk to allocate.")] = "25GB",
+) -> None:
+    """Create a bot-box: a devbox whose GitHub writes come from the exe.dev app.
 
-    status = follow_bootstrap(name)
-    if status != 0:
-        typer.echo(f"\nbootstrap failed with status {status}", err=True)
-        raise typer.Exit(status)
+    The same bootstrap a devbox gets, so the same tools, the same dotfiles, and
+    the same clone of every repo the tag reaches. What differs is the tag, and
+    with it the integrations: a `bot-box` integration carries no `--act-as-user`,
+    so a commit or a pull request an unattended run leaves behind is the app's
+    rather than mine. It also tracks this repository on a daily timer, which a
+    devbox has a person for.
 
-    register_key(name)
+    Run it from an unscoped credential rather than from a box. A key scoped to a
+    tag is refused both `tag` and `ssh-key add --tag=<other>`, so a devbox can
+    neither tag a VM into `bot-box` nor mint the key this registers. That refusal
+    is also what keeps a bot-box from reaching a devbox, which is the direction
+    worth keeping; the price is that neither can build the other.
 
-    typer.echo(f"\n{name} is ready: ssh {vm_host(name)}")
+    Nothing here sets up an escapement server, or logs the box into Claude. Both
+    want a person, and both are per-box rather than per-kind.
+    """
+    build(name, BOT_BOX_TAG, BOT_BOX_BOOTSTRAP, cpu, memory, disk)
 
 
 @app.command()

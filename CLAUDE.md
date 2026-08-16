@@ -22,6 +22,13 @@ clone it was installed from, and only `install.sh` knows where that is. The same
 directory is where `claude-scriptorium` writes the codex service it manages
 itself, so symlinking the tree in would point that tool's writes at this repo.
 
+`bin/exe-dev` writes units there too, from the setup script `create-botbox`
+sends: a bot-box has nobody to run the installer on it, so it gets a timer that
+does. Those name no clone (`%h` reaches the home directory, and systemd resolves
+a specifier wherever it appears, quoting included), and are written at first boot
+rather than on every converge, so a change to them reaches only boxes built
+afterwards.
+
 ## Shell Startup Chain
 
 `bashrc`/`zshrc` → `~/.commonrc-pre` (sources every file in `sources/`, adds `bin/`
