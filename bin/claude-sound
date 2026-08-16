@@ -4,6 +4,50 @@
 
 set -euo pipefail
 
+# CLAUDE_HOOK_SELFTEST: set this env var to run the hook's embedded self-tests. This
+# marker line is how `claude-hook-selftests` discovers participating hooks. The hook
+# always exits 0, so the tests stub `uname` (to reach both the Darwin and Linux
+# branches from one machine) and the player command, and assert on the exit code plus
+# which sound file the stub was invoked with, or that no player ran at all.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  fails=0
+  t() {
+    local want="$1" uname_out="$2" player="$3" installed="$4" player_exit="$5" test_role="$6"
+    local stubs got exit_code
+    stubs=$(mktemp -d)
+    printf '#!/usr/bin/env bash\necho %s\n' "$uname_out" >"$stubs/uname"
+    chmod +x "$stubs/uname"
+    if [[ "$installed" == "1" ]]; then
+      printf '#!/usr/bin/env bash\nprintf %%s "${@: -1}" >"%s/played"\nexit %s\n' \
+        "$stubs" "$player_exit" >"$stubs/$player"
+      chmod +x "$stubs/$player"
+    fi
+    PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$0" $test_role >/dev/null 2>&1
+    exit_code=$?
+    if [[ -e "$stubs/played" ]]; then
+      got="exit=$exit_code played=$(basename "$(cat "$stubs/played")")"
+    else
+      got="exit=$exit_code played=none"
+    fi
+    rm -rf "$stubs"
+    [[ "$got" == "$want" ]] ||
+    { printf 'FAIL want=%s got=%s :: %s %s installed=%s player_exit=%s role=%s\n' \
+      "$want" "$got" "$uname_out" "$player" "$installed" "$player_exit" "$test_role"; fails=1; }
+  }
+  t 'exit=0 played=complete.oga' Linux paplay 1 0 stop
+  t 'exit=0 played=message.oga'  Linux paplay 1 0 notify
+  t 'exit=0 played=complete.oga' Linux paplay 1 0 ''      # no role arg defaults to stop
+  t 'exit=0 played=none'         Linux paplay 0 0 stop    # paplay not installed
+  t 'exit=0 played=complete.oga' Linux paplay 1 1 stop    # paplay installed but fails (no audio server)
+  t 'exit=0 played=Morse.aiff'   Darwin afplay 1 0 stop
+  t 'exit=0 played=Ping.aiff'    Darwin afplay 1 0 notify
+  t 'exit=0 played=none'         Darwin afplay 0 0 stop   # afplay not installed
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
 role="${1:-stop}"
 
 # A player that is installed but can't reach an audio server fails at playback rather
