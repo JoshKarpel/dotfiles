@@ -86,6 +86,10 @@ function do_apt() {
 
   sudo apt-get upgrade -y
   sudo apt-get autoremove -y
+
+  # The .debs the upgrade just downloaded are dead weight once installed. Here
+  # rather than in bin/tidy, so that stays user-level and never needs a password.
+  sudo apt-get clean
 }
 
 function do_locale() {
@@ -125,7 +129,8 @@ function do_brew() {
 
   brew upgrade
 
-  brew cleanup
+  # --prune=all drops the whole download cache rather than only aged entries.
+  brew cleanup --prune=all
 
   "$(brew --prefix)"/opt/fzf/install --completion --key-bindings --no-update-rc
 }

@@ -17,6 +17,7 @@ function update() {
       return 1
     }
   )
+  tidy
   reload
 }
 

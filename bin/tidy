@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Reclaim disk by pruning the caches of every tool installed on this machine.
+# `update` runs this after install.sh; it is also safe to run by hand.
+#
+# Every step is user-level, so this never asks for a password. apt and brew are
+# the two caches deliberately absent: install.sh already runs those package
+# managers under sudo, and clearing their archives belongs in that phase rather
+# than dragging root into this one.
+#
+# Everything removed here is a cache: the tool rebuilds or re-downloads it on
+# next use. What that costs varies from seconds (cargo re-extracting sources it
+# still has archived) to a gigabyte of download (the browser bundles), so each
+# step below says which it is where the answer isn't obvious.
+#
+# `set -e` is deliberately absent: one tool's prune failing, because its daemon
+# isn't running or another process holds its cache, must not skip every prune
+# after it.
+set -uo pipefail
+
+CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+
+function have() {
+  command -v "$1" > /dev/null 2>&1
+}
+
+function available_kb() {
+  df -Pk "$HOME" | awk 'NR == 2 { print $4 }'
+}
+
+# Not numfmt: it is GNU-only, and macOS ships neither it nor an unprefixed
+# coreutils, so the report would come out empty there.
+function human_kb() {
+  awk -v kb="$1" 'BEGIN {
+    split("K M G T", unit)
+    i = 1
+    while (kb >= 1024 && i < 4) { kb /= 1024; i++ }
+    printf "%.1f%s", kb, unit[i]
+  }'
+}
+
+function step() {
+  local label="$1"
+  shift
+
+  printf "\n\033[0;30;46m%s\033[0m\n" "$label"
+  "$@" || echo "  failed, continuing" >&2
+}
+
+# `cargo clean gc` is nightly-only as of cargo 1.97, so there is no stable
+# built-in. Of the three, only registry/cache costs a re-download: registry/src
+# is re-extracted from those archives, and git/checkouts re-cloned from git/db,
+# which stays.
+function prune_cargo() {
+  rm -rf "$CARGO_HOME"/registry/{cache,src} "$CARGO_HOME"/git/checkouts
+}
+
+# Neither tool prunes to just the current revision. Playwright's `uninstall
+# --all` and `npx @puppeteer/browsers clear` each remove everything, and
+# puppeteer's has to fetch its CLI over the network to do it, so removing the
+# directories reaches the same state without the download. The cost lands on the
+# next test run, which re-fetches a browser bundle per project.
+function prune_browser_bundles() {
+  rm -rf "$HOME/.cache/ms-playwright" "$HOME/.cache/puppeteer"
+}
+
+before=$(available_kb)
+
+# Tool versions no longer named by any config are install.sh's `mise prune`;
+# this is the separate cache of downloads and remote-version lookups.
+have mise && step "Pruning mise cache..." mise cache prune
+
+# Hook environments for repos and revisions no longer referenced by any
+# .pre-commit-config.yaml this machine has run.
+have pre-commit-run && step "Collecting pre-commit garbage..." pre-commit-run gc
+
+# After pre-commit, not before: pre-commit-run reaches pre-commit through uvx,
+# which leaves an ephemeral cached environment behind that this then collects.
+have uv && step "Pruning uv cache..." uv cache prune
+
+have cargo && step "Pruning cargo registry..." prune_cargo
+
+# npm has no prune. `verify` is the closest thing: it garbage-collects expired
+# entries and rebuilds the index, rather than emptying the cache the way
+# `npm cache clean --force` does.
+have npm && step "Verifying npm cache..." npm cache verify
+
+have pnpm && step "Pruning pnpm store..." pnpm store prune
+
+# pip only offers the whole-cache purge; there is no unreferenced-entry prune.
+have pip && step "Purging pip cache..." pip cache purge
+
+if have go && [[ -d $(go env GOCACHE) || -d $(go env GOMODCACHE) ]]; then
+  step "Cleaning go caches..." go clean -cache -testcache -fuzzcache -modcache
+fi
+
+have docker && step "Pruning docker..." docker system prune --all --volumes --force
+have podman && step "Pruning podman..." podman system prune --all --volumes --force
+
+step "Removing browser bundles..." prune_browser_bundles
+
+after=$(available_kb)
+
+printf "\n\033[0;30;46mReclaimed %s\033[0m\n" "$(human_kb "$((after - before))")"

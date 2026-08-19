@@ -55,6 +55,10 @@ can just use the name.
 # Run pre-commit hooks manually
 pre-commit run
 
+# Prune every installed tool's cache to reclaim disk. `update` runs this after
+# install.sh; run it by hand to reclaim now.
+tidy
+
 # Count Claude tokens in files/dirs via the Anthropic count_tokens API
 # (needs ANTHROPIC_API_KEY). Run with --help for usage and flags.
 count-claude-tokens --help
