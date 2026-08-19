@@ -47,7 +47,33 @@ just arguments, so tests pass in whatever they need without patching.
   knowingly-broken copy, and confirm it fails before trusting it. This matters
   most where the obvious signal is constant: a script that always exits 0 has to
   assert a side effect instead, and an assertion on a side effect is easy to
-  write in a form that holds either way.
+  write in a form that holds either way. Undo the break with the inverse edit,
+  or work on a copy: `git checkout --`/`git restore` reverts the *whole file* to
+  HEAD, so it discards every other uncommitted change in it, which during a
+  feature is most of the session's work. Restoring from a backup taken earlier
+  has the same failure in slower motion, since the backup predates whatever you
+  fixed in between.
+- **A green run is not a fixed race.** For a failure that was already
+  intermittent, one pass is the expected outcome even with no fix at all, so it
+  is not evidence. Before crediting a fix, check that its mechanism could
+  actually produce the effect (does the hook run before or after the teardown it
+  is supposed to observe?), then get a second independent signal by re-running.
+  A fix you can't explain mechanically is a coincidence you haven't caught yet.
+- **Simulate the platform before suppressing the check.** When a coverage or
+  lint gate fails on a branch unreachable on this platform, a `# pragma: no
+  cover` also stops measuring the branch where it *is* exercised, so the gate
+  goes quiet if that path later dies. Ask first whether the other platform's
+  shape can be built locally (delete the attribute the code probes for,
+  construct the other event loop directly) and tested for real on every
+  platform. Reach for the pragma only when it can't.
+- **Coverage is a floor, not a ceiling.** 100% line and branch coverage means
+  every line ran, not that anything pins its behavior: a mutation that flips an
+  `and` to an `or` can survive a fully-covering test that never varies the
+  second operand. Where the logic is subtle and the project has a mutation
+  testing setup, run it over new code and kill the survivors. To judge whether a
+  refactor weakened the suite, diff the survivor *sets* against a worktree at
+  the pre-change commit, not the survivor counts, which hide a new survivor
+  behind a newly-killed one.
 - **Substring assertions match the whole artifact.** Generated output that embeds
   a script's own source will contain every selector that script mentions, and a
   negative assertion (`!output.contains("x")`) is satisfied by your own comment

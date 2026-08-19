@@ -16,16 +16,32 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
     [[ "$got" == "$want" ]] ||
     { printf 'FAIL want=%s got=%s :: %s\n' "$want" "$got" "$cmd"; fails=1; }
   }
+  # Both sed branches exit 2, so the exit code can't tell them apart; assert on
+  # the advice itself, which is the whole point of splitting them.
+  m() {
+    local want="$1" cmd="$2" got
+    got=$(jq -cn --arg c "$cmd" '{tool_input: {command: $c}}' \
+      | CLAUDE_HOOK_SELFTEST= "$0" 2>&1 >/dev/null || true)
+    [[ "$got" == *"$want"* ]] ||
+    { printf 'FAIL want-advice=%s got=%s :: %s\n' "$want" "$got" "$cmd"; fails=1; }
+  }
   t 2 "sed -n '1,5p' file.txt"
   t 2 'sed -n 1,5p file.txt'
   t 2 'head -n 20 file.txt'
   t 2 'tail -n 5 app.log'
+  t 2 "grep -n source render.rs | sed -n '1,40p'"
+  t 2 "cat a.txt | sed -n 1,40p"
   t 0 "sed -n '5p' file"
   t 0 'sed -i s/a/b/ file'
   t 0 'head -c 100 file'
   t 0 'cat file | head -n 5'
   t 0 'tail -f log'
   t 0 'ls -la'
+  # Reading a file range: Read does it natively.
+  m 'Read tool' "sed -n '1,5p' file.txt"
+  # Trimming piped output: Read cannot page through a pipe, so say head/tail.
+  m 'head' "grep -n source render.rs | sed -n '1,40p'"
+  m 'head' "cat a.txt | sed -n 1,40p"
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
   fi
@@ -35,9 +51,16 @@ fi
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 
-# Detect: sed -n 'X,Yp' file  (line-range reads)
-if echo "$COMMAND" | grep -qE "sed\s+-n\s+['\"]?[0-9]+,[0-9]+p['\"]?"; then
-  echo "Use the Read tool with 'offset' and 'limit' parameters instead of 'sed -n X,Yp'. It reads line ranges natively and doesn't require Bash approval." >&2
+# Detect: sed -n 'X,Yp'  (line-range reads)
+SED_RANGE="sed[[:space:]]+-n[[:space:]]+['\"]?[0-9]+,[0-9]+p"
+if [[ "$COMMAND" =~ $SED_RANGE ]]; then
+  # Downstream of a pipe the range trims command output, not a file, and Read has
+  # no pipe to attach to; head/tail is the honest alternative there.
+  if [[ "$COMMAND" =~ [|][^|]*$SED_RANGE ]]; then
+    echo "Use 'head' or 'tail' to trim piped output instead of 'sed -n X,Yp'. (The Read tool is the right answer for a line range in a file, but it cannot page through a pipe.)" >&2
+  else
+    echo "Use the Read tool with 'offset' and 'limit' parameters instead of 'sed -n X,Yp'. It reads line ranges natively and doesn't require Bash approval." >&2
+  fi
   exit 2
 fi
 

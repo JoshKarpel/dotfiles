@@ -28,6 +28,13 @@ you think the API does.
   depends on it. A remembered, precise-sounding threshold ("renders inline under
   ~1 MB") is exactly the kind that proves false only after a feature, its tests,
   and its docs are built on it.
+- **Run the control before trusting the experiment.** A reproduction harness you
+  just built is itself unproven, so a run that confirms your hypothesis may be
+  measuring the harness instead: a nested container with no init system, a health
+  command the runtime takes literally, a probe that never reached the code path.
+  Run the known-good case through the same harness first and confirm it comes out
+  known-good. If the control fails too, what you have is a broken rig, not a
+  reproduction.
 - **Never state a performance claim you haven't measured**, least of all in a
   comment or doc. Plausible reasoning about what amortizes or what dominates is
   frequently backwards, and a measurement is usually one command away.

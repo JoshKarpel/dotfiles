@@ -22,6 +22,15 @@ Beck's rule applies to a change you can see coming, not to one you're
 imagining. Restructure on evidence: the change you're making now, or one
 already asked for.
 
+An unfilled cell in a matrix the design already commits to is evidence too.
+Once an abstraction enumerates its axes (the arms of a union, both directions
+of a codec table, a handler per method), the missing combination is implied by
+the ones already there, and "wait until someone needs it" is the wrong test:
+the design asked for it the moment the axes were fixed, and shipping three of
+four arms leaves a hole callers have to route around. This licenses completing
+a cross-product that already exists. It does not license inventing an axis so
+there's a cross-product to complete.
+
 Wait for *cut points* to emerge: a narrow interface the rest of the system
 talks through, with the complexity sealed behind it. Cut points are found, not
 planned. Refactor toward them as they appear.

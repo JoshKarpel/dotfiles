@@ -71,6 +71,21 @@ otherwise fails to build.
 - Use `anyhow` for application-level propagation where the specific type doesn't matter at the call site.
 - Avoid `.unwrap()` in library code. In application code, `.expect("reason")` is acceptable where a panic signals a programmer error; include a message that explains the invariant.
 
+In a process that outlives one request, recover a poisoned lock instead of
+propagating the panic:
+
+```rust
+let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+```
+
+`.expect()` on `lock()` is fine for a CLI, which exits. In a long-running
+service it converts one panic into a permanent outage without ever crashing:
+every later lock fails, the accept loop never returns, and the process stays up
+serving errors, so `Restart=always` sees a healthy process and never fires. The
+poison flag only reports that some past holder panicked, and the data behind it
+is usually still coherent, so `into_inner` costs one bad request where the
+alternative costs the whole process.
+
 ## Async
 
 - `tokio` is the async runtime; annotate `main` with `#[tokio::main]`.

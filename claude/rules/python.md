@@ -44,6 +44,24 @@ to or a mutable object you mutate, and that's fine. Interior mutability of a
 field is not a reason to drop `frozen`: keep the dataclass frozen and omit it
 only when you genuinely need to reassign the instance's own fields.
 
+Build one container from another by assigning its fields explicitly, in a
+`@classmethod` factory. Don't route the fields through `dataclasses.asdict()`
+or a `**` splat:
+
+```python
+@classmethod
+def from_content(cls, status: int, content: Content) -> Response:
+    return cls(status=status, headers=content.headers, body=content.body)
+```
+
+The splat hides which fields actually cross, so the mapping is invisible at the
+point it's decided, and it breaks the moment the two field sets diverge: a field
+added to the source silently becomes an unexpected keyword argument, and a
+renamed one fails at runtime rather than under the type checker. `asdict()` is
+worse than a plain splat besides: it recurses, so a nested dataclass arrives as
+a `dict` rather than the type the target declares, and it `deepcopy`s every
+value on the way through.
+
 Make Pydantic models frozen, mirroring the frozen-by-default dataclass rule:
 set it through the `model_config` classvar with `ConfigDict`, not the older
 `class Config` inner class.
@@ -68,6 +86,10 @@ class Order(BaseModel):
 - **f-strings** for all string formatting, including logging calls. No `.format()` or `%`.
   (The conventional advice to use `%`-style in logging to defer interpolation is rarely
   a meaningful optimization in practice.)
+- **Bytes are the exception**, because there is no f-string for them: `fb""` is a
+  syntax error (`'b' and 'f' prefixes are incompatible`), since PEP 498 deliberately
+  excluded bytes. Use printf-style `%` formatting, which PEP 461 added for exactly
+  this: `b"GET %s HTTP/1.1" % path`.
 
 ## Docstrings
 

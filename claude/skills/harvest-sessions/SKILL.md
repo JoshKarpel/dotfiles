@@ -88,10 +88,20 @@ where the reasoning actually lives. Give each reader a self-contained task like:
 > For each finding give: a one-line general principle, the evidence (quote the
 > message(s), with role), and whether it's **general** (applies to any project) or
 > **project-specific**. Return a short list; "nothing notable" is a fine answer.
+>
+> If you write the transcript to a file, name it after the session id. Every
+> reader in this fan-out shares one scratchpad directory.
 
 The open-ended prompt matters: the subagent's judgment reading the actual session
 beats any list of things to grep for. The script handles the mechanical cleanup;
 the subagent handles the interpretation.
+
+The naming instruction is load-bearing at width: readers run concurrently in a
+shared scratchpad, so the obvious name (`session.txt`) is the one they all pick,
+and a reader that dumps a transcript there gets it overwritten mid-read by a
+sibling. What that looks like from inside is a transcript whose content changes
+between two reads of the same file, which reads as corruption and costs a reader
+its context re-verifying.
 
 ## 3. Synthesize across the reports
 

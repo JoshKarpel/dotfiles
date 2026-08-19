@@ -110,6 +110,20 @@ commits. This is the declarative "recovered, not restated" principle (see the
 declarative rule) applied to codegen: the generator owns the shape, the
 checked-in file is derived.
 
+## Hooks That Create Files
+
+pre-commit decides a hook "modified files" by diffing the worktree against the
+index, so a hook that generates a *new* file has to stage it with
+`git add --intent-to-add`. A plain `git add` stages the content in full, which
+leaves no unstaged diff, and the run passes silently the very first time, which
+is exactly the run that should have failed. Intent-to-add registers the path
+without its content, so the file still reads as an unstaged new-file diff and
+the run fails like any other autofixing hook.
+
+```bash
+git add --intent-to-add "$generated"
+```
+
 ## Schema Validation
 
 When the repo has GitHub config under `.github/`, add the

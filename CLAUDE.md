@@ -146,7 +146,11 @@ tests can't run exits non-zero.
   A hook that always exits 0 has no exit code to assert, so it asserts the side effect
   instead: `claude-notify-push` stubs its downstream commands on PATH and compares the
   set that recorded a call, which is what distinguishes an early exit from a hook that
-  did the work and returned 0 anyway.
+  did the work and returned 0 anyway. Where the exit code is the same across branches
+  but the advice differs, assert on the message: `claude-read-check` blocks a `sed -n`
+  range either way, and only the stderr text distinguishes reading a file (use Read)
+  from trimming a pipe (use `head`/`tail`), so a second helper captures stderr and
+  matches a substring.
 - **Python hooks** check the env var in `main()` and run an embedded case matrix
   against a pure `(command, cwd, repo_root) -> …` function, so the tests need no git
   or filesystem. See `claude-rm-scope-check`.

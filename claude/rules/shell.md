@@ -60,6 +60,24 @@ if command -v jq >/dev/null 2>&1; then
 fi
 ```
 
+## Portability Across Linux and macOS
+
+macOS ships BSD userland, not GNU coreutils, so a script that runs on both can't
+reach for GNU-only tools or GNU-only flags. `numfmt` doesn't exist there at all,
+and `sed -i`, `date -d`, `readlink -f`, `stat`, and `grep -P` all differ or are
+absent. The failure is quiet: the tool is missing, the substitution produces
+nothing, and the script reports an empty result rather than an error.
+
+Prefer what POSIX guarantees, and do formatting and arithmetic in `awk`, which
+is present and consistent on both:
+
+```bash
+awk '{ printf "%.1f MiB\n", $1 / 1048576 }'   # not: numfmt --to=iec
+```
+
+Where a GNU tool is genuinely needed, guard on its presence (see above) and
+provide the POSIX path, rather than discovering the gap on the other platform.
+
 ## Expected Non-Zero Exits
 
 Under `set -e`, a command that returns non-zero for a normal, expected

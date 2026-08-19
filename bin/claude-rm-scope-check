@@ -53,6 +53,7 @@ TEMP_PREFIXES = ("/tmp/claude-", "/private/tmp/claude-")
 
 _VAR_ASSIGN = re.compile(r"^\w+=")
 _WORD_RM = re.compile(r"\brm\b")
+_REDIRECT_CHARS = set("<>&|")
 
 
 def _tokenize(command: str) -> list[str]:
@@ -74,6 +75,35 @@ def _split_segments(tokens: list[str]) -> list[list[str]]:
     if current:
         segments.append(current)
     return segments
+
+
+def _is_redirect_operator(token: str) -> bool:
+    return bool(token) and set(token) <= _REDIRECT_CHARS and ("<" in token or ">" in token)
+
+
+def _strip_redirections(segment: list[str]) -> list[str]:
+    """Drop redirections so their destinations aren't mistaken for command arguments.
+
+    `punctuation_chars` tokenizing splits `2>/dev/null` into `2`, `>`, `/dev/null`,
+    and only `;&|()` tokens end a segment, so without this the redirect destination
+    reads as an `rm` target and blocks the call on a path nothing was deleting.
+    A bare file descriptor in front of the operator goes too; shlex has already
+    discarded the whitespace that would distinguish `rm 2>x` from `rm 2 >x`, and a
+    pure-digit relative target resolves inside the work area either way.
+    """
+    kept: list[str] = []
+    skip_next = False
+    for token in segment:
+        if skip_next:
+            skip_next = False
+            continue
+        if _is_redirect_operator(token):
+            if kept and kept[-1].isdigit():
+                kept.pop()
+            skip_next = True
+            continue
+        kept.append(token)
+    return kept
 
 
 def _resolve_command(segment: list[str]) -> tuple[str | None, list[str]]:
@@ -233,6 +263,7 @@ def _escaping_target(command: str, cwd: str, repo_root: str) -> str | None:
         except ValueError:
             continue
         for segment in segments:
+            segment = _strip_redirections(segment)
             name, args = _resolve_command(segment)
             if name is None:
                 continue
@@ -347,6 +378,19 @@ _SELFTEST_CASES = [
     ("rm -rf ~", "/repo/packages/web", "/repo", True),
     ("rm -rf ../web-old", "/repo/packages/web", "/repo", True),
     ("cd ../.. && rm -rf x", "/repo/packages/web", "/repo", True),
+    # --- ALLOW: a redirect destination is not an rm target ---
+    ("rm -rf mutants setup.cfg 2>/dev/null", "/repo", "/repo", False),
+    ("rm -rf build 2> /dev/null", "/repo", "/repo", False),
+    ("rm -rf build >/dev/null 2>&1", "/repo", "/repo", False),
+    ("rm -rf build &> /dev/null", "/repo", "/repo", False),
+    ("rm -rf build >> /var/log/cleanup.log", "/repo", "/repo", False),
+    ("rm -rf build < /etc/inputlist", "/repo", "/repo", False),
+    ("cd sub && rm -rf tmp 2>/dev/null", "/repo", "/repo", False),
+    # --- BLOCK: a redirect must not launder an escaping target beside it ---
+    ("rm -rf /etc/passwd 2>/dev/null", "/repo", "/repo", True),
+    ("rm -rf ~/Documents >/dev/null 2>&1", "/repo", "/repo", True),
+    ("rm -rf $HOME/x &> /dev/null", "/repo", "/repo", True),
+    ("cd /etc && rm -rf x 2>/dev/null", "/repo", "/repo", True),
     # --- ALLOW: not a delete, or rm only mentioned ---
     ("ls -la", "/repo", "/repo", False),
     ('grep "rm -rf /etc" logfile', "/repo", "/repo", False),
