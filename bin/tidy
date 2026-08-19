@@ -84,8 +84,6 @@ have cargo && step "Pruning cargo registry..." prune_cargo
 # `npm cache clean --force` does.
 have npm && step "Verifying npm cache..." npm cache verify
 
-have pnpm && step "Pruning pnpm store..." pnpm store prune
-
 # pip only offers the whole-cache purge; there is no unreferenced-entry prune.
 have pip && step "Purging pip cache..." pip cache purge
 
