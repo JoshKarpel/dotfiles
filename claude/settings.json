@@ -125,6 +125,7 @@
       "Bash(mise registry*)",
       "Bash(mise search*)",
       "Bash(mise config ls*)",
+      "Bash(brew list *)",
       "Bash(cp *)",
       "Bash(sort *)",
       "Bash(uniq *)",
