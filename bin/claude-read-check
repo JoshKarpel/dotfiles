@@ -37,6 +37,12 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   t 0 'cat file | head -n 5'
   t 0 'tail -f log'
   t 0 'ls -la'
+  # Old-style `head -N`/`tail -N` and the glued `-nN` form skip the space the
+  # original regex required; both are common enough to need their own case.
+  t 2 'head -20 file.txt'
+  t 2 'tail -20 app.log'
+  t 2 'head -n20 file.txt'
+  t 2 'tail -n20 app.log'
   # Reading a file range: Read does it natively.
   m 'Read tool' "sed -n '1,5p' file.txt"
   # Trimming piped output: Read cannot page through a pipe, so say head/tail.
@@ -64,15 +70,18 @@ if [[ "$COMMAND" =~ $SED_RANGE ]]; then
   exit 2
 fi
 
-# Detect: head -n N file  (reading first N lines of a file, not in a pipeline)
-if echo "$COMMAND" | grep -qE "^head\s+-n\s+[0-9]+\s+\S+$"; then
-  echo "Use the Read tool with 'limit' instead of 'head -n N file'. It reads the first N lines natively and doesn't require Bash approval." >&2
+# Detect: head -n N file / head -nN file / head -N file  (reading first N lines
+# of a file, not in a pipeline). The old-style bare-count form and the glued
+# -nN form are both still valid head invocations, not just `-n N`.
+if echo "$COMMAND" | grep -qE "^head\s+-(n\s*)?[0-9]+\s+\S+$"; then
+  echo "Use the Read tool with 'limit' instead of 'head -N file'. It reads the first N lines natively and doesn't require Bash approval." >&2
   exit 2
 fi
 
-# Detect: tail -n N file  (reading last N lines of a file, not in a pipeline)
-if echo "$COMMAND" | grep -qE "^tail\s+-n\s+[0-9]+\s+\S+$"; then
-  echo "Use the Read tool instead of 'tail -n N file'. Read the file with an appropriate offset (use 'wc -l' first if needed to find the line count). This avoids Bash approval." >&2
+# Detect: tail -n N file / tail -nN file / tail -N file  (reading last N lines
+# of a file, not in a pipeline)
+if echo "$COMMAND" | grep -qE "^tail\s+-(n\s*)?[0-9]+\s+\S+$"; then
+  echo "Use the Read tool instead of 'tail -N file'. Read the file with an appropriate offset (use 'wc -l' first if needed to find the line count). This avoids Bash approval." >&2
   exit 2
 fi
 
