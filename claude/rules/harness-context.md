@@ -1,16 +1,3 @@
----
-paths:
-  - "**/{AGENTS,CLAUDE,GEMINI,QWEN}.md"
-  - "**/rulesync.md"
-  - "**/.{claude,codex,cursor,rulesync,windsurf,junie,clinerules,roo,kiro,augment}/**"
-  - "**/.{cursorrules,windsurfrules,clinerules}"
-  - ".github/copilot-instructions.md"
-  - ".github/{instructions,prompts}/**"
-  - "**/{rules,commands,skills}/*.md"
-  - "**/SKILL.md"
-  - "claude/**"
----
-
 # Harness Context Loading
 
 Which mechanism carries a piece of guidance, and when each one loads. This covers
@@ -21,6 +8,18 @@ The organizing question, _who decides that guidance applies_, generalizes across
 harnesses; the names below are Claude Code's. A harness offering only one always-on
 instructions file collapses the choice to "unconditional or absent", leaving only
 the criterion below.
+
+## A Session Is Not Storage
+
+Nothing learned in a session survives it. When a correction, a hard-won
+constraint, or a settled convention is worth keeping, write it into one of the
+mechanisms below, committed to the repository that owns the harness config.
+Guidance living anywhere else is unversioned, unreviewable, and absent from the
+next machine.
+
+The trigger is sometimes stated outright. When it isn't, supply it: being
+corrected twice on the same thing, or establishing a constraint that cost an
+hour, is the signal to say where the lesson belongs before moving on.
 
 ## Who Decides It Applies
 
