@@ -234,10 +234,6 @@
           {
             "type": "command",
             "command": "claude-awk-check"
-          },
-          {
-            "type": "command",
-            "command": "claude-sleep-poll-check"
           }
         ]
       },
