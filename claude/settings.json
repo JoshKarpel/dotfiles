@@ -174,19 +174,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "claude-just-list"
-          },
-          {
-            "type": "command",
-            "command": "claude-pre-commit-reminder"
-          },
-          {
-            "type": "command",
-            "command": "claude-python-version"
-          },
-          {
-            "type": "command",
-            "command": "claude-gh-status"
+            "command": "agent-session-start claude startup"
           }
         ]
       },
@@ -194,7 +182,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "claude-git-status"
+            "command": "agent-session-start claude always"
           }
         ]
       }

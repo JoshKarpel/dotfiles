@@ -44,6 +44,9 @@ function do_config() {
   done
 
   "$BASEDIR/bin/link-claude"
+
+  # Guards on codex being installed, so this is a no-op on a box without it.
+  "$BASEDIR/bin/link-codex"
 }
 
 function do_ssh_key() {

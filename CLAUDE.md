@@ -10,7 +10,7 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 
 - **`dotrc/`** — Files symlinked as `~/.<filename>` (bashrc, zshrc, commonrc-pre, commonrc-post, gitconfig, etc.)
 - **`config/`** — Top-level entries symlinked into `~/.config/` under their own names. An entry that is a file lands as a file, so `starship.toml` becomes `~/.config/starship.toml`, not `~/.config/starship/`. Adding a tool's config needs no change to `install.sh`.
-- **`claude/`** — Source files symlinked into `~/.claude/` via `bin/link-claude`: the global `CLAUDE.md`, `settings.json`, `skills/`, `rules/`, and `commands/` (personal slash commands, invoked only when explicitly run, e.g. `/disco`). Edit these here, not the symlinks in `~/.claude/`.
+- **`claude/`** — Source files symlinked into `~/.claude/` via `bin/link-claude`: the global `CLAUDE.md`, `settings.json`, `skills/`, `rules/`, and `commands/` (personal slash commands, invoked only when explicitly run, e.g. `/disco`). Edit these here, not the symlinks in `~/.claude/`. `bin/link-codex` consumes the same directory for Codex, so a change here reaches both harnesses.
 - **`sources/`** — Shell scripts sourced by `commonrc-pre` at shell startup (aliases, git helpers, path management, etc.)
 - **`targets/`** — Package lists for apt and brew (one package per line, kept sorted by pre-commit)
 - **`bin/`** — Scripts added to PATH via `dotfiles/bin`; add any executable scripts here and they will be available in the shell (e.g., for Claude Code hooks)
@@ -97,6 +97,9 @@ does. What follows is only what neither source states.
   `claude-stop` is therefore an orchestrator rather than a group: it runs its checks
   in sequence and announces the stop only when none of them blocked, so an
   announcement means Claude is actually stopping rather than retrying after a block.
+  `agent-session-start` is the other orchestrator, for a different reason: the order
+  is the _content_ of a session's opening context, so leaving it to chance assembles
+  the front of every session differently.
 - Stop hooks return JSON: `additionalContext` carries a message to Claude without
   displaying it in the TUI, `systemMessage` shows a brief visible indicator.
 - A hook that auto-approves has to prove the _whole_ command is safe, while one that
@@ -175,6 +178,33 @@ tests can't run exits non-zero.
   where PATH and gitconfig are installed, so a green local run says nothing about either.
 - A passing self-test that cannot fail is worth nothing, so confirm a new case catches
   a deliberately broken copy of the hook before trusting it.
+
+## OpenAI Codex
+
+`bin/link-codex` converges `~/.codex` from `claude/`, so Codex sees the same
+instructions, skills, prompts, and guardrails. It guards on `codex` being
+installed, so it is a no-op elsewhere, and `install.sh` calls it beside
+`link-claude`.
+
+Skills and prompts are symlinked, because those formats are identical on both
+harnesses. Everything else is generated, because Codex wants the same knowledge in
+a different notation: rules concatenated into `AGENTS.override.md` because Codex
+has no rules mechanism, the deny list rewritten as `prefix_rule` execution policy,
+and the hook registrations moved into `hooks.json`. Generated files converge the
+way the systemd units do, so a run that changes nothing writes nothing.
+
+What does _not_ carry over is a list of a dozen items, and it lives as a comment
+block at the top of `link-codex` rather than here, because it is the thing most
+likely to change as the trial proceeds and it belongs next to the code that
+causes it.
+
+Codex's hook payload and its exit-2-blocks convention are Claude Code's, field for
+field, which is why the `PreToolUse` checks are registered unchanged. The one
+divergence worth knowing without reading the script: Claude takes a `SessionStart`
+hook's raw stdout as context, while Codex reads
+`hookSpecificOutput.additionalContext`. `bin/agent-session-start` is where that
+difference is absorbed, and it takes the harness as its first argument for exactly
+that reason.
 
 ## Claude Code Skills
 

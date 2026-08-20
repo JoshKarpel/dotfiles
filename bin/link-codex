@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+# Converge ~/.codex from this repo, so Codex sees the same instructions, skills,
+# prompts, and guardrails as Claude Code.
+#
+# Skills and prompts are symlinked, because the formats are identical on both
+# harnesses. Everything else is generated, because Codex wants the same knowledge
+# in a different notation. Generated files converge the way the systemd units in
+# install.sh do: write to a temp file, compare, replace only on difference.
+#
+# Runs from install.sh's do_config, which is before ~/.commonrc-pre is sourced, so
+# `exists` is not defined here and neither is dotfiles/bin on PATH. Use
+# `command -v` and absolute paths.
+#
+# ---------------------------------------------------------------------------
+# KNOWN GAPS
+#
+# Things Claude Code has that this does not carry over. Each is a deliberate
+# choice for a first cut, not an oversight; revisit as the trial turns up which
+# ones are actually felt.
+#
+#  1. exe.dev's own instructions are dropped. Codex reads AGENTS.override.md
+#     *instead of* AGENTS.md, never both, and ~/.codex/AGENTS.md is a root-owned
+#     symlink to exe.dev's Shelley file. Writing the override therefore hides it.
+#
+#  2. Path-scoped rules are not carried. The 16 rules in claude/rules/ with
+#     `paths:` frontmatter are loaded by Claude when a matching file is touched;
+#     Codex has no equivalent, so only the path-less rules ship. The plan is to
+#     replace path scoping with repo-marker selection at session start, which
+#     works the same on both harnesses.
+#
+#  3. The auto-approving hooks are omitted. claude-gh-api-check and
+#     claude-awk-check only ever emit an `allow` decision, and Codex parses but
+#     rejects `allow`, acting on `deny` alone. Registering them buys nothing.
+#
+#  4. No allow list. Claude's ~130 permissions.allow patterns are not translated,
+#     so Codex prompts more than Claude does. Deliberate: the deny side is the
+#     half that matters and it lives in the hooks, which do port. Translating the
+#     allow side to prefix_rule is mechanical work worth doing only if the
+#     prompting turns out to be the thing that makes Codex unpleasant.
+#
+#  5. rm is guarded by the hook, not by a rule. Codex declines to evaluate any
+#     command containing redirection, substitution, or a wildcard against .rules
+#     at all, and `~` / `$HOME` expansion makes a token-prefix match a poor fit
+#     besides. claude-rm-scope-check reasons about the actual target and is the
+#     guard here.
+#
+#  6. Tool-permission rules have no Codex equivalent. Read(**/.env*),
+#     Edit(**/.env*) and Edit(**/uv.lock) constrain Claude's own tools rather
+#     than shell commands. sandbox_mode covers some of the .env case by denying
+#     credential paths; nothing covers uv.lock.
+#
+#  7. Stop and Notification hooks are not registered. Codex's stop event cannot
+#     return additionalContext, so claude-stop's context-injection half would be
+#     silently dropped, and Codex has no Notification event at all, so
+#     claude-sound and claude-notify-push have nowhere to attach.
+#
+#  8. No status line. Codex's is built in and takes no command.
+#
+#  9. UNVERIFIED: the shape of tool_input for shell calls. The check scripts read
+#     `.tool_input.command`. Codex's embedded schema declares the same field
+#     names as Claude's, but leaves tool_input unconstrained, so the value shape
+#     is confirmed only for the field, not the contents. Run one session with a
+#     hook that dumps its stdin before trusting any of these to fire.
+#
+# 10. UNVERIFIED: whether hooks fire under `codex exec`. An upstream issue reports
+#     .rules being ignored in exec mode; hooks may share the problem.
+#
+# 11. SessionStart scopes collapse. Claude runs the `startup` set only on
+#     startup/clear/compact and the `always` set on every SessionStart including a
+#     resume. Codex's SessionStart carries a `source` field that could express the
+#     same split, but both scopes are registered unconditionally here, so a Codex
+#     session gets the startup set slightly more often than a Claude one does.
+#
+# 12. config.toml is fully managed here and overwritten on every converge, so
+#     `codex features enable/disable` will not survive. Commands approved in the
+#     TUI land in ~/.codex/rules/default.rules, which this script does not touch,
+#     so those do survive.
+# ---------------------------------------------------------------------------
+
+set -euo pipefail
+
+BASEDIR="$(dirname "$(dirname "$(realpath "$0")")")"
+CLAUDE="$BASEDIR/claude"
+CODEX=~/.codex
+
+if ! command -v codex >/dev/null 2>&1; then
+  echo "link-codex: codex is not installed, skipping"
+  exit 0
+fi
+
+# Write stdin to $1 only if it differs from what is already there.
+converge() {
+  local target="$1" tmp
+  tmp="$(mktemp)"
+  cat > "$tmp"
+
+  if [[ -f $target ]] && cmp -s "$tmp" "$target"; then
+    rm -f "$tmp"
+    echo "unchanged $target"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$target")"
+  mv "$tmp" "$target"
+  chmod 644 "$target"
+  echo "wrote $target"
+}
+
+link_dir_entries() {
+  local src="$1" dest="$2" entry target
+  mkdir -p "$dest"
+
+  for entry in "$src"/*; do
+    [[ -e $entry ]] || continue
+    target="$dest/$(basename "$entry")"
+    echo "link $target -> $entry"
+    ln -nsf "$entry" "$target"
+  done
+
+  # Drop links into this repo whose source has since been renamed or deleted.
+  while IFS= read -r link; do
+    case "$(readlink "$link")" in
+      "$BASEDIR"/*) [[ -e $link ]] || { echo "prune $link"; rm -f "$link"; } ;;
+    esac
+  done < <(find "$dest" -maxdepth 1 -type l)
+}
+
+# --- instructions -----------------------------------------------------------
+#
+# Claude loads claude/rules/*.md natively; Codex has no rules mechanism, so the
+# unconditional ones are concatenated into the instruction file. A rule carrying
+# frontmatter is path-scoped by definition, and those are skipped (gap 2).
+
+{
+  cat "$CLAUDE/CLAUDE.md"
+
+  for rule in "$CLAUDE"/rules/*.md; do
+    [[ -f $rule ]] || continue
+    # An empty file makes `read` return non-zero, which under `set -e` would end
+    # the script before the guard below ever runs.
+    IFS= read -r first < "$rule" || true
+    [[ $first == "---" ]] && continue
+
+    printf '\n\n---\n\n'
+    cat "$rule"
+  done
+} | converge "$CODEX/AGENTS.override.md"
+
+# --- skills and prompts -----------------------------------------------------
+
+link_dir_entries "$CLAUDE/skills" "$CODEX/skills"
+link_dir_entries "$CLAUDE/commands" "$CODEX/prompts"
+
+# --- hooks ------------------------------------------------------------------
+#
+# The PreToolUse checks are registered unchanged: Codex's hook payload and its
+# exit-2-blocks convention are Claude Code's, field for field. The matcher is a
+# regex over tool_name, and Codex aliases file edits to apply_patch/Edit/Write,
+# so the shell checks match Bash alone.
+
+converge "$CODEX/hooks.json" << 'EOF'
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "agent-session-start codex startup" },
+          { "type": "command", "command": "agent-session-start codex always" }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "claude-uv-check" },
+          { "type": "command", "command": "claude-read-check" },
+          { "type": "command", "command": "claude-shell-comment-check" },
+          { "type": "command", "command": "claude-git-dash-c-check" },
+          { "type": "command", "command": "claude-http-server-bind-check" },
+          { "type": "command", "command": "claude-rm-scope-check" },
+          { "type": "command", "command": "claude-sleep-poll-check" }
+        ]
+      }
+    ]
+  }
+}
+EOF
+
+# --- execution policy -------------------------------------------------------
+#
+# The deny half of settings.json, in the notation Codex evaluates. Only the
+# entries a token-prefix match expresses well are here; see gaps 5 and 6 for what
+# stays with the hooks instead. Check a command against these with:
+#
+#   codex execpolicy check --pretty --rules ~/.codex/rules/dotfiles.rules -- <cmd>
+
+converge "$CODEX/rules/dotfiles.rules" << 'EOF'
+# Generated by dotfiles/bin/link-codex. Edit the source, not this file.
+#
+# Codex also writes ~/.codex/rules/default.rules when a command is approved in
+# the TUI. That file is left alone; this one holds only the standing policy.
+
+prefix_rule(
+    pattern = ["git", ["commit", "push"]],
+    decision = "forbidden",
+    justification = "the user creates commits and pushes, not the agent",
+)
+
+prefix_rule(
+    pattern = ["git", "reset", "--hard"],
+    decision = "forbidden",
+    justification = "discards uncommitted work, which no VM or sandbox protects",
+)
+
+prefix_rule(
+    pattern = ["git", ["clean", "restore"]],
+    decision = "forbidden",
+    justification = "discards uncommitted work",
+)
+
+prefix_rule(
+    pattern = ["git", "checkout", "."],
+    decision = "forbidden",
+    justification = "reverts the whole tree to HEAD, losing the session's work",
+)
+
+prefix_rule(
+    pattern = ["git", "branch", ["-d", "-D"]],
+    decision = "forbidden",
+    justification = "branch deletion is the user's call",
+)
+
+prefix_rule(
+    pattern = ["git", "remote", ["set-url", "set-head", "set-branches"]],
+    decision = "forbidden",
+    justification = "repointing a remote changes where a later push lands",
+)
+
+prefix_rule(
+    pattern = ["sudo"],
+    decision = "forbidden",
+    justification = "privileged operations are run by the user",
+)
+EOF
+
+# --- config -----------------------------------------------------------------
+#
+# On an exe.dev VM the LLM integration serves OpenAI models over its own hostname
+# with no provider key on the box, so point Codex at it. Anywhere else, leave the
+# provider alone and let Codex use whatever `codex login` established.
+
+{
+  cat << 'EOF'
+# Generated by dotfiles/bin/link-codex. Edit the source, not this file.
+
+model_reasoning_effort = "high"
+
+# Codex's own sandbox, as a layer beneath the hooks: the hooks decide whether a
+# command runs, this decides what it can reach once it does.
+sandbox_mode = "workspace-write"
+EOF
+
+  if "$BASEDIR/bin/is-exe-dev"; then
+    cat << 'EOF'
+
+model = "gpt-5.6-terra"
+model_provider = "exe-llm"
+
+[model_providers.exe-llm]
+name = "exe-llm"
+base_url = "https://llm.int.exe.xyz/v1"
+requires_openai_auth = false
+EOF
+  fi
+} | converge "$CODEX/config.toml"

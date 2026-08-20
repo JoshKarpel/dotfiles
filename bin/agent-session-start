@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+# SessionStart hook for both harnesses: run the session-start scripts in a fixed
+# order and emit their combined output in the caller's dialect.
+#
+# Usage: agent-session-start <claude|codex> <startup|always>
+#
+# Two things make this a wrapper rather than five registrations.
+#
+# Ordering. Hooks registered as a group run in parallel with no guaranteed order,
+# so the front of every session was previously assembled differently each time.
+# Order is now the arrays below, on both harnesses.
+#
+# Dialect. Claude Code takes a SessionStart hook's raw stdout as context. Codex
+# ignores stdout and reads `hookSpecificOutput.additionalContext` instead. The
+# scripts themselves stay harness-neutral; only the envelope differs, and it
+# differs in exactly one place.
+#
+# The two scopes preserve a distinction the Claude config already made: most of
+# these only make sense when a session begins or its context is reset, while git
+# status is worth having on every SessionStart including a resume.
+
+set -euo pipefail
+
+STARTUP_HOOKS=(
+  claude-just-list
+  claude-pre-commit-reminder
+  claude-python-version
+  claude-gh-status
+)
+
+ALWAYS_HOOKS=(
+  claude-git-status
+)
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
+# line is how `claude-hook-selftests` discovers participating hooks. What is easy to
+# get wrong here is silent: a hook that fails or says nothing must drop out without
+# taking the others with it, an empty result must produce no output at all rather
+# than an envelope wrapping a blank string, and each harness must get its own
+# dialect. Run with `CLAUDE_HOOK_SELFTEST=1 agent-session-start`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+
+  # Stubs shadow the real session-start scripts, which would otherwise report on
+  # whatever repo the test happens to run in. They go ahead of the inherited PATH
+  # rather than replacing it, so jq still resolves.
+  stubs="$workdir/stubs"
+  mkdir -p "$stubs"
+  PATH="$stubs:$PATH"
+  export PATH
+
+  stub() {
+    printf '#!/usr/bin/env bash\n%s\n' "$2" > "$stubs/$1"
+    chmod +x "$stubs/$1"
+  }
+
+  # A non-zero exit is an outcome under test here, not a failure of the harness,
+  # so it must not trip the `set -e` of the test itself.
+  call() {
+    set +e
+    OUT=$(printf '{"hook_event_name":"SessionStart"}' | CLAUDE_HOOK_SELFTEST= "$SELF" "$@" 2>/dev/null)
+    RC=$?
+    set -e
+  }
+
+  check_contains() {
+    [[ "$OUT" == *"$2"* ]] ||
+    { printf 'FAIL %s: expected output to contain %q :: %s\n' "$1" "$2" "$OUT"; fails=1; }
+  }
+
+  check_not_contains() {
+    [[ "$OUT" != *"$2"* ]] ||
+    { printf 'FAIL %s: expected output to NOT contain %q :: %s\n' "$1" "$2" "$OUT"; fails=1; }
+  }
+
+  check_rc() {
+    [[ "$RC" == "$2" ]] ||
+    { printf 'FAIL %s: expected exit %s, got %s :: %s\n' "$1" "$2" "$RC" "$OUT"; fails=1; }
+  }
+
+  all_stubs() {
+    stub claude-just-list           'echo MARK_JUST'
+    stub claude-pre-commit-reminder 'echo MARK_PRECOMMIT'
+    stub claude-python-version      'echo MARK_PYTHON'
+    stub claude-gh-status           'echo MARK_GH'
+    stub claude-git-status          'echo MARK_GIT'
+  }
+
+  # Claude takes raw stdout, in the declared order, with no envelope.
+  all_stubs
+  call claude startup
+  check_rc "claude startup" 0
+  check_contains "claude startup" 'MARK_JUST'
+  check_contains "claude startup" 'MARK_GH'
+  check_not_contains "claude startup" 'hookSpecificOutput'
+  check_not_contains "claude startup" 'MARK_GIT'
+  [[ "${OUT%%MARK_GH*}" == *MARK_JUST* ]] ||
+  { printf 'FAIL claude startup: fragments not in declared order :: %s\n' "$OUT"; fails=1; }
+
+  # The always scope is git status alone, on either harness.
+  all_stubs
+  call claude always
+  check_contains "claude always" 'MARK_GIT'
+  check_not_contains "claude always" 'MARK_JUST'
+
+  # Codex takes the same content wrapped in its own envelope.
+  all_stubs
+  call codex startup
+  check_rc "codex startup" 0
+  check_contains "codex startup" '"hookEventName": "SessionStart"'
+  check_contains "codex startup" 'MARK_JUST'
+  check_contains "codex startup" 'MARK_GH'
+
+  # A hook with nothing to say drops out; the rest still land.
+  all_stubs
+  stub claude-python-version 'exit 0'
+  call claude startup
+  check_not_contains "one silent" 'MARK_PYTHON'
+  check_contains "one silent" 'MARK_GH'
+
+  # A hook that fails is not a reason to lose the others, or to fail the session.
+  all_stubs
+  stub claude-gh-status 'echo boom >&2; exit 1'
+  call claude startup
+  check_rc "one failing" 0
+  check_not_contains "one failing" 'boom'
+  check_contains "one failing" 'MARK_JUST'
+
+  # Nothing to report at all: no envelope wrapping an empty string.
+  all_stubs
+  for name in claude-just-list claude-pre-commit-reminder claude-python-version claude-gh-status; do
+    stub "$name" 'exit 0'
+  done
+  call codex startup
+  check_rc "all silent" 0
+  [[ -z "$OUT" ]] ||
+  { printf 'FAIL all silent: expected no output :: %s\n' "$OUT"; fails=1; }
+
+  # An unrecognised harness is a wiring mistake, and should say so rather than
+  # quietly emitting the wrong dialect.
+  all_stubs
+  call gemini startup
+  check_rc "unknown harness" 2
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+HARNESS="${1:-}"
+SCOPE="${2:-}"
+
+case "$HARNESS" in
+  claude | codex) ;;
+  *)
+    echo "agent-session-start: unknown harness ${HARNESS:-<none>}, expected claude or codex" >&2
+    exit 2
+    ;;
+esac
+
+case "$SCOPE" in
+  startup) HOOKS=("${STARTUP_HOOKS[@]}") ;;
+  always) HOOKS=("${ALWAYS_HOOKS[@]}") ;;
+  *)
+    echo "agent-session-start: unknown scope ${SCOPE:-<none>}, expected startup or always" >&2
+    exit 2
+    ;;
+esac
+
+payload="$(cat)"
+
+context=""
+for hook in "${HOOKS[@]}"; do
+  command -v "$hook" >/dev/null 2>&1 || continue
+
+  # A hook that finds nothing to say exits 0 with no output, and one that fails is
+  # not a reason to lose the others or to break the session.
+  out="$(printf '%s' "$payload" | "$hook" 2>/dev/null || true)"
+  [[ -n $out ]] || continue
+
+  context="${context}${out}"$'\n\n'
+done
+
+[[ -n $context ]] || exit 0
+
+if [[ $HARNESS == claude ]]; then
+  printf '%s' "$context"
+  exit 0
+fi
+
+command -v jq >/dev/null 2>&1 || {
+  echo "agent-session-start: jq is required to encode the Codex hook response" >&2
+  exit 1
+}
+
+jq -n --arg ctx "$context" \
+  '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'
