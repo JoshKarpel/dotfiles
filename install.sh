@@ -45,8 +45,6 @@ function do_config() {
 
   "$BASEDIR/bin/link-claude"
 
-  # Guards on codex being installed, so this is a no-op on a box without it.
-  "$BASEDIR/bin/link-codex"
 }
 
 function do_ssh_key() {
@@ -219,4 +217,11 @@ do_apt
 do_locale
 do_brew
 do_mise
+
+# link-codex needs uv, which mise just installed but has not activated in this
+# shell yet.
+if command -v codex >/dev/null 2>&1; then
+  "$HOME/.local/bin/mise" exec uv -- "$BASEDIR/bin/link-codex"
+fi
+
 do_cloister
