@@ -75,6 +75,10 @@
 #     `codex features enable/disable` will not survive. Commands approved in the
 #     TUI land in ~/.codex/rules/default.rules, which this script does not touch,
 #     so those do survive.
+#
+# 13. claude-read-check is omitted. It redirects line-range shell reads to
+#     Claude's native Read tool to avoid Bash permission prompts; Codex has no
+#     equivalent text-reading tool, so registering it would block useful work.
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
@@ -174,12 +178,10 @@ converge "$CODEX/hooks.json" << 'EOF'
         "matcher": "Bash",
         "hooks": [
           { "type": "command", "command": "claude-uv-check" },
-          { "type": "command", "command": "claude-read-check" },
           { "type": "command", "command": "claude-shell-comment-check" },
           { "type": "command", "command": "claude-git-dash-c-check" },
           { "type": "command", "command": "claude-http-server-bind-check" },
-          { "type": "command", "command": "claude-rm-scope-check" },
-          { "type": "command", "command": "claude-sleep-poll-check" }
+          { "type": "command", "command": "claude-rm-scope-check" }
         ]
       }
     ]
@@ -260,6 +262,11 @@ model_reasoning_effort = "high"
 # command runs, this decides what it can reach once it does.
 sandbox_mode = "workspace-write"
 EOF
+
+  # uv's default cache is outside a project workspace. Keep this exception
+  # narrow so project commands and hook self-tests work without opening the
+  # rest of the home directory to writes.
+  printf '\n[sandbox_workspace_write]\nwritable_roots = ["%s"]\n' "$HOME/.cache/uv"
 
   if "$BASEDIR/bin/is-exe-dev"; then
     cat << 'EOF'
