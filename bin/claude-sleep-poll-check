@@ -40,6 +40,9 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   t 0 'sleep 0.5; echo go'
   t 0 'sleep 120 && just test'
   t 0 'for i in 1 2 3; do sleep 1; done'
+  # --- ALLOW: polling something Claude never started, as long as each wake checks ---
+  t 0 'sleep 300 && systemctl status my-cron.service'
+  t 0 'while ! systemctl is-active --quiet my-cron.service; do sleep 30; done'
   # --- ALLOW: reading the output file is the recommended progress check ---
   t 0 'tail -8 /tmp/claude-1000/sess/tasks/bqjv6aqim.output'
   t 0 'cat /tmp/claude-1000/sess/tasks/x.output'
@@ -100,9 +103,11 @@ if [[ "$reads_task_output" == 0 && ("$has_work" == 1 || "$long_sleep" == 0) ]]; 
 fi
 
 cat >&2 <<'EOF'
-Don't sleep to wait on background work. Run the command with `run_in_background: true` instead: it returns immediately, keeps running across turns, and re-invokes you when it exits, so you stay free to do other work in the meantime.
+Don't sleep to wait on work you started with Bash. Run the command with `run_in_background: true` instead: it returns immediately, keeps running across turns, and re-invokes you when it exits, so you stay free to do other work in the meantime.
 
 To check on it before then, use the Read tool on the output file path the call returned. That file is readable while the command is still running and shows the partial output, which is everything the sleep-then-read was waiting for.
+
+Waiting on something you didn't start, like a cron job or an external deploy, needs a real check, not a bare stall: put it in the same command so each wake does something (`sleep 300 && systemctl status my-service`). If there's nothing to check yet, end the turn and follow up later instead of blocking on it.
 
 Sleeping in the foreground blocks you for the full duration, and the Bash timeout caps at 10 minutes, so a longer sleep is killed having produced nothing.
 EOF
