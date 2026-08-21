@@ -47,6 +47,7 @@
       "WebFetch(domain:pytest-asyncio.readthedocs.io)",
       "WebFetch(domain:python.temporal.io)",
       "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:reference.langchain.com)",
       "WebFetch(domain:sqlite.org)",
       "WebFetch(domain:sre.google)",
       "WebFetch(domain:support.langchain.com)",
