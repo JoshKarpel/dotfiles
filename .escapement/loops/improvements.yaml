@@ -33,7 +33,7 @@ schedule:
   cron: "0 5 * * *"
   timezone: America/Chicago
 
-max_active_runs: 1
+max_active_runs: 2
 
 publish:
   kind: pull-request
