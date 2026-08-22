@@ -45,3 +45,8 @@ alias z="zellij -l welcome"
 
 # exe.dev; commonrc-post gives this exe-dev's own completion
 alias xd="exe-dev"
+
+# Claude Code in the voice of Harrier Du Bois. --settings applies the Disco
+# output style to this run alone, so it never reaches a settings file and every
+# other session stays sober. Takes claude's own flags and prompt after it.
+alias harry="claude --settings '{\"outputStyle\": \"Disco\"}'"

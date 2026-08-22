@@ -10,7 +10,7 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 
 - **`dotrc/`** — Files symlinked as `~/.<filename>` (bashrc, zshrc, commonrc-pre, commonrc-post, gitconfig, etc.)
 - **`config/`** — Top-level entries symlinked into `~/.config/` under their own names. An entry that is a file lands as a file, so `starship.toml` becomes `~/.config/starship.toml`, not `~/.config/starship/`. Adding a tool's config needs no change to `install.sh`.
-- **`claude/`** — Source files symlinked into `~/.claude/` via `bin/link-claude`: the global `CLAUDE.md`, `settings.json`, `skills/`, `rules/`, and `commands/` (personal slash commands, invoked only when explicitly run, e.g. `/disco`). Edit these here, not the symlinks in `~/.claude/`.
+- **`claude/`** — Source files symlinked into `~/.claude/` via `bin/link-claude`: the global `CLAUDE.md`, `settings.json`, `skills/`, `rules/`, and `output-styles/`. Anything else added here lands at the matching path under `~/.claude/`, and a symlink whose source is later deleted is pruned on the next run wherever it sits. Edit these here, not the symlinks in `~/.claude/`.
 - **`sources/`** — Shell scripts sourced by `commonrc-pre` at shell startup (aliases, git helpers, path management, etc.)
 - **`targets/`** — Package lists for apt and brew (one package per line, kept sorted by pre-commit)
 - **`bin/`** — Scripts added to PATH via `dotfiles/bin`; add any executable scripts here and they will be available in the shell (e.g., for Claude Code hooks)
@@ -221,6 +221,21 @@ Language rules split the same way, source conventions in one file and project
 configuration in another: `rust.md` and `cargo.md`, `python.md` and `pyproject.md`.
 In both pairs the config rule's `paths:` are a subset of the source rule's, so the
 two are always in context together and neither needs to mention the other.
+
+## Claude Code Output Styles
+
+Output styles live in `claude/output-styles/` and go into the system prompt, replacing
+Claude Code's built-in software engineering instructions unless the file sets
+`keep-coding-instructions: true`. A style that changes only voice or format MUST set it;
+without it the harness's own guidance on scoping changes, writing comments, and verifying
+work drops out. A style is selected in `/config` or by the `outputStyle` setting, is read
+once at session start (so a change needs `/clear`), and reaches the main conversation only,
+never a subagent.
+
+Nothing here sets `outputStyle`, deliberately: putting it in the committed `settings.json`
+would apply a style to every session on every machine. The `harry` alias in
+`sources/aliases.sh` is the per-run alternative, passing the style through
+`claude --settings` so it lives and dies with that one process.
 
 ## Conventions
 
