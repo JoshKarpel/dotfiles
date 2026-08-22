@@ -3,6 +3,103 @@
 
 set -euo pipefail
 
+# CLAUDE_HOOK_SELFTEST: set this env var to run the hook's embedded self-tests. This
+# marker line is how `claude-hook-selftests` discovers participating hooks. The hook
+# always exits 0 whether or not it prints anything, so a bail check or a comparison
+# (PR state, CI conclusion) that's wrong or backwards fails silently in a real
+# session; these assert on the printed output instead of the exit code.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  stubs=$(mktemp -d)
+  trap 'rm -rf "$workdir" "$stubs"' EXIT
+
+  repo="$workdir/repo"
+  mkdir -p "$repo"
+  git init -q -b main "$repo"
+  git -C "$repo" config user.email "test@example.com"
+  git -C "$repo" config user.name "test"
+  echo base >"$repo/file"
+  git -C "$repo" add file
+  git -C "$repo" commit -q -m init
+
+  # A stub `gh`, dispatched on subcommand. GH_AUTH_OK defaults to authenticated, and an
+  # unset *_JSON var reproduces the real CLI's non-zero exit for "no PR" / "not a GitHub
+  # repo", so the base case needs no env at all and each test only sets what it varies.
+  cat >"$stubs/gh" <<'STUB'
+#!/bin/sh
+case "$1" in
+  auth) [ "${GH_AUTH_OK:-1}" = "1" ] && exit 0 || exit 1 ;;
+  repo) if [ -n "${GH_REPO_JSON:-}" ]; then printf '%s' "$GH_REPO_JSON"; else exit 1; fi ;;
+  pr) if [ -n "${GH_PR_JSON:-}" ]; then printf '%s' "$GH_PR_JSON"; else exit 1; fi ;;
+  run) printf '%s' "${GH_RUN_JSON:-[]}" ;;
+  *) exit 1 ;;
+esac
+STUB
+  chmod +x "$stubs/gh"
+
+  REPO_JSON='{"url":"https://github.com/example/repo","defaultBranchRef":{"name":"main"}}'
+  PR_JSON_OPEN='{"number":7,"title":"Add widget","state":"OPEN","isDraft":false}'
+  PR_JSON_MERGED='{"number":7,"title":"Add widget","state":"MERGED","isDraft":false}'
+  RUN_JSON_FAILED='[{"databaseId":123,"status":"completed","conclusion":"failure","workflowName":"CI","displayTitle":"Add widget"}]'
+  RUN_JSON_SUCCESS='[{"databaseId":123,"status":"completed","conclusion":"success","workflowName":"CI","displayTitle":"Add widget"}]'
+  RUN_JSON_RUNNING='[{"databaseId":123,"status":"in_progress","conclusion":null,"workflowName":"CI","displayTitle":"Add widget"}]'
+
+  call() {
+    local cwd="$1"
+    shift
+    OUT=$(cd "$cwd" && env -u GH_AUTH_OK -u GH_REPO_JSON -u GH_PR_JSON -u GH_RUN_JSON "$@" \
+      PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1)
+  }
+
+  check_contains() {
+    local desc="$1" needle="$2"
+    [[ "$OUT" == *"$needle"* ]] ||
+    { printf 'FAIL %s: expected output to contain %q :: %s\n' "$desc" "$needle" "$OUT"; fails=1; }
+  }
+
+  check_not_contains() {
+    local desc="$1" needle="$2"
+    [[ "$OUT" != *"$needle"* ]] ||
+    { printf 'FAIL %s: expected output to NOT contain %q :: %s\n' "$desc" "$needle" "$OUT"; fails=1; }
+  }
+
+  call "$workdir"
+  [[ -z "$OUT" ]] || { printf 'FAIL outside any repo: expected no output :: %s\n' "$OUT"; fails=1; }
+
+  call "$repo" GH_AUTH_OK=0
+  [[ -z "$OUT" ]] || { printf 'FAIL not authenticated: expected no output :: %s\n' "$OUT"; fails=1; }
+
+  call "$repo"
+  [[ -z "$OUT" ]] || { printf 'FAIL not a GitHub-backed repo: expected no output :: %s\n' "$OUT"; fails=1; }
+
+  call "$repo" GH_REPO_JSON="$REPO_JSON"
+  check_contains "GitHub-backed repo, no PR, no CI runs" "Current GitHub repository: https://github.com/example/repo (default branch: main)"
+  check_not_contains "GitHub-backed repo, no PR, no CI runs" "open PR"
+  check_not_contains "GitHub-backed repo, no PR, no CI runs" "Latest CI run"
+
+  call "$repo" GH_REPO_JSON="$REPO_JSON" GH_PR_JSON="$PR_JSON_OPEN"
+  check_contains "open PR" "This branch has an open PR #7: Add widget"
+
+  call "$repo" GH_REPO_JSON="$REPO_JSON" GH_PR_JSON="$PR_JSON_MERGED"
+  check_not_contains "merged PR" "open PR"
+
+  call "$repo" GH_REPO_JSON="$REPO_JSON" GH_RUN_JSON="$RUN_JSON_FAILED"
+  check_contains "failed CI run" "Latest CI run on this branch failed: CI is failure (Add widget)"
+
+  call "$repo" GH_REPO_JSON="$REPO_JSON" GH_RUN_JSON="$RUN_JSON_SUCCESS"
+  check_not_contains "successful CI run" "Latest CI run"
+
+  call "$repo" GH_REPO_JSON="$REPO_JSON" GH_RUN_JSON="$RUN_JSON_RUNNING"
+  check_not_contains "CI run still in progress" "Latest CI run"
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
 # Bail silently if not in a git repo
 git rev-parse --git-dir &>/dev/null || exit 0
 
