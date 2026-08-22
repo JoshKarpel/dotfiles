@@ -49,12 +49,12 @@ function do_config() {
 function do_ssh_key() {
   local key=~/.ssh/id_ed25519
 
+  log "Setting up SSH key..."
+
   if [[ -f $key ]]; then
     echo "SSH key already exists at $key"
     return 0
   fi
-
-  log "Generating SSH key..."
 
   mkdir -p ~/.ssh
   chmod 700 ~/.ssh
@@ -93,11 +93,11 @@ function do_apt() {
 }
 
 function do_locale() {
-  log "Updating locale..."
-
   if ! exists locale-gen; then
     return 0
   fi
+
+  log "Updating locale..."
 
   if ! locale -a | grep -q "^en_US.utf8$\|^en_US.UTF-8$"; then
     sudo localedef -i en_US -f UTF-8 en_US.UTF-8
