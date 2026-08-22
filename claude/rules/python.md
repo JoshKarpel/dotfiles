@@ -220,6 +220,53 @@ the fact. See the `optimize-python` skill for measurement tools.
 - **Parse once.** If a deserialized result is needed in two places (e.g., a
   debug log and actual processing), parse once and pass the result to both.
 
+### Garbage Collection
+
+A long-lived server holds two populations of objects: a large graph built once
+at startup (imported modules, ORM metadata, parsed config, DI container) that
+lives until the process exits, and per-request objects that reference counting
+reclaims as soon as the response is sent. The cyclic collector exists only for
+the cycles reference counting misses, yet every full pass rescans that entire
+startup graph to re-derive what startup already settled. Tell it not to, once,
+after the app is fully initialized and before it takes traffic:
+
+```python
+gc.collect()
+gc.freeze()
+_, gen1, gen2 = gc.get_threshold()
+gc.set_threshold(50_000, gen1, gen2)
+```
+
+- **Collect before freezing.** `gc.freeze()` moves everything currently tracked
+  into a permanent generation exempt from _all_ future collections, so a cycle
+  that is already dead at that moment is leaked for the process lifetime.
+  The bare `gc.collect()` is a full collection; `gc.collect(2)` says the same
+  thing less clearly. Cycles created after the freeze still collect normally.
+- **Freeze after initialization, not at import.** Anything lazily built on first
+  use (ORM model registration, framework setup, a connection pool) is not yet
+  allocated at import time, so it lands outside the frozen set and gets
+  rescanned forever. The framework's lifespan/startup hook is the place, and
+  driving one synthetic request first flushes the remaining lazy setup.
+- **Read `gc.get_threshold()`; never hardcode the default.** It is `700` through
+  3.12 and `2000` from 3.13 on, so advice quoting a 700 baseline predates the
+  change. Derive all three values from the call, as above.
+- **Treat `50_000` as a starting point to measure, not a constant.** The win
+  comes from the ratio of startup graph to per-request allocation, which is a
+  property of the app. Instrument with `gc.callbacks` and compare, rather than
+  copying a number from someone else's workload.
+- **Re-benchmark on each minor version.** Generation semantics moved twice
+  inside 3.14 alone: 3.14 ignored `threshold2` and dropped generation 1, and
+  3.14.5 restored both to 3.13 behavior. A tuning result does not carry forward
+  on its own.
+- **In a prefork server, freeze in the parent before forking.** The collector
+  writes to reference-count headers on long-lived objects, which un-shares
+  copy-on-write pages and drives each worker's private memory up. The `gc` docs
+  give the sequence: `gc.disable()`, `gc.freeze()`, `fork()`, then `gc.enable()`
+  in the children.
+- **Keep collection off the request path.** Where GC pauses show up in tail
+  latency, run collection on a timer or between requests rather than letting
+  allocation volume trigger it mid-request. See the control-plane rule.
+
 ## Type-level tests
 
 When a guarantee lives in the type system (a generic bound, variance, an
