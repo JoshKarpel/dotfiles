@@ -46,6 +46,20 @@ function step() {
   "$@" || echo "  failed, continuing" >&2
 }
 
+# uv locks its cache for the length of a command, so a long-lived `uv run` (a dev
+# server, a script running as a service) holds that lock and an unbounded prune
+# waits for as long as that process lives. `--force` skips the wait rather than
+# the race: it deletes cached environments out from under running processes,
+# which breaks them at their next import. Bound the wait and skip the prune
+# instead. `timeout` is GNU-only, so macOS keeps the unbounded wait.
+function prune_uv() {
+  if have timeout; then
+    timeout 30 uv cache prune
+  else
+    uv cache prune
+  fi
+}
+
 # `cargo clean gc` is nightly-only as of cargo 1.97, so there is no stable
 # built-in. Of the three, only registry/cache costs a re-download: registry/src
 # is re-extracted from those archives, and git/checkouts re-cloned from git/db,

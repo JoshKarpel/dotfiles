@@ -21,6 +21,27 @@ service means the entire job, bounded only by its `TimeoutStartSec`. Pass
 `--no-block` to trigger a long-running oneshot and return immediately, or a unit
 with a 75 minute timeout holds the caller for 75 minutes.
 
+## `uv run` in a Long-Lived Unit
+
+A `uv run` process holds a shared lock on the uv cache (`~/.cache/uv/.lock`) for
+its entire lifetime, not only while it resolves and installs.
+A unit that runs one therefore blocks `uv cache prune` on that machine for as
+long as the service is up, and prune waits rather than failing.
+
+For a script with no dependencies, pass `--no-cache` wherever that `uv run` is
+written, in `ExecStart` or in the script's own shebang.
+It builds the environment under `/tmp` and takes no shared lock, at the cost of
+rebuilding a bare venv on each start.
+Where the service has dependencies, `--no-cache` would re-download them every
+start, so install them into a real venv (`uv sync`) and point `ExecStart` at that
+venv's own entry point rather than at `uv run`.
+
+Reaching for `uv cache prune --force` to get past the wait trades a hang for
+corruption: it skips the wait, not the race, deleting in-use cached environments
+out from under running processes, which then fail at their next import.
+A maintenance job that prunes should bound its wait instead
+(`timeout 30 uv cache prune`) and skip the prune while something else is running.
+
 ## Template units
 
 A **template unit** (`name@.service`) is a single file shared by every instance, so

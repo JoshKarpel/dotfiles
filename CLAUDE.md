@@ -247,7 +247,10 @@ would apply a style to every session on every machine. The `harry` alias in
   third-party dependencies; the Python hooks (`claude-rm-scope-check`,
   `claude-gh-api-check`) use the same shebang with an empty dependency set. `--quiet`
   keeps `uv`'s own output off stdout, which matters for hooks whose stdout must stay
-  clean (parseable JSON or empty).
+  clean (parseable JSON or empty). `port-atlas` adds `--no-cache` to that shebang
+  because it runs as a service: a `uv run` holds a shared lock on the uv cache for
+  its whole life, so a process that never exits blocks every `uv cache prune` on the
+  machine.
 - Shell scripts use 2-space indentation (enforced by beautysh via pre-commit)
 - Target files in `targets/` are auto-sorted by the `file-contents-sorter` pre-commit hook
 - Pre-commit hooks run via [pre-commit.ci](https://pre-commit.ci) on push; see

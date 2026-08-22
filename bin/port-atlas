@@ -1,7 +1,12 @@
-#!/usr/bin/env -S uv run --quiet --script
+#!/usr/bin/env -S uv run --quiet --no-cache --script
 # /// script
 # requires-python = ">=3.12"
 # ///
+# `--no-cache` because this runs as a daemon: uv holds a shared lock on its cache
+# for the whole life of the command, and `uv cache prune` waits for an exclusive
+# one, so a service that never exits blocks every prune on the machine forever.
+# There are no dependencies to download, so the cost is rebuilding a bare venv on
+# each start.
 """Serve an index of everything listening on this machine's proxied ports.
 
 exe.dev forwards ports 3000-9999 to `https://<vm>.exe.xyz:<port>/` with no
