@@ -13,10 +13,10 @@ set -euo pipefail
 BASEDIR="$(dirname "$(realpath "$0")")"
 
 # A codex serves every session recorded on the machine, and `cloister install`
-# binds it to localhost. On an exe.dev VM that is reachable through the
-# platform's authenticated proxy, which is the point; on a laptop it is a daemon
-# nobody asked for.
-"$BASEDIR/is-exe-dev" || exit 0
+# binds it to localhost. On a box someone works on that is reachable through the
+# platform's authenticated proxy, which is the point; on a laptop, or on a VM
+# running a workload rather than a person, it is a daemon nobody asked for.
+"$BASEDIR/is-dev-box" || exit 0
 
 # By absolute path. This runs from a systemd user unit as readily as from a
 # shell, and that unit gets an environment with neither mise nor its shims on
@@ -39,4 +39,13 @@ TOOL="github:JoshKarpel/claude-scriptorium"
 # that `latest` currently points at, since the tool asks the kernel what it is
 # running as rather than how it was invoked; that is what turns tomorrow's
 # upgrade into a restart instead of a unit that looks unchanged.
-"$("$MISE" which claude-scriptorium)" cloister install
+#
+# Off 8000, which port-atlas holds because that is the port the bare
+# `https://<vm>.exe.xyz/` hostname is proxied to. The codex is one of the things
+# the atlas indexes, reached at `https://<vm>.exe.xyz:3000/` like anything else.
+#
+# The bottom of the forwarded range, so the atlas (which sorts by port) always
+# lists it first. The cost is 3000 itself, which is what a bare `next dev` or
+# `rails s` reaches for: this claims it at boot, so those have to be told to
+# bind elsewhere.
+"$("$MISE" which claude-scriptorium)" cloister install --port 3000

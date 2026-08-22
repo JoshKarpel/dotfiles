@@ -1,0 +1,673 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Serve an index of everything listening on this machine's proxied ports.
+
+exe.dev forwards ports 3000-9999 to `https://<vm>.exe.xyz:<port>/` with no
+configuration, so a dev server started on one already has a URL. What it has no
+way to tell you is which ports are live and what is on them. This serves that
+list, on the port the bare hostname points at, so `https://<vm>.exe.xyz/` is a
+launcher for everything else on the box.
+
+Listeners are found by polling, because the kernel offers no other way: netlink's
+inet_diag answers a query rather than announcing a new socket, and /proc/net/tcp
+cannot be watched. A scan costs a few milliseconds, so it runs once a second and
+pushes over SSE only when the result changes. A server bound while the page is
+open shows up within that second.
+
+Links are built from the browser's own location rather than the VM name, so they
+stay correct whether the page was reached through the exe.dev proxy or an SSH
+tunnel to the same port.
+"""
+
+from __future__ import annotations
+
+import html
+import json
+import os
+import pwd
+import re
+import subprocess
+import threading
+import time
+import urllib.error
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict, dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# The range exe.dev's proxy forwards verbatim. A listener outside it is real but
+# unreachable from outside the VM, so listing it would offer a dead link.
+ROUTED_PORTS = range(3000, 10_000)
+
+SCAN_INTERVAL_SECONDS = 1.0
+
+# A heartbeat well inside any proxy or load balancer idle timeout, so an open
+# page survives a quiet machine.
+HEARTBEAT_INTERVAL_SECONDS = 15.0
+
+# A server can hold its port down before it answers on it, which is exactly the
+# moment this page is being watched. A port that did not respond is re-probed on
+# this cadence until it does, or until the attempts run out.
+PROBE_RETRY_SECONDS = 5.0
+PROBE_MAX_ATTEMPTS = 6
+PROBE_TIMEOUT_SECONDS = 1.5
+
+CLOCK_TICKS_PER_SECOND = os.sysconf("SC_CLK_TCK")
+
+LISTEN_PID_PATTERN = re.compile(r"pid=(\d+)")
+TITLE_PATTERN = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+
+
+@dataclass(frozen=True)
+class Listener:
+    """A port with something bound to it, as the kernel describes it."""
+
+    port: int
+    pid: int | None
+    addresses: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Probe:
+    """What the port said when asked for a page."""
+
+    is_http: bool
+    status: int | None
+    title: str
+    server: str
+    attempts: int
+    at: float
+
+
+@dataclass(frozen=True)
+class Row:
+    """Everything known about one listening port, ready to render."""
+
+    port: int
+    addresses: list[str]
+    pid: int | None
+    command_name: str
+    command_line: str
+    directory: str
+    user: str
+    started_at: int | None
+    is_http: bool | None
+    status: int | None
+    title: str
+    server: str
+
+
+def parse_listeners(ss_output: str) -> list[Listener]:
+    """Turn `ss -tlnpH` output into one Listener per routed port.
+
+    A port bound on both IPv4 and IPv6 arrives as two lines and leaves as one
+    row, since it is one service and would be one link.
+    """
+    pids: dict[int, int | None] = {}
+    addresses: dict[int, set[str]] = {}
+    for line in ss_output.splitlines():
+        fields = line.split(maxsplit=5)
+        if len(fields) < 4:
+            continue
+        address, _, port_text = fields[3].rpartition(":")
+        if not port_text.isdigit():
+            continue
+        port = int(port_text)
+        if port not in ROUTED_PORTS:
+            continue
+        pid_match = LISTEN_PID_PATTERN.search(fields[5] if len(fields) > 5 else "")
+        addresses.setdefault(port, set()).add(address.strip("[]"))
+        if pid_match and pids.get(port) is None:
+            pids[port] = int(pid_match.group(1))
+        pids.setdefault(port, None)
+    return [
+        Listener(port=port, pid=pids[port], addresses=tuple(sorted(addresses[port])))
+        for port in sorted(addresses)
+    ]
+
+
+def format_probe_title(body: str) -> str:
+    match = TITLE_PATTERN.search(body)
+    if not match:
+        return ""
+    return html.unescape(" ".join(match.group(1).split()))
+
+
+def read_listeners() -> list[Listener]:
+    result = subprocess.run(
+        ["ss", "--tcp", "--listening", "--numeric", "--processes", "--no-header"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return parse_listeners(result.stdout)
+
+
+def read_process_details(pid: int | None) -> tuple[str, str, str, str, int | None]:
+    """Name, command line, working directory, owner, and start time for a pid.
+
+    Every field is read independently: a process owned by another user hides its
+    cwd and command line from us but still has a name, and a process that exits
+    mid-scan should cost one blank field rather than the whole row.
+    """
+    if pid is None:
+        return "", "", "", "", None
+
+    def read(path: str) -> str:
+        try:
+            with open(f"/proc/{pid}/{path}", "rb") as handle:
+                return handle.read().decode("utf-8", "replace")
+        except OSError:
+            return ""
+
+    name = read("comm").strip()
+    command_line = " ".join(read("cmdline").split("\0")).strip()
+
+    try:
+        directory = os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        directory = ""
+
+    try:
+        user = pwd.getpwuid(os.stat(f"/proc/{pid}").st_uid).pw_name
+    except (OSError, KeyError):
+        user = ""
+
+    return name, command_line, directory, user, read_start_time(pid)
+
+
+def read_start_time(pid: int) -> int | None:
+    """Wall-clock epoch second the process started.
+
+    Derived from boot time rather than sent as an age, so the value is stable
+    across scans and does not push a change every second just by getting older.
+    """
+    try:
+        with open(f"/proc/{pid}/stat") as handle:
+            stat = handle.read()
+        with open("/proc/uptime") as handle:
+            uptime = float(handle.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+    # The comm field is parenthesised and may itself contain spaces and
+    # parentheses, so the fixed-position fields start after its closing paren.
+    try:
+        fields = stat[stat.rindex(")") + 2 :].split()
+        ticks_since_boot = int(fields[19])
+    except (ValueError, IndexError):
+        return None
+    return round(time.time() - uptime + ticks_since_boot / CLOCK_TICKS_PER_SECOND)
+
+
+def probe_port(port: int) -> Probe:
+    """Ask a port for a page, to tell a web server from a database socket."""
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/",
+        headers={"User-Agent": "port-atlas", "Accept": "text/html"},
+    )
+    now = time.time()
+    try:
+        with urllib.request.urlopen(request, timeout=PROBE_TIMEOUT_SECONDS) as response:
+            return describe_response(
+                response.status,
+                response.headers.get("Content-Type", ""),
+                response.headers.get("Server", ""),
+                response.read(65_536),
+                now,
+            )
+    except urllib.error.HTTPError as error:
+        # A 404 or a 401 is still a web server, and still worth a link.
+        return describe_response(
+            error.code,
+            error.headers.get("Content-Type", "") if error.headers else "",
+            error.headers.get("Server", "") if error.headers else "",
+            error.read(65_536),
+            now,
+        )
+    except Exception:
+        return Probe(is_http=False, status=None, title="", server="", attempts=1, at=now)
+
+
+def describe_response(
+    status: int, content_type: str, server: str, body: bytes, at: float
+) -> Probe:
+    title = ""
+    if "html" in content_type.lower():
+        title = format_probe_title(body.decode("utf-8", "replace"))
+    return Probe(is_http=True, status=status, title=title, server=server, attempts=1, at=at)
+
+
+class Probes:
+    """Probe results, keyed so a restarted process is asked again.
+
+    Probing happens off the scan loop: a port that accepts a connection and then
+    says nothing would otherwise stall every other row behind its timeout.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._results: dict[tuple[int, int | None], Probe] = {}
+        self._in_flight: set[tuple[int, int | None]] = set()
+        self._pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="probe")
+
+    def get(self, listener: Listener) -> Probe | None:
+        with self._lock:
+            return self._results.get((listener.port, listener.pid))
+
+    def refresh(self, listeners: list[Listener]) -> None:
+        live = {(listener.port, listener.pid) for listener in listeners}
+        with self._lock:
+            for key in list(self._results):
+                if key not in live:
+                    del self._results[key]
+            due = [
+                listener
+                for listener in listeners
+                if self._is_due((listener.port, listener.pid))
+            ]
+            for listener in due:
+                self._in_flight.add((listener.port, listener.pid))
+        for listener in due:
+            self._pool.submit(self._run, listener)
+
+    def _is_due(self, key: tuple[int, int | None]) -> bool:
+        if key in self._in_flight:
+            return False
+        previous = self._results.get(key)
+        if previous is None:
+            return True
+        if previous.is_http:
+            return False
+        return (
+            previous.attempts < PROBE_MAX_ATTEMPTS
+            and time.time() - previous.at >= PROBE_RETRY_SECONDS
+        )
+
+    def _run(self, listener: Listener) -> None:
+        key = (listener.port, listener.pid)
+        probe = probe_port(listener.port)
+        with self._lock:
+            previous = self._results.get(key)
+            if previous is not None and not probe.is_http:
+                probe = Probe(
+                    is_http=False,
+                    status=None,
+                    title="",
+                    server="",
+                    attempts=previous.attempts + 1,
+                    at=probe.at,
+                )
+            self._results[key] = probe
+            self._in_flight.discard(key)
+
+
+def build_rows(listeners: list[Listener], probes: Probes) -> list[Row]:
+    rows = []
+    for listener in listeners:
+        name, command_line, directory, user, started_at = read_process_details(listener.pid)
+        probe = probes.get(listener)
+        rows.append(
+            Row(
+                port=listener.port,
+                addresses=list(listener.addresses),
+                pid=listener.pid,
+                command_name=name,
+                command_line=command_line,
+                directory=directory,
+                user=user,
+                started_at=started_at,
+                is_http=None if probe is None else probe.is_http,
+                status=None if probe is None else probe.status,
+                title="" if probe is None else probe.title,
+                server="" if probe is None else probe.server,
+            )
+        )
+    return rows
+
+
+class Broadcast:
+    """The latest payload, and a way to wait for the next different one."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._version = 0
+        self._payload = "{}"
+
+    def publish(self, payload: str) -> None:
+        with self._condition:
+            if payload == self._payload:
+                return
+            self._payload = payload
+            self._version += 1
+            self._condition.notify_all()
+
+    def wait(self, seen: int) -> tuple[int, str]:
+        """Block until the payload differs from `seen`, or the heartbeat is due."""
+        with self._condition:
+            if self._version == seen:
+                self._condition.wait(HEARTBEAT_INTERVAL_SECONDS)
+            return self._version, self._payload
+
+
+def scan_forever(broadcast: Broadcast, own_port: int) -> None:
+    """Rescan, and publish whenever the result differs from the last one.
+
+    A probe finishing does not push on its own: it lands in the cache and the
+    next scan carries it, which costs a title up to a second and saves a probe
+    worker from re-entering the scan.
+    """
+    probes = Probes()
+    while True:
+        listeners = read_listeners()
+        probes.refresh(listeners)
+        payload = {
+            "own_port": own_port,
+            "rows": [asdict(row) for row in build_rows(listeners, probes)],
+        }
+        broadcast.publish(json.dumps(payload, sort_keys=True))
+        time.sleep(SCAN_INTERVAL_SECONDS)
+
+
+PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ports</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #fbfbfa; --card: #ffffff; --line: #e4e2dd; --ink: #1c1b19;
+  --dim: #6d6a63; --accent: #2f6f4f; --badge: #ecebe7; --flash: #fff6d8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16171a; --card: #1e2024; --line: #2e3137; --ink: #e6e5e2;
+    --dim: #8f8d87; --accent: #7fc9a1; --badge: #2a2d33; --flash: #3a3520;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 2rem 1.25rem 4rem; background: var(--bg); color: var(--ink);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 62rem; margin: 0 auto; }
+header { display: flex; align-items: baseline; gap: .75rem; margin-bottom: 1.25rem; }
+h1 { font-size: 1.15rem; margin: 0; font-weight: 600; letter-spacing: -.01em; }
+#host { color: var(--dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
+#state { margin-left: auto; font-size: .78rem; color: var(--dim); }
+#state.stale { color: #c2622f; }
+ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+li {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  overflow: hidden; transition: border-color .15s ease;
+}
+li:hover { border-color: var(--accent); }
+li.flash { animation: flash 1.6s ease-out; }
+@keyframes flash { from { background: var(--flash); } to { background: var(--card); } }
+.row { display: flex; gap: .85rem; align-items: flex-start; padding: .7rem .9rem; color: inherit; text-decoration: none; }
+.key {
+  flex: none; width: 1.1rem; text-align: right; font-size: .72rem; color: var(--dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding-top: .2rem;
+}
+.port {
+  flex: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1rem; font-weight: 600; color: var(--accent); padding-top: .05rem;
+  min-width: 3.4rem;
+}
+li.inert .port { color: var(--dim); }
+.body { min-width: 0; flex: 1; }
+.headline { display: flex; flex-wrap: wrap; align-items: baseline; gap: .45rem; }
+.title { font-weight: 600; }
+.title.unknown { font-weight: 400; color: var(--dim); font-style: italic; }
+.badge {
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .05em;
+  background: var(--badge); color: var(--dim); padding: .1rem .4rem; border-radius: 4px;
+}
+.badge.here { color: var(--accent); }
+.dir, .meta, .cmd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .76rem;
+  color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dir { margin-top: .15rem; }
+.dir b { color: var(--ink); font-weight: 600; }
+.cmd { margin-top: .1rem; opacity: .8; }
+.meta { margin-top: .25rem; display: flex; flex-wrap: wrap; gap: .1rem .85rem; white-space: normal; }
+#empty { color: var(--dim); padding: 2rem 0; text-align: center; }
+footer { margin-top: 1.5rem; font-size: .75rem; color: var(--dim); }
+kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .72rem;
+  border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 .3rem;
+}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Ports</h1>
+    <span id="host"></span>
+    <span id="state">connecting</span>
+  </header>
+  <ul id="ports"></ul>
+  <p id="empty" hidden>Nothing listening on a proxied port (3000-9999).</p>
+  <footer>Press <kbd>1</kbd>&ndash;<kbd>9</kbd> to open a service. Updates live.</footer>
+</main>
+<script>
+const list = document.getElementById("ports");
+const empty = document.getElementById("empty");
+const state = document.getElementById("state");
+document.getElementById("host").textContent = location.hostname;
+
+let openable = [];
+// The first paint is not news, so nothing flashes on it. Afterwards a row that
+// had no element is one that just appeared, which is what the flash is for.
+let painted = false;
+
+// This page is itself served on the port the bare hostname points at, so its own
+// row is where you already are and every other row needs an explicit port.
+function linkFor(row, ownPort) {
+  if (row.is_http === false || row.port === ownPort) return null;
+  return location.protocol + "//" + location.hostname + ":" + row.port + "/";
+}
+
+function ago(epoch) {
+  if (!epoch) return "";
+  let s = Math.max(0, Math.floor(Date.now() / 1000) - epoch);
+  if (s < 60) return s + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m";
+  if (s < 86400) return Math.floor(s / 3600) + "h";
+  return Math.floor(s / 86400) + "d";
+}
+
+function describe(row) {
+  if (row.title) return row.title;
+  if (row.is_http === null) return "probing\\u2026";
+  if (row.is_http === false) return "not answering HTTP";
+  return row.command_name || "no title";
+}
+
+function render(payload) {
+  const rows = payload.rows || [];
+  empty.hidden = rows.length > 0;
+  openable = [];
+  const keep = new Set();
+
+  rows.forEach((row) => {
+    keep.add(row.port);
+    const href = linkFor(row, payload.own_port);
+    if (href) openable.push(href);
+
+    let li = list.querySelector('li[data-port="' + row.port + '"]');
+    const fresh = !li;
+    if (fresh) {
+      li = document.createElement("li");
+      li.dataset.port = row.port;
+      li.innerHTML =
+        '<a class="row"><span class="key"></span><span class="port"></span>' +
+        '<span class="body"><span class="headline"><span class="title"></span></span>' +
+        '<div class="dir"></div><div class="cmd"></div><div class="meta"></div></span></a>';
+      if (painted) {
+        li.classList.add("flash");
+        li.addEventListener("animationend", () => li.classList.remove("flash"), { once: true });
+      }
+    }
+
+    const anchor = li.querySelector(".row");
+    if (href) anchor.setAttribute("href", href);
+    else anchor.removeAttribute("href");
+    li.classList.toggle("inert", !href);
+
+    li.querySelector(".key").textContent =
+      openable.length && href && openable.length <= 9 ? openable.length : "";
+    li.querySelector(".port").textContent = row.port;
+
+    const title = li.querySelector(".title");
+    title.textContent = describe(row);
+    title.classList.toggle("unknown", !row.title);
+
+    const headline = li.querySelector(".headline");
+    headline.querySelectorAll(".badge").forEach((b) => b.remove());
+    const badges = [];
+    if (row.port === payload.own_port) badges.push(["this page", "here"]);
+    if (row.is_http === false) badges.push(["no http", ""]);
+    badges.forEach(([text, kind]) => {
+      const span = document.createElement("span");
+      span.className = "badge" + (kind === "here" ? " here" : "");
+      span.textContent = text;
+      headline.appendChild(span);
+    });
+
+    const dir = li.querySelector(".dir");
+    if (row.directory) {
+      const parts = row.directory.split("/");
+      const base = parts.pop();
+      dir.innerHTML = "";
+      dir.append(parts.join("/") + "/");
+      const strong = document.createElement("b");
+      strong.textContent = base;
+      dir.append(strong);
+    } else {
+      dir.textContent = "";
+    }
+
+    li.querySelector(".cmd").textContent = row.command_line;
+
+    const meta = li.querySelector(".meta");
+    meta.innerHTML = "";
+    const facts = [];
+    if (row.command_name) facts.push(row.command_name);
+    if (row.pid) facts.push("pid " + row.pid);
+    if (row.user) facts.push(row.user);
+    if (row.started_at) facts.push("up " + ago(row.started_at));
+    if (row.addresses.length) facts.push(row.addresses.join(", "));
+    if (row.status) facts.push("HTTP " + row.status);
+    if (row.server) facts.push(row.server);
+    facts.forEach((fact) => {
+      const span = document.createElement("span");
+      span.textContent = fact;
+      meta.appendChild(span);
+    });
+
+    list.appendChild(li);
+  });
+
+  list.querySelectorAll("li").forEach((li) => {
+    if (!keep.has(Number(li.dataset.port))) li.remove();
+  });
+
+  painted = true;
+}
+
+let latest = null;
+const source = new EventSource("/events");
+source.onopen = () => { state.textContent = "live"; state.classList.remove("stale"); };
+source.onerror = () => { state.textContent = "reconnecting"; state.classList.add("stale"); };
+source.onmessage = (event) => {
+  state.textContent = "live";
+  state.classList.remove("stale");
+  latest = JSON.parse(event.data);
+  render(latest);
+};
+
+// Uptimes are rendered from an absolute start time, so they need a local tick to
+// stay honest between pushes.
+setInterval(() => { if (latest) render(latest); }, 5000);
+
+addEventListener("keydown", (event) => {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const index = "123456789".indexOf(event.key);
+  if (index >= 0 && openable[index]) location.href = openable[index];
+});
+</script>
+</body>
+</html>
+"""
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    broadcast: Broadcast
+
+    def do_GET(self) -> None:
+        path = self.path.split("?", 1)[0]
+        if path == "/":
+            self.send_page()
+        elif path == "/events":
+            self.send_events()
+        else:
+            self.send_error(404)
+
+    def send_page(self) -> None:
+        body = PAGE.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_events(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        # Names an nginx-specific behaviour, and costs nothing where no nginx is
+        # in the path: without it a buffering proxy holds every event until the
+        # stream it is never going to close ends.
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        seen = -1
+        try:
+            while True:
+                version, payload = self.broadcast.wait(seen)
+                if version == seen:
+                    self.wfile.write(b": heartbeat\n\n")
+                else:
+                    seen = version
+                    self.wfile.write(f"data: {payload}\n\n".encode())
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
+    def log_message(self, *args) -> None:  # noqa: D102
+        return
+
+
+def main() -> None:
+    port = int(os.environ.get("PORT_ATLAS_PORT", "8000"))
+    broadcast = Broadcast()
+    Handler.broadcast = broadcast
+
+    scanner = threading.Thread(
+        target=scan_forever, args=(broadcast, port), name="scan", daemon=True
+    )
+    scanner.start()
+
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server.daemon_threads = True
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

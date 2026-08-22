@@ -41,6 +41,11 @@ KNOWN_HOSTS = Path.home() / ".ssh" / "known_hosts"
 
 VM_SUFFIX = ".exe.xyz"
 
+# Ports exe.dev's proxy forwards verbatim, at `https://<vm>.exe.xyz:<port>/`.
+# One port outside the range is reachable too, the one the bare hostname is
+# pointed at, and that one is asked for by omitting the port entirely.
+PROXIED_PORTS = range(3000, 10_000)
+
 # The one place a VM hostname sidesteps the front door: exe.dev points a box's
 # own name here at the box itself, so a client running on it meets that VM's
 # own sshd rather than the proxy, and a key the published fingerprint will
@@ -830,6 +835,42 @@ def code(
     command = [CODE, "--folder-uri", folder_uri(vm, absolute)]
     typer.echo(command[-1])
     os.execvp(command[0], command)
+
+
+@app.command()
+def url(
+    port: Annotated[
+        int | None,
+        typer.Argument(help="Port on this VM. Omit for the one the bare hostname reaches."),
+    ] = None,
+) -> None:
+    """Print the HTTPS URL this VM answers on, to click out of the terminal.
+
+    The name comes from the `/etc/hosts` override rather than reflection: it is
+    already on disk, so this needs no round trip and holds on a box the
+    reflection integration was never attached to.
+
+    Nothing but the URL is printed, so terminals linkify it and `$(...)` can
+    take it whole.
+    """
+    vm = local_vm()
+    if vm is None:
+        typer.echo("not on an exe.dev VM; a VM's URL is https://<vm>.exe.xyz/", err=True)
+        raise typer.Exit(1)
+
+    if port is None:
+        typer.echo(f"https://{vm_host(vm)}/")
+        return
+
+    if port not in PROXIED_PORTS:
+        typer.echo(
+            f"exe.dev forwards {PROXIED_PORTS.start}-{PROXIED_PORTS.stop - 1}, "
+            f"so nothing outside the VM reaches {port}",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    typer.echo(f"https://{vm_host(vm)}:{port}/")
 
 
 def build(name: str, tag: str, bootstrap: str, cpu: int, memory: str, disk: str) -> None:

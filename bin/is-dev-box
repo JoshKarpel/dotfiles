@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Check whether this machine is an exe.dev VM tagged for interactive development
+#
+# Not every VM is a box someone works on. A tag is what separates the two, and
+# it is set from the lobby (`exe-dev lobby tag <vm> dev-box`) rather than from
+# anything on the disk, so a box can change its mind without being rebuilt.
+#
+# Services that exist to be looked at by a person go behind this, not behind
+# is-exe-dev: a VM running a workload has nobody reading its session archive and
+# no reason to spend its proxied ports on an index of itself.
+
+set -euo pipefail
+
+BASEDIR="$(dirname "$(realpath "$0")")"
+
+# The cheap local test first, so a laptop answers without a DNS lookup for a
+# name that only resolves inside exe.dev's network.
+"$BASEDIR/is-exe-dev" || exit 1
+
+# Reflection is a default integration, attached to new accounts with `auto:all`.
+# A VM it was detached from reports no tags and is therefore not a dev box,
+# which is the right answer for a guard: nothing installs itself on the strength
+# of a query that did not resolve.
+command -v jq > /dev/null 2>&1 || exit 1
+
+curl --silent --show-error --fail --max-time 5 https://reflection.int.exe.xyz/tags |
+jq --exit-status '.tags | index("dev-box")' > /dev/null 2>&1

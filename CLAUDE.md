@@ -16,11 +16,25 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 - **`bin/`** — Scripts added to PATH via `dotfiles/bin`; add any executable scripts here and they will be available in the shell (e.g., for Claude Code hooks)
 
 Systemd user units are the exception to `config/`. `install.sh` writes
-`cloister-codex.{service,timer}` into `~/.config/systemd/user/` rather than
-symlinking them from here, because a unit has to name the absolute path of the
-clone it was installed from, and only `install.sh` knows where that is. The same
-directory is where `claude-scriptorium` writes the codex service it manages
-itself, so symlinking the tree in would point that tool's writes at this repo.
+`cloister-codex.{service,timer}` and `port-atlas.service` into
+`~/.config/systemd/user/` rather than symlinking them from here, because a unit
+has to name the absolute path of the clone it was installed from, and only
+`install.sh` knows where that is. The same directory is where
+`claude-scriptorium` writes the codex service it manages itself, so symlinking
+the tree in would point that tool's writes at this repo.
+
+Both of those are for a person to look at, so both are gated on `is-dev-box`
+rather than `is-exe-dev`: a VM running a workload has nobody reading its session
+archive and no reason to spend its proxied ports on an index of itself. It reads
+the same `dev-box` tag `exe-dev create-devbox` sets at creation, which is what
+keeps a bot-box running `install.sh` on its timer from installing either one.
+Reading it back through reflection rather than off the disk is what lets a box
+change its mind (`exe-dev lobby tag <vm> dev-box`) without being rebuilt.
+
+exe.dev proxies one port per VM to the bare `https://<vm>.exe.xyz/` hostname and
+forwards 3000-9999 to `https://<vm>.exe.xyz:<port>/`. `port-atlas` takes the bare
+hostname's port so the front door is an index of everything else listening, and
+the codex moves to 3000 to become its first entry, the atlas sorting by port.
 
 `bin/exe-dev` writes units there too, from the setup script `create-botbox`
 sends: a bot-box has nobody to run the installer on it, so it gets a timer that
@@ -64,8 +78,9 @@ tidy
 count-claude-tokens --help
 
 # Reach exe.dev and its VMs over checked host keys: run lobby commands, open a
-# shell or a VS Code window on a box, create one from this repo, or cut a new
-# one over to an existing name. Run with --help for subcommands and flags.
+# shell or a VS Code window on a box, create one from this repo, cut a new one
+# over to an existing name, or print the URL the box you are on answers at.
+# Run with --help for subcommands and flags.
 exe-dev --help
 
 # Run Claude Code billed against exe.dev's LLM allocation rather than the
@@ -77,9 +92,18 @@ claude-exe-dev --model opus
 setup-tailscale
 
 # Update claude-scriptorium and converge the systemd user service that serves
-# this machine's sessions. exe.dev VMs only; a no-op anywhere else. install.sh
+# this machine's sessions. Dev-box VMs only; a no-op anywhere else. install.sh
 # schedules it daily, so running it by hand is only for wanting a release now.
 cloister-codex
+
+# Serve an index of everything listening on a proxied port, with a link to each.
+# install.sh runs this as a systemd user service on the port the bare
+# `https://<vm>.exe.xyz/` hostname reaches; run it by hand to serve it elsewhere.
+PORT_ATLAS_PORT=9100 port-atlas
+
+# Exit 0 only on an exe.dev VM tagged `dev-box`. The guard the services that
+# exist to be looked at by a person are gated on.
+is-dev-box
 ```
 
 ## Claude Code Hooks

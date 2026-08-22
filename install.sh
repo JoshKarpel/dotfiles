@@ -148,8 +148,19 @@ function do_mise() {
   "$HOME/.local/bin/mise" prune --yes
 }
 
+# `systemctl --user` finds its manager through XDG_RUNTIME_DIR, which a login
+# shell has and the first-boot bootstrap running install.sh over `ssh host
+# <command>` does not. Without it every call fails with "Failed to connect to
+# bus: No medium found", which reads as systemd being absent and is really the
+# environment being thin.
+function use_user_bus() {
+  if [[ -z ${XDG_RUNTIME_DIR:-} ]]; then
+    export XDG_RUNTIME_DIR="$(loginctl show-user "$(id -un)" --value -p RuntimePath)"
+  fi
+}
+
 # Schedules bin/cloister-codex, which does the work of serving this machine's
-# sessions and is where the exe.dev guard lives. This only sets up the timer that
+# sessions and is where the dev-box guard lives. This only sets up the timer that
 # fires it once a day, then runs it once so the box is serving now rather than
 # whenever the timer first comes round.
 function do_cloister() {
@@ -158,16 +169,9 @@ function do_cloister() {
   # cloister-codex guards itself on the same test, which is what makes it safe to
   # run by hand anywhere. This one is earlier because a laptop has neither
   # systemctl nor loginctl for the rest of this function to call.
-  "$BASEDIR/bin/is-exe-dev" || return 0
+  "$BASEDIR/bin/is-dev-box" || return 0
 
-  # `systemctl --user` finds its manager through XDG_RUNTIME_DIR, which a login
-  # shell has and the first-boot bootstrap running install.sh over `ssh host
-  # <command>` does not. Without it every call below fails with "Failed to
-  # connect to bus: No medium found", which reads as systemd being absent and is
-  # really the environment being thin.
-  if [[ -z ${XDG_RUNTIME_DIR:-} ]]; then
-    export XDG_RUNTIME_DIR="$(loginctl show-user "$(id -un)" --value -p RuntimePath)"
-  fi
+  use_user_bus
 
   log "Scheduling the cloistered codex..."
 
@@ -207,6 +211,51 @@ EOF
   "$BASEDIR/bin/cloister-codex"
 }
 
+# Runs bin/port-atlas on 8000, the port the bare `https://<vm>.exe.xyz/` hostname
+# is proxied to, so the box's front door is an index of everything else listening
+# on a proxied port rather than any one of those things.
+function do_port_atlas() {
+  local units=~/.config/systemd/user
+
+  "$BASEDIR/bin/is-dev-box" || return 0
+
+  use_user_bus
+
+  log "Serving the port atlas..."
+
+  mkdir -p "$units"
+
+  # A daemon rather than a converge job, so unlike cloister-codex there is no
+  # timer: the unit is the whole of it.
+  #
+  # The PATH is spelled out because a user unit inherits none of a login shell's,
+  # and the script's `uv run` shebang has to resolve `uv` through mise's shims.
+  # Restart=always covers the scan thread dying on a kernel interface that
+  # answered differently than it used to; there is nothing to lose by starting
+  # over, and a box whose front door 502s is one nobody can navigate.
+  cat > "$units/port-atlas.service" << EOF
+[Unit]
+Description=Index this machine's proxied ports on the default hostname
+
+[Service]
+ExecStart=$BASEDIR/bin/port-atlas
+Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+  systemctl --user daemon-reload
+  systemctl --user enable port-atlas.service
+
+  # Unconditionally, rather than `enable --now`: the file above may have changed
+  # under a service that is already running, and a daemon this cheap to start has
+  # no work in flight worth preserving.
+  systemctl --user restart port-atlas.service
+}
+
 do_config
 
 . "$HOME/.commonrc-pre"
@@ -217,3 +266,4 @@ do_locale
 do_brew
 do_mise
 do_cloister
+do_port_atlas
