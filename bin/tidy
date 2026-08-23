@@ -89,7 +89,7 @@ have pre-commit-run && step "Collecting pre-commit garbage..." pre-commit-run gc
 
 # After pre-commit, not before: pre-commit-run reaches pre-commit through uvx,
 # which leaves an ephemeral cached environment behind that this then collects.
-have uv && step "Pruning uv cache..." uv cache prune
+have uv && step "Pruning uv cache..." prune_uv
 
 have cargo && step "Pruning cargo registry..." prune_cargo
 
