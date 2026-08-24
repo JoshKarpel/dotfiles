@@ -16,6 +16,46 @@ export GH_HOST=github.int.exe.xyz
 # by choice rather than by which context happened to start zellij first.
 export ZELLIJ_SOCKET_DIR="/tmp/zellij-$(id -u)"
 
+# A login reaches a server only through a socket file, so a server whose socket
+# it cannot see may as well not exist: `attach --create` builds a second session
+# of the same name beside it, and nothing about the new session looks wrong.
+# Zellij itself guards the ordinary case, declining to clobber a live server
+# whose socket is on disk even when that server is too busy to answer, so the
+# gap is only the servers that fall outside this shell's view. Two ways in, both
+# seen on this box: the socket file is unlinked while the server keeps running,
+# and the server was started against a different socket directory, which is what
+# happens whenever ZELLIJ_SOCKET_DIR is not pinned at both ends.
+#
+# Neither is recoverable. An unlinked socket cannot be relinked, and the panes
+# live in the server's memory rather than anywhere on disk, so reporting is what
+# is left. It beats the alternative, which is finding out hours later by noticing
+# the work is missing.
+function warn_stranded_zellij_servers() {
+  local session="$1" pid flag socket
+
+  exists pgrep || return 0
+
+  # The loop body runs in a subshell and only prints, so nothing needs to escape
+  # it; the declarations sit out here because `local` inside a pipeline is not
+  # reliably scoped across shells.
+  pgrep -u "$(id -u)" -x zellij 2> /dev/null | while read -r pid; do
+    # `zellij --server <socket>`, so the flag is the second field and the socket
+    # the last. Read from the process rather than rebuilding the path here: the
+    # `contract_version_N` component is zellij's own and moves with its protocol.
+    flag=$(tr '\0' '\n' < "/proc/$pid/cmdline" 2> /dev/null | head -2 | tail -1)
+    socket=$(tr '\0' '\n' < "/proc/$pid/cmdline" 2> /dev/null | tail -1)
+
+    [[ $flag == "--server" && ${socket##*/} == "$session" ]] || continue
+    [[ -S $socket && $socket == "$ZELLIJ_SOCKET_DIR"/* ]] && continue
+
+    echo "zellij: server $pid holds a session named '$session' at" >&2
+    echo "zellij:   $socket" >&2
+    echo "zellij: which this login cannot reach. A second one is starting." >&2
+    echo "zellij: Its panes are still running and cannot be reattached." >&2
+    echo "zellij: Inspect with 'ps --ppid $pid'; 'kill $pid' when done." >&2
+  done
+}
+
 # Land in zellij on arrival. Defined here but deliberately not called here:
 # sources/ loads partway through commonrc-pre, so exec'ing at this point would
 # replace the shell before the rest of startup ran, and zellij isn't even on
@@ -48,6 +88,8 @@ function start_zellij_session() {
 
   if [[ $- == *i* && -z ${ZELLIJ:-} && -t 0 && -t 1 ]] && exists zellij; then
     session=$(hostname -s)
+
+    warn_stranded_zellij_servers "$session"
 
     # Zellij sizes a session to the smallest attached client and keeps a client
     # registered until its process dies, so a window that is gone but unreaped

@@ -84,12 +84,22 @@ here and keeps user settings in the browser's IndexedDB rather than on disk, so 
 browser. The CLI comes from mise rather than the copy Remote-SSH pushes to
 `~/.vscode-server/code-<commit>`, whose path moves with every VS Code update.
 
-Three details are worth knowing before touching any of this.
+Four details are worth knowing before touching any of this.
 
 Zellij keys its session sockets off `$XDG_RUNTIME_DIR` and falls back to
 `/tmp/zellij-$UID` when it is unset. A systemd user unit always has it and sshd
 here never does, so the unit and the logins it exists to serve build two separate
 sessions of the same name unless both pin `ZELLIJ_SOCKET_DIR`. Both do.
+
+A server the login cannot see through that socket directory may as well not
+exist: `attach --create` builds a second session of the same name beside it and
+nothing about the result looks wrong. Zellij covers the ordinary case itself,
+declining to clobber a live server whose socket is on disk even when that server
+is too busy to answer, so what is left is the server whose socket was unlinked
+under it and the server started against a different directory. Neither is
+recoverable, since an unlinked socket cannot be relinked and the panes live in
+the server's memory, so `warn_stranded_zellij_servers` reports them at login
+rather than letting the loss pass silently.
 
 `zellij attach --create-background` is the only way to make a session with no
 controlling terminal, and it exits 1 with "Session already exists" rather than

@@ -24,4 +24,40 @@ keybinds {
     shared_except "locked" {
         unbind "Ctrl q"
     }
+
+    // The mode keys the browser takes for itself, given an Alt alternate. A web
+    // client sees a keystroke only if the browser lets the page have it, and
+    // Ctrl+T (new tab), Ctrl+N (new window), and Ctrl+P (print) are all claimed
+    // above the page, so no configuration on this end makes them arrive. Alt is
+    // left alone, so it carries the same modes with the same letter. The Ctrl
+    // bindings stay for terminal clients, where they work and are what the
+    // status bar advertises.
+    //
+    // Two of these letters are defaults in their own right, Alt+n for NewPane
+    // and Alt+p for TogglePaneInGroup, and taking them gives those up. Both
+    // still have a route through pane mode, `Ctrl+p n` and `Ctrl+p` then the
+    // group keys.
+    shared_except "tab" "locked" {
+        bind "Alt t" { SwitchToMode "Tab"; }
+    }
+
+    tab {
+        bind "Alt t" { SwitchToMode "Normal"; }
+    }
+
+    shared_except "resize" "locked" {
+        bind "Alt n" { SwitchToMode "Resize"; }
+    }
+
+    resize {
+        bind "Alt n" { SwitchToMode "Normal"; }
+    }
+
+    shared_except "pane" "locked" {
+        bind "Alt p" { SwitchToMode "Pane"; }
+    }
+
+    pane {
+        bind "Alt p" { SwitchToMode "Normal"; }
+    }
 }
