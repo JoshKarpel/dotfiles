@@ -26,17 +26,25 @@ fmt_remaining() {
 else echo "${m}m"; fi
 }
 
+# `date -d` is GNU-only and fails silently on macOS's BSD date, which needs `-j -f`
+# with an explicit format instead. Try both; print nothing (and return non-zero) if
+# neither parses, so a caller can tell "unknown" from a bogus epoch.
+resets_epoch() {
+  date -d "$1" +%s 2>/dev/null && return
+  date -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null
+}
+
 if [[ -n "$usage" ]]; then
   now=$(date +%s)
   five_hour_pct=$(echo "$usage" | jq -r 'if (.five_hour.utilization | type) == "number" then (.five_hour.utilization | floor | tostring) + "%" else empty end' 2>/dev/null)
   seven_day_pct=$(echo "$usage" | jq -r 'if (.seven_day.utilization | type) == "number" then (.seven_day.utilization | floor | tostring) + "%" else empty end' 2>/dev/null)
   five_hour_resets=$(echo "$usage" | jq -r '.five_hour.resets_at // empty' 2>/dev/null)
   seven_day_resets=$(echo "$usage" | jq -r '.seven_day.resets_at // empty' 2>/dev/null)
-  if [[ -n "$five_hour_resets" ]]; then
-    five_hour_remaining=$(fmt_remaining $(( $(date -d "$five_hour_resets" +%s 2>/dev/null) - now )))
+  if [[ -n "$five_hour_resets" ]] && epoch=$(resets_epoch "$five_hour_resets"); then
+    five_hour_remaining=$(fmt_remaining $(( epoch - now )))
   fi
-  if [[ -n "$seven_day_resets" ]]; then
-    seven_day_remaining=$(fmt_remaining $(( $(date -d "$seven_day_resets" +%s 2>/dev/null) - now )))
+  if [[ -n "$seven_day_resets" ]] && epoch=$(resets_epoch "$seven_day_resets"); then
+    seven_day_remaining=$(fmt_remaining $(( epoch - now )))
   fi
 
   extra_enabled=$(echo "$usage" | jq -r '.extra_usage.is_enabled // false' 2>/dev/null)

@@ -25,6 +25,14 @@ colorize() {
 else echo "\033[32m${text}\033[0m"; fi
 }
 
+# `date -d` is GNU-only and fails silently on macOS's BSD date, which needs `-j -f`
+# with an explicit format instead. Try both; print nothing (and return non-zero) if
+# neither parses, so a caller can tell "unknown" from a bogus epoch.
+resets_epoch() {
+  date -d "$1" +%s 2>/dev/null && return
+  date -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null
+}
+
 now=$(date +%s)
 
 echo ""
@@ -35,8 +43,8 @@ for window in five_hour seven_day; do
   if [[ -z "$pct" ]]; then continue; fi
 
   remaining=""
-  if [[ -n "$resets_at" ]]; then
-    remaining=$(fmt_remaining $(( $(date -d "$resets_at" +%s 2>/dev/null) - now )))
+  if [[ -n "$resets_at" ]] && epoch=$(resets_epoch "$resets_at"); then
+    remaining=$(fmt_remaining $(( epoch - now )))
   fi
 
   case "$window" in
