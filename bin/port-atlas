@@ -24,6 +24,16 @@ open shows up within that second.
 Links are built from the browser's own location rather than the VM name, so they
 stay correct whether the page was reached through the exe.dev proxy or an SSH
 tunnel to the same port.
+
+A zellij web server is the one port not linked directly, because arriving there
+without a session named in the path does not land on a picker: it creates a new
+session, so a link to its root would litter the box with an empty session per
+visit. Its existing sessions are listed individually instead, which is both the
+useful destination and the harmless one.
+
+Those session names are shown only to the VM's owner, because a session name is
+often a project or client name and the atlas is reachable by anyone the VM is
+shared with.
 """
 
 from __future__ import annotations
@@ -58,6 +68,26 @@ HEARTBEAT_INTERVAL_SECONDS = 15.0
 PROBE_RETRY_SECONDS = 5.0
 PROBE_MAX_ATTEMPTS = 6
 PROBE_TIMEOUT_SECONDS = 1.5
+
+# Reflection is an exe.dev default integration, and `/email` is the address the
+# VM is owned by. Read once at startup rather than per request: it is a remote
+# call, it decides an authorization question, and the answer changes about never.
+OWNER_URL = "https://reflection.int.exe.xyz/email"
+REFLECTION_URL = "https://reflection.int.exe.xyz/"
+OWNER_TIMEOUT_SECONDS = 5.0
+
+# What VS Code's Remote-SSH opens, the same form the exe.dev dashboard links.
+# The VM name comes from reflection rather than the browser's location, because
+# unlike every other link on this page it names a host to SSH to rather than one
+# to fetch from: reached through a tunnel, `location.hostname` is `localhost`,
+# which is the one machine this must not point at.
+VSCODE_URL = "vscode://vscode-remote/ssh-remote+{host}{directory}?windowId=_blank"
+VM_SUFFIX = ".exe.xyz"
+
+# The proxy sets this from the exe.dev session and overwrites whatever the client
+# sent, so a forged value does not survive the hop. It is absent entirely when the
+# caller is unauthenticated, which is why the comparison below fails closed.
+CALLER_EMAIL_HEADER = "X-ExeDev-Email"
 
 CLOCK_TICKS_PER_SECOND = os.sysconf("SC_CLK_TCK")
 
@@ -138,6 +168,97 @@ def format_probe_title(body: str) -> str:
     if not match:
         return ""
     return html.unescape(" ".join(match.group(1).split()))
+
+
+def read_owner_email() -> str:
+    """The address this VM is owned by, or "" if reflection did not answer.
+
+    An empty answer denies rather than defaults: nothing is disclosed on the
+    strength of a query that failed.
+    """
+    try:
+        with urllib.request.urlopen(OWNER_URL, timeout=OWNER_TIMEOUT_SECONDS) as response:
+            return str(json.load(response).get("email") or "")
+    except (urllib.error.URLError, OSError, ValueError):
+        return ""
+
+
+def read_vscode_url() -> str:
+    """A VS Code Remote-SSH link to this VM's home, or "" off exe.dev.
+
+    Empty is the honest answer anywhere reflection does not resolve: a laptop
+    running this has no `<vm>.exe.xyz` to hand VS Code, and an empty string
+    renders as no link rather than as a broken one.
+    """
+    try:
+        with urllib.request.urlopen(REFLECTION_URL, timeout=OWNER_TIMEOUT_SECONDS) as response:
+            name = str(json.load(response).get("name") or "")
+    except (urllib.error.URLError, OSError, ValueError):
+        return ""
+
+    if not name:
+        return ""
+
+    return VSCODE_URL.format(host=f"{name}{VM_SUFFIX}", directory=pwd.getpwuid(os.getuid()).pw_dir)
+
+
+def read_zellij_sessions(row: Row) -> tuple[str, ...]:
+    """Session names a zellij web server can serve, newest listing first.
+
+    The socket directory is read from the server's own environment rather than
+    from this process's. Zellij derives it from $XDG_RUNTIME_DIR and falls back
+    to /tmp/zellij-$UID, and a daemon started by systemd and a shell started by
+    sshd disagree about that, so asking our own environment would enumerate a
+    different machine-local set than the one the web server is actually serving.
+    """
+    if row.pid is None:
+        return ()
+
+    environ = {}
+    try:
+        with open(f"/proc/{row.pid}/environ", "rb") as handle:
+            for entry in handle.read().decode("utf-8", "replace").split("\0"):
+                key, _, value = entry.partition("=")
+                if key:
+                    environ[key] = value
+    except OSError:
+        return ()
+
+    try:
+        result = subprocess.run(
+            ["zellij", "list-sessions", "--short", "--no-formatting"],
+            capture_output=True,
+            text=True,
+            timeout=PROBE_TIMEOUT_SECONDS,
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "HOME": environ.get("HOME", ""),
+                **{
+                    key: environ[key]
+                    for key in ("ZELLIJ_SOCKET_DIR", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME")
+                    if key in environ
+                },
+            },
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ()
+
+    # A server with no sessions exits non-zero, which is not an error worth
+    # distinguishing from one whose sessions we could not read: both render the
+    # port as an ordinary row with nothing broken out.
+    if result.returncode != 0:
+        return ()
+
+    return tuple(line.strip() for line in result.stdout.splitlines() if line.strip())
+
+
+def is_zellij_web(row: Row) -> bool:
+    """Whether this listener is a zellij web server rather than anything else.
+
+    Matched on the process, not the port: the port is configurable and this is
+    meant to work on any box running one, not only on a box set up like this one.
+    """
+    return row.command_name == "zellij" and " web" in f" {row.command_line} "
 
 
 def read_listeners() -> list[Listener]:
@@ -333,30 +454,38 @@ def build_rows(listeners: list[Listener], probes: Probes) -> list[Row]:
 
 
 class Broadcast:
-    """The latest payload, and a way to wait for the next different one."""
+    """The latest payload, and a way to wait for the next different one.
+
+    Two payloads rather than one, serialized here so the cost is per scan and not
+    per connection. They differ only in whether zellij session names are present,
+    and which one a connection receives is an authorization decision made in the
+    handler that holds the caller's headers.
+    """
 
     def __init__(self) -> None:
         self._condition = threading.Condition()
         self._version = 0
-        self._payload = "{}"
+        self._public = "{}"
+        self._owner = "{}"
 
-    def publish(self, payload: str) -> None:
+    def publish(self, public: str, owner: str) -> None:
         with self._condition:
-            if payload == self._payload:
+            if (public, owner) == (self._public, self._owner):
                 return
-            self._payload = payload
+            self._public = public
+            self._owner = owner
             self._version += 1
             self._condition.notify_all()
 
-    def wait(self, seen: int) -> tuple[int, str]:
+    def wait(self, seen: int, *, is_owner: bool) -> tuple[int, str]:
         """Block until the payload differs from `seen`, or the heartbeat is due."""
         with self._condition:
             if self._version == seen:
                 self._condition.wait(HEARTBEAT_INTERVAL_SECONDS)
-            return self._version, self._payload
+            return self._version, (self._owner if is_owner else self._public)
 
 
-def scan_forever(broadcast: Broadcast, own_port: int) -> None:
+def scan_forever(broadcast: Broadcast, own_port: int, vscode_url: str) -> None:
     """Rescan, and publish whenever the result differs from the last one.
 
     A probe finishing does not push on its own: it lands in the cache and the
@@ -367,11 +496,25 @@ def scan_forever(broadcast: Broadcast, own_port: int) -> None:
     while True:
         listeners = read_listeners()
         probes.refresh(listeners)
-        payload = {
-            "own_port": own_port,
-            "rows": [asdict(row) for row in build_rows(listeners, probes)],
-        }
-        broadcast.publish(json.dumps(payload, sort_keys=True))
+        rows = build_rows(listeners, probes)
+        # Flagged for everyone, unlike the session names: it withholds a link
+        # rather than disclosing anything, and the command line already says
+        # `zellij web` to anyone reading the row.
+        public = [
+            asdict(row) | {"is_session_server": True} if is_zellij_web(row) else asdict(row)
+            for row in rows
+        ]
+        owner = [
+            row_dict | {"sessions": list(read_zellij_sessions(row))}
+            if is_zellij_web(row)
+            else row_dict
+            for row, row_dict in zip(rows, public)
+        ]
+        common = {"own_port": own_port, "vscode_url": vscode_url}
+        broadcast.publish(
+            json.dumps(common | {"rows": public}, sort_keys=True),
+            json.dumps(common | {"rows": owner}, sort_keys=True),
+        )
         time.sleep(SCAN_INTERVAL_SECONDS)
 
 
@@ -402,6 +545,11 @@ main { max-width: 62rem; margin: 0 auto; }
 header { display: flex; align-items: baseline; gap: .75rem; margin-bottom: 1.25rem; }
 h1 { font-size: 1.15rem; margin: 0; font-weight: 600; letter-spacing: -.01em; }
 #host { color: var(--dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
+#vscode {
+  font-size: .76rem; color: var(--accent); text-decoration: none;
+  border: 1px solid var(--line); border-radius: 5px; padding: .1rem .45rem;
+}
+#vscode:hover { border-color: var(--accent); }
 #state { margin-left: auto; font-size: .78rem; color: var(--dim); }
 #state.stale { color: #c2622f; }
 ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
@@ -440,6 +588,18 @@ li.inert .port { color: var(--dim); }
 .dir b { color: var(--ink); font-weight: 600; }
 .cmd { margin-top: .1rem; opacity: .8; }
 .meta { margin-top: .25rem; display: flex; flex-wrap: wrap; gap: .1rem .85rem; white-space: normal; }
+.sessions:not(:empty) {
+  display: flex; flex-wrap: wrap; gap: .3rem;
+  padding: 0 .9rem .7rem calc(.9rem + 1.1rem + .85rem);
+}
+.session {
+  display: flex; align-items: baseline; gap: .35rem; text-decoration: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .76rem;
+  color: var(--accent); background: var(--badge);
+  padding: .15rem .5rem; border-radius: 5px; border: 1px solid transparent;
+}
+.session:hover { border-color: var(--accent); }
+.session .key { width: auto; }
 #empty { color: var(--dim); padding: 2rem 0; text-align: center; }
 footer { margin-top: 1.5rem; font-size: .75rem; color: var(--dim); }
 kbd {
@@ -453,6 +613,7 @@ kbd {
   <header>
     <h1>Ports</h1>
     <span id="host"></span>
+    <a id="vscode" hidden>open in VS&nbsp;Code</a>
     <span id="state">connecting</span>
   </header>
   <ul id="ports"></ul>
@@ -463,6 +624,7 @@ kbd {
 const list = document.getElementById("ports");
 const empty = document.getElementById("empty");
 const state = document.getElementById("state");
+const vscode = document.getElementById("vscode");
 document.getElementById("host").textContent = location.hostname;
 
 let openable = [];
@@ -474,6 +636,10 @@ let painted = false;
 // row is where you already are and every other row needs an explicit port.
 function linkFor(row, ownPort) {
   if (row.is_http === false || row.port === ownPort) return null;
+  // A zellij web server creates a brand new session for anyone arriving without
+  // one named in the path, so linking its root would litter the box with an
+  // empty session per visit. The per-session links below are the way in.
+  if (row.is_session_server) return null;
   return location.protocol + "//" + location.hostname + ":" + row.port + "/";
 }
 
@@ -496,6 +662,14 @@ function describe(row) {
 function render(payload) {
   const rows = payload.rows || [];
   empty.hidden = rows.length > 0;
+
+  // Absent off exe.dev, where there is no <vm>.exe.xyz for Remote-SSH to reach.
+  if (payload.vscode_url) {
+    vscode.href = payload.vscode_url;
+    vscode.hidden = false;
+  } else {
+    vscode.hidden = true;
+  }
   openable = [];
   const keep = new Set();
 
@@ -512,7 +686,8 @@ function render(payload) {
       li.innerHTML =
         '<a class="row"><span class="key"></span><span class="port"></span>' +
         '<span class="body"><span class="headline"><span class="title"></span></span>' +
-        '<div class="dir"></div><div class="cmd"></div><div class="meta"></div></span></a>';
+        '<div class="dir"></div><div class="cmd"></div><div class="meta"></div></span></a>' +
+        '<div class="sessions"></div>';
       if (painted) {
         li.classList.add("flash");
         li.addEventListener("animationend", () => li.classList.remove("flash"), { once: true });
@@ -537,6 +712,7 @@ function render(payload) {
     const badges = [];
     if (row.port === payload.own_port) badges.push(["this page", "here"]);
     if (row.is_http === false) badges.push(["no http", ""]);
+    if (row.is_session_server) badges.push(["session server", ""]);
     badges.forEach(([text, kind]) => {
       const span = document.createElement("span");
       span.className = "badge" + (kind === "here" ? " here" : "");
@@ -573,6 +749,25 @@ function render(payload) {
       const span = document.createElement("span");
       span.textContent = fact;
       meta.appendChild(span);
+    });
+
+    // Sessions arrive only for the VM's owner, so this is absent rather than
+    // empty for everyone else and the row renders as any other port would.
+    const sessions = li.querySelector(".sessions");
+    sessions.innerHTML = "";
+    (row.sessions || []).forEach((name) => {
+      const link = document.createElement("a");
+      link.className = "session";
+      link.href = location.protocol + "//" + location.hostname + ":" + row.port + "/" + encodeURIComponent(name);
+      openable.push(link.href);
+      const key = document.createElement("span");
+      key.className = "key";
+      key.textContent = openable.length <= 9 ? openable.length : "";
+      link.appendChild(key);
+      const label = document.createElement("span");
+      label.textContent = name;
+      link.appendChild(label);
+      sessions.appendChild(link);
     });
 
     list.appendChild(li);
@@ -614,6 +809,18 @@ addEventListener("keydown", (event) => {
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     broadcast: Broadcast
+    owner_email: str
+
+    def is_owner(self) -> bool:
+        """Whether the caller is the VM's owner, per exe.dev's own authentication.
+
+        Both sides must be non-empty: reflection failing at startup and an
+        unauthenticated caller both produce "", and "" == "" would otherwise
+        disclose to everyone exactly when we know least.
+        """
+        caller = (self.headers.get(CALLER_EMAIL_HEADER) or "").strip().casefold()
+        owner = self.owner_email.strip().casefold()
+        return bool(owner) and caller == owner
 
     def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
@@ -643,9 +850,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
         seen = -1
+        is_owner = self.is_owner()
         try:
             while True:
-                version, payload = self.broadcast.wait(seen)
+                version, payload = self.broadcast.wait(seen, is_owner=is_owner)
                 if version == seen:
                     self.wfile.write(b": heartbeat\n\n")
                 else:
@@ -664,8 +872,16 @@ def main() -> None:
     broadcast = Broadcast()
     Handler.broadcast = broadcast
 
+    # Resolved once, before the first request, so no request path carries a
+    # remote call. A box whose reflection lookup failed serves the public view to
+    # everyone until it is restarted, which is the safe direction to fail.
+    Handler.owner_email = read_owner_email()
+
     scanner = threading.Thread(
-        target=scan_forever, args=(broadcast, port), name="scan", daemon=True
+        target=scan_forever,
+        args=(broadcast, port, read_vscode_url()),
+        name="scan",
+        daemon=True,
     )
     scanner.start()
 

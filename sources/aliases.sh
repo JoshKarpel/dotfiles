@@ -40,8 +40,11 @@ alias j="just"
 # watchfiles
 alias w="uvx watchfiles"
 
-# zellij
-alias z="zellij"
+# zellij; the machine's own session, the same one a login lands in. Single
+# quotes so the hostname resolves on use rather than being baked in when this
+# file is sourced. A bare `zellij` would invent a fresh auto-named session and
+# leave it behind on every invocation, which is where stray sessions come from.
+alias z='zellij attach --create $(hostname -s)'
 
 # exe.dev; commonrc-post gives this exe-dev's own completion
 alias xd="exe-dev"

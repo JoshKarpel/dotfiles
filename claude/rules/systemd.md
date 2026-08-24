@@ -21,6 +21,32 @@ service means the entire job, bounded only by its `TimeoutStartSec`. Pass
 `--no-block` to trigger a long-running oneshot and return immediately, or a unit
 with a 75 minute timeout holds the caller for 75 minutes.
 
+## A Unit's Environment Is Not a Login's
+
+A user unit always has `XDG_RUNTIME_DIR`; an sshd login frequently does not. A
+tool that derives a path from it therefore resolves somewhere different depending
+on which side started it, and neither side can see the other's state. Zellij is
+the worked example: it keys session sockets off `$XDG_RUNTIME_DIR` and falls back
+to `/tmp/zellij-$UID`, so a unit and the login it exists to serve build two
+separate sessions of the same name and each reports the other missing.
+
+Pin such a variable explicitly on both sides rather than letting each inherit
+whatever its context happens to supply. The same applies to `PATH`, which a unit
+does not inherit from a login shell at all, so spell it out when `ExecStart`
+resolves a tool through a version manager's shims.
+
+## User Units at Boot Need Lingering
+
+`WantedBy=default.target` starts a unit when the *user manager* starts, which
+without lingering is at first login rather than at boot. A service meant to be up
+on a machine nobody has logged into needs `loginctl enable-linger <user>`, and
+the failure is quiet: the unit is enabled, the file is correct, and nothing is
+running. Lingering also keeps `/run/user/$UID` present between logins, so
+anything resolving `XDG_RUNTIME_DIR` depends on it too.
+
+Treat it as a precondition to confirm (`loginctl show-user <user> -p Linger`)
+rather than to assume, especially on an image that may have set it for you.
+
 ## `uv run` in a Long-Lived Unit
 
 A `uv run` process holds a shared lock on the uv cache (`~/.cache/uv/.lock`) for
@@ -55,6 +81,17 @@ precondition that cannot be written that way belongs in the program the unit run
 where it can exit cleanly with a diagnostic. A failing condition makes the unit skip
 silently, which is indistinguishable from a unit that never fired.
 
+## Specifiers Expand in Unit Files, Not in `systemd-run`
+
+`%h` (home), `%U` (uid), and `%l` (short hostname) let a unit avoid naming a
+machine or a user, so it survives a rename and needs no interpolation by the
+installer that writes it.
+
+Test one with a real unit file. `systemd-run --user ... /bin/sh -c 'echo "%l"'`
+prints `%l` verbatim, which reads as "specifiers are not available here" when
+the identical `ExecStart` in an installed unit expands it correctly. Reaching
+for `systemd-run` as the quick check is what produces the false negative.
+
 ## Generated units
 
 A unit that embeds an absolute path belongs to the installer that knows that path,
@@ -68,6 +105,21 @@ unit is harmless and needs no guard.
 Never restart an active `Type=oneshot` service because its definition changed.
 Install the new file, reload, and let the next activation pick it up; restarting
 destroys work in progress.
+
+Whether a restart is *actually* destructive depends on where the spawned process
+ended up. A daemon that re-parents itself out of the unit's cgroup keeps running
+through `stop` and `restart`, so systemd is not managing its lifetime at all.
+Compare `/proc/<pid>/cgroup` against `systemctl show <unit> -p ControlGroup`
+instead of assuming either way: assuming systemd reaps it leaves a stray process
+behind, and assuming it doesn't means avoiding a restart that was safe.
+
+A oneshot that establishes state rather than performing work wants
+`RemainAfterExit=yes`, so the unit reads as active for as long as that state
+holds instead of as a job that finished. Where the command treats "already in the
+desired state" as an error, `SuccessExitStatus=` is how the unit says otherwise.
+Confirm first that genuine failures use a different code: zellij's
+`attach --create-background` exits 1 for "Session already exists" and panics with
+101 on a real fault, so tolerating 1 there hides nothing.
 
 ## Validation
 

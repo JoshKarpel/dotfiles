@@ -313,7 +313,9 @@ EOF
   systemctl --user enable --now zellij-session.service
 }
 
-# Serves the work session over HTTPS at `https://<vm>.exe.xyz:8082/<session>`.
+# Serves the work session over HTTPS at `https://<vm>.exe.xyz:3000/<session>`.
+# The port comes from `web_server_port` in config/zellij/config.kdl rather than a
+# flag here, so the CLI and this unit agree on where the server is.
 #
 # The server binds loopback and speaks plain HTTP: exe.dev terminates TLS at the
 # proxy, so a certificate on the VM would be a second thing to obtain and rotate

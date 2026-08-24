@@ -39,8 +39,10 @@ the exeuntu image.
 
 exe.dev proxies one port per VM to the bare `https://<vm>.exe.xyz/` hostname and
 forwards 3000-9999 to `https://<vm>.exe.xyz:<port>/`. `port-atlas` takes the bare
-hostname's port so the front door is an index of everything else listening, and
-the codex moves to 3000 to become its first entry, the atlas sorting by port.
+hostname's port so the front door is an index of everything else listening. The
+atlas sorts by port, so the bottom of the forwarded range is the top of the
+index: the work session takes 3000 and the codex 3001, putting the two things
+worth opening first ahead of whatever a dev server later binds.
 
 ## The Work Session
 
@@ -52,9 +54,20 @@ instead would tie its existence to somebody having connected, so a reboot would
 quietly discard it until the next login.
 
 `zellij-web.service` then serves that session at
-`https://<vm>.exe.xyz:8082/<session>`, which needs `web_sharing "on"` in
+`https://<vm>.exe.xyz:3000/<session>`, which needs `web_sharing "on"` in
 `config/zellij/config.kdl`: the web server serves sessions it created itself
 whatever that setting says, and the work session is created outside it.
+
+`port-atlas` links each session directly and deliberately does not link the port
+itself: arriving at a zellij web server without a session named in the path
+creates a new one, so a link to its root would leave an empty session behind on
+every visit. It shows those names only to the VM's owner, comparing the
+`X-ExeDev-Email` the exe.dev proxy injects (which overwrites whatever the
+client sent) against the owner address from reflection. A session
+name is often a project name and the atlas is reachable by anyone the VM is
+shared with, so the default is to withhold: an unauthenticated caller and a
+failed reflection lookup both produce an empty string, and the check requires
+both sides non-empty rather than letting those compare equal.
 
 Three details are worth knowing before touching any of this.
 

@@ -9,6 +9,12 @@ show_startup_tips false
 // would show an empty list on a box with a session running in front of it.
 web_sharing "on"
 
+// The bottom of the range exe.dev forwards verbatim, so the work session sorts
+// first in the port atlas. Set here rather than as a flag on the unit so that
+// `zellij web --status` from a shell looks at the port the service actually
+// bound, instead of reporting nothing on the 8082 default.
+web_server_port 3000
+
 keybinds {
     // Quit tears the session down along with everything running in it, and
     // recovery isn't guaranteed: a short-lived session that exits can vanish
