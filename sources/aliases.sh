@@ -41,7 +41,7 @@ alias j="just"
 alias w="uvx watchfiles"
 
 # zellij
-alias z="zellij -l welcome"
+alias z="zellij"
 
 # exe.dev; commonrc-post gives this exe-dev's own completion
 alias xd="exe-dev"

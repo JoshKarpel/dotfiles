@@ -255,6 +255,114 @@ EOF
   systemctl --user restart port-atlas.service
 }
 
+# Owns the box's work session, so that it exists because the box is up rather
+# than because somebody logged in. Without this the session is created lazily by
+# the first interactive login, which means a reboot silently discards it until
+# someone reconnects.
+#
+# `attach --create-background` is the only way in to a session without a
+# controlling terminal: every other form of `attach` wants raw mode and panics
+# without it. It leaves no client registered behind it, so converging this unit
+# never shrinks the session the way an unreaped terminal client would, and the
+# usual "never restart an active oneshot" caution does not apply.
+#
+# It exits 1 with "Session already exists" rather than succeeding as a no-op,
+# which for a unit whose job is to converge on "the session exists" is success.
+# SuccessExitStatus is narrow enough to say so: a real failure panics and exits
+# 101, so tolerating 1 does not swallow one.
+#
+# Note that it returns before the session registers, so nothing may order itself
+# after this unit expecting the session to be there. Logins handle that race by
+# running `attach --create` rather than a bare `attach`.
+#
+# %l is the short hostname, matching what start_zellij_session computes, so the
+# unit names no box and survives a rename.
+#
+# ZELLIJ_SOCKET_DIR is pinned to the same path sources/exe.sh pins, and for the
+# reason given there: a unit has XDG_RUNTIME_DIR and a login here does not, so
+# left alone the two build separate sessions of the same name.
+function do_zellij_session() {
+  local units=~/.config/systemd/user
+
+  "$BASEDIR/bin/is-dev-box" || return 0
+
+  use_user_bus
+
+  log "Converging the work session..."
+
+  mkdir -p "$units"
+
+  # RemainAfterExit so the unit reads as active while the session it created is
+  # up, rather than as a job that ran once and finished.
+  cat > "$units/zellij-session.service" << 'EOF'
+[Unit]
+Description=Keep this box's zellij work session running
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+SuccessExitStatus=1
+Environment=ZELLIJ_SOCKET_DIR=/tmp/zellij-%U
+ExecStart=%h/.local/share/mise/shims/zellij attach --create-background %l
+
+[Install]
+WantedBy=default.target
+EOF
+
+  systemctl --user daemon-reload
+  systemctl --user enable --now zellij-session.service
+}
+
+# Serves the work session over HTTPS at `https://<vm>.exe.xyz:8082/<session>`.
+#
+# The server binds loopback and speaks plain HTTP: exe.dev terminates TLS at the
+# proxy, so a certificate on the VM would be a second thing to obtain and rotate
+# for no gain. The web client derives its own `wss://` URL from window.location,
+# so it needs no telling that it is behind a terminator.
+#
+# Two independent gates sit in front of this, and both are load-bearing. The
+# exe.dev proxy is private by default, so an unauthenticated request is bounced
+# to an exe.dev login. Zellij then wants its own token, minted per box with
+# `zellij web --create-token` and shown exactly once. Do not `share set-public`
+# this port: that would drop the first gate and leave an interactive shell behind
+# nothing but the token.
+function do_zellij_web() {
+  local units=~/.config/systemd/user
+
+  "$BASEDIR/bin/is-dev-box" || return 0
+
+  use_user_bus
+
+  log "Serving the work session over HTTPS..."
+
+  mkdir -p "$units"
+
+  # A daemon rather than a converge job, so like port-atlas there is no timer.
+  # Restarting it is safe at any time: sessions live in their own processes and
+  # outlive this one, which only brokers connections to them.
+  cat > "$units/zellij-web.service" << 'EOF'
+[Unit]
+Description=Serve zellij sessions over the exe.dev HTTPS proxy
+
+[Service]
+ExecStart=%h/.local/share/mise/shims/zellij web
+Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=ZELLIJ_SOCKET_DIR=/tmp/zellij-%U
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+  systemctl --user daemon-reload
+  systemctl --user enable zellij-web.service
+
+  # Unconditionally, for the same reason as port-atlas: the file above may have
+  # changed under a running server, and there is no work in flight to preserve.
+  systemctl --user restart zellij-web.service
+}
+
 do_config
 
 . "$HOME/.commonrc-pre"
@@ -266,3 +374,5 @@ do_brew
 do_mise
 do_cloister
 do_port_atlas
+do_zellij_session
+do_zellij_web

@@ -16,25 +16,66 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 - **`bin/`** — Scripts added to PATH via `dotfiles/bin`; add any executable scripts here and they will be available in the shell (e.g., for Claude Code hooks)
 
 Systemd user units are the exception to `config/`. `install.sh` writes
-`cloister-codex.{service,timer}` and `port-atlas.service` into
+`cloister-codex.{service,timer}`, `port-atlas.service`,
+`zellij-session.service`, and `zellij-web.service` into
 `~/.config/systemd/user/` rather than symlinking them from here, because a unit
 has to name the absolute path of the clone it was installed from, and only
 `install.sh` knows where that is. The same directory is where
 `claude-scriptorium` writes the codex service it manages itself, so symlinking
 the tree in would point that tool's writes at this repo.
 
-Both of those are for a person to look at, so both are gated on `is-dev-box`
+All of those are for a person to look at, so all are gated on `is-dev-box`
 rather than `is-exe-dev`: a VM running a workload has nobody reading its session
 archive and no reason to spend its proxied ports on an index of itself. It reads
 the same `dev-box` tag `exe-dev create-devbox` sets at creation, which is what
-keeps a bot-box running `install.sh` on its timer from installing either one.
+keeps a bot-box running `install.sh` on its timer from installing any of them.
 Reading it back through reflection rather than off the disk is what lets a box
 change its mind (`exe-dev lobby tag <vm> dev-box`) without being rebuilt.
+
+They all depend on `Linger=yes` for the account, without which the user manager
+starts at first login instead of at boot and every one of them waits for a
+connection that the box exists to not need. Nothing here sets it; it comes with
+the exeuntu image.
 
 exe.dev proxies one port per VM to the bare `https://<vm>.exe.xyz/` hostname and
 forwards 3000-9999 to `https://<vm>.exe.xyz:<port>/`. `port-atlas` takes the bare
 hostname's port so the front door is an index of everything else listening, and
 the codex moves to 3000 to become its first entry, the atlas sorting by port.
+
+## The Work Session
+
+A dev box holds one long-lived zellij session named after its short hostname.
+`zellij-session.service` creates it at boot and `start_zellij_session` attaches
+each login to it, which is the whole of the split: the unit owns whether the
+session exists, the shell owns joining it. Creating it from the login shell
+instead would tie its existence to somebody having connected, so a reboot would
+quietly discard it until the next login.
+
+`zellij-web.service` then serves that session at
+`https://<vm>.exe.xyz:8082/<session>`, which needs `web_sharing "on"` in
+`config/zellij/config.kdl`: the web server serves sessions it created itself
+whatever that setting says, and the work session is created outside it.
+
+Three details are worth knowing before touching any of this.
+
+Zellij keys its session sockets off `$XDG_RUNTIME_DIR` and falls back to
+`/tmp/zellij-$UID` when it is unset. A systemd user unit always has it and sshd
+here never does, so the unit and the logins it exists to serve build two separate
+sessions of the same name unless both pin `ZELLIJ_SOCKET_DIR`. Both do.
+
+`zellij attach --create-background` is the only way to make a session with no
+controlling terminal, and it exits 1 with "Session already exists" rather than
+succeeding as a no-op, hence `SuccessExitStatus=1`. A real failure panics and
+exits 101, so tolerating 1 does not hide one.
+
+The session outlives the unit: `stop` and `restart` both leave it running, and
+`install.sh` only ever `enable --now`s it. Deleting a session is
+`zellij delete-session`, never `systemctl`.
+
+The token that gets you into the web client is minted per box with
+`zellij web --create-token`, displayed once, and hashed into
+`~/.local/share/zellij/tokens.db`. Nothing in this repo can provision it, so it
+is a manual step per box.
 
 `bin/exe-dev` writes units there too, from the setup script `create-botbox`
 sends: a bot-box has nobody to run the installer on it, so it gets a timer that

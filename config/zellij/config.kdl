@@ -3,6 +3,12 @@
 
 show_startup_tips false
 
+// Sessions are created outside the web server, by the zellij-session unit at
+// boot and by a login shell everywhere else. The default "off" only serves
+// sessions the web server created itself, which is none of them, so the browser
+// would show an empty list on a box with a session running in front of it.
+web_sharing "on"
+
 keybinds {
     // Quit tears the session down along with everything running in it, and
     // recovery isn't guaranteed: a short-lived session that exits can vanish
