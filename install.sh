@@ -365,6 +365,54 @@ EOF
   systemctl --user restart zellij-web.service
 }
 
+# Serves VS Code in the browser at `https://<vm>.exe.xyz:3001/`, alongside the
+# Remote-SSH path rather than instead of it. The two differ in where the
+# workbench runs, and that decides where its settings come from: Remote-SSH runs
+# it on the laptop and picks up the settings already there, while this runs it
+# here and keeps them in the browser's own storage, which is why it needs
+# Settings Sync signed in per browser and the desktop path does not.
+function do_vscode_web() {
+  local units=~/.config/systemd/user
+
+  "$BASEDIR/bin/is-dev-box" || return 0
+
+  use_user_bus
+
+  log "Serving VS Code over HTTPS..."
+
+  mkdir -p "$units"
+
+  # No connection token, matching the codex and the atlas: the server binds
+  # loopback and the exe.dev proxy is private, so the only way to it is through
+  # an exe.dev login or a tunnel by someone who already has a shell. A token
+  # would also have to ride in the query string, which would break the plain
+  # `:3001/` link the atlas offers.
+  #
+  # This one does hand out a terminal, so unlike those two it is a shell. Never
+  # `share set-public` this port. Only one port per VM can be public and the
+  # atlas holds it, so that would take deliberately dislodging the atlas first.
+  cat > "$units/vscode-web.service" << 'EOF'
+[Unit]
+Description=Serve VS Code in the browser over the exe.dev HTTPS proxy
+
+[Service]
+ExecStart=%h/.local/share/mise/shims/code serve-web --host 127.0.0.1 --port 3001 --without-connection-token --accept-server-license-terms
+Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+  systemctl --user daemon-reload
+  systemctl --user enable vscode-web.service
+
+  # Unconditionally, for the same reason as the others. Editor state lives in the
+  # browser and on disk rather than in this process, so a restart costs a reload.
+  systemctl --user restart vscode-web.service
+}
+
 do_config
 
 . "$HOME/.commonrc-pre"
@@ -378,3 +426,4 @@ do_cloister
 do_exe_dev_atlas
 do_zellij_session
 do_zellij_web
+do_vscode_web

@@ -42,10 +42,10 @@ TOOL="github:JoshKarpel/claude-scriptorium"
 #
 # Off 8000, which exe-dev-atlas holds because that is the port the bare
 # `https://<vm>.exe.xyz/` hostname is proxied to. The codex is one of the things
-# the atlas indexes, reached at `https://<vm>.exe.xyz:3001/` like anything else.
+# the atlas indexes, reached at `https://<vm>.exe.xyz:4000/` like anything else.
 #
-# Near the bottom of the forwarded range, so the atlas (which sorts by port)
-# lists it second, behind the work session on 3000. The cost is claiming another
-# low port at boot, which is where a bare `next dev` or `rails s` would land, so
-# those have to be told to bind elsewhere.
-"$("$MISE" which claude-scriptorium)" cloister install --port 3001
+# 4000 rather than a port adjacent to the work session on 3000: the atlas sorts
+# by port, so the 3000s are the top of the index and are worth leaving free for
+# whatever a person is actually working on. A long-lived service that is only
+# occasionally opened does not need to outrank them.
+"$("$MISE" which claude-scriptorium)" cloister install --port 4000

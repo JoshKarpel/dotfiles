@@ -17,7 +17,7 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 
 Systemd user units are the exception to `config/`. `install.sh` writes
 `cloister-codex.{service,timer}`, `exe-dev-atlas.service`,
-`zellij-session.service`, and `zellij-web.service` into
+`zellij-session.service`, `zellij-web.service`, and `vscode-web.service` into
 `~/.config/systemd/user/` rather than symlinking them from here, because a unit
 has to name the absolute path of the clone it was installed from, and only
 `install.sh` knows where that is. The same directory is where
@@ -41,8 +41,9 @@ exe.dev proxies one port per VM to the bare `https://<vm>.exe.xyz/` hostname and
 forwards 3000-9999 to `https://<vm>.exe.xyz:<port>/`. `exe-dev-atlas` takes the
 bare hostname's port so the front door is an index of everything else. The
 atlas sorts by port, so the bottom of the forwarded range is the top of the
-index: the work session takes 3000 and the codex 3001, putting the two things
-worth opening first ahead of whatever a dev server later binds.
+index, and the two ways in to the box take it: the work session on 3000 and VS
+Code on 3001. A dev server lands wherever it lands above those, and services that
+are only occasionally opened start at 4000, where the codex is.
 
 ## The Work Session
 
@@ -61,15 +62,27 @@ whatever that setting says, and the work session is created outside it.
 `exe-dev-atlas` links each session directly and deliberately does not link the port
 itself: arriving at a zellij web server without a session named in the path
 creates a new one, so a link to its root would leave an empty session behind on
-every visit. Session names, and the VS Code links to each checkout under
-`~/projects`, go only to the VM's owner, comparing the `X-ExeDev-Email` the
-exe.dev proxy injects (which overwrites whatever the client sent) against the
-owner address from reflection. Both are project names and the atlas is reachable
-by anyone the VM is shared with, so the default is to withhold: an
-unauthenticated caller and a failed reflection lookup both produce an empty
-string, and the check requires both sides non-empty rather than letting those
-compare equal. Following the VM's actual sharing grants would be better, but
-reflection does not publish them.
+every visit. Session names, and the Remote-SSH link to the VM, go only to its
+owner, comparing the `X-ExeDev-Email` the exe.dev proxy injects (which overwrites
+whatever the client sent) against the owner address from reflection. A session
+name is often a project name and the atlas is reachable by anyone the VM is
+shared with, so the default is to withhold: an unauthenticated caller and a
+failed reflection lookup both produce an empty string, and the check requires
+both sides non-empty rather than letting those compare equal. Following the VM's
+actual sharing grants would be better, but reflection does not publish them.
+
+That link opens the home directory rather than no directory. A `vscode://` URL
+with no path resolves to `/` rather than to a folderless window, so the choice is
+home or the whole filesystem, not home or nothing (microsoft/vscode#232345).
+
+`vscode-web.service` is the other half of that: `code serve-web` on 3001, kept
+alongside the Remote-SSH link rather than replacing it. The two differ in where
+the workbench runs, which decides where its settings come from. Remote-SSH runs
+it on the laptop and inherits the settings already there. `serve-web` runs it
+here and keeps user settings in the browser's IndexedDB rather than on disk, so a
+`settings.json` on the box is not read and Settings Sync has to be signed in per
+browser. The CLI comes from mise rather than the copy Remote-SSH pushes to
+`~/.vscode-server/code-<commit>`, whose path moves with every VS Code update.
 
 Three details are worth knowing before touching any of this.
 

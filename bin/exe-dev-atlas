@@ -13,8 +13,8 @@ exe.dev forwards ports 3000-9999 to `https://<vm>.exe.xyz:<port>/` with no
 configuration, so a dev server started on one already has a URL. What it has no
 way to tell you is which ports are live and what is on them. This serves that
 list, on the port the bare hostname points at, so `https://<vm>.exe.xyz/` is a
-launcher for everything else on the box, alongside the zellij sessions and VS
-Code workspaces that have no port of their own.
+launcher for everything else on the box, alongside the zellij sessions that have
+no port of their own.
 
 Written for exe.dev and not portable off it: the proxy's port range, its
 authentication headers, and the reflection integration are all assumed.
@@ -80,18 +80,19 @@ OWNER_URL = "https://reflection.int.exe.xyz/email"
 REFLECTION_URL = "https://reflection.int.exe.xyz/"
 OWNER_TIMEOUT_SECONDS = 5.0
 
-# What VS Code's Remote-SSH opens, the same form the exe.dev dashboard links.
-# The VM name comes from reflection rather than the browser's location, because
-# unlike every other link on this page it names a host to SSH to rather than one
-# to fetch from: reached through a tunnel, `location.hostname` is `localhost`,
-# which is the one machine this must not point at.
+# What VS Code's Remote-SSH opens. The VM name comes from reflection rather than
+# the browser's location, because unlike every other link on this page it names a
+# host to SSH to rather than one to fetch from: reached through a tunnel,
+# `location.hostname` is `localhost`, which is the one machine this must not
+# point at.
+#
+# The path names the folder to open, and there is no way to say "open none": a
+# URL with no path resolves to `/` rather than to a folderless window, so
+# omitting it trades the home directory for the whole filesystem. Only the CLI
+# (`code --remote ssh-remote+<host>`) can open an empty remote window, and a
+# clickable link cannot reach it. See microsoft/vscode#232345.
 VSCODE_URL = "vscode://vscode-remote/ssh-remote+{host}{directory}?windowId=_blank"
 VM_SUFFIX = ".exe.xyz"
-
-# Workspaces offered alongside the home directory. Shallow on purpose: one level
-# down is a checkout, two levels down is a subdirectory of one, and opening the
-# latter as a workspace loses the repo the editor is meant to be looking at.
-PROJECTS_DIRECTORY = "projects"
 
 # The proxy sets this from the exe.dev session and overwrites whatever the client
 # sent, so a forged value does not survive the hop. It is absent entirely when the
@@ -223,27 +224,14 @@ def vscode_url(vm_name: str, directory: str) -> str:
     return VSCODE_URL.format(host=f"{vm_name}{VM_SUFFIX}", directory=directory)
 
 
-def read_workspaces(vm_name: str) -> list[dict[str, str]]:
-    """Home, then each checkout under it, as VS Code workspace links.
+def read_home_workspace(vm_name: str) -> str:
+    """A VS Code Remote-SSH link to this VM's home directory.
 
-    Rebuilt every scan rather than at startup so a repo cloned while the page is
-    open shows up, which is the same liveness the port list already offers.
+    Home only, and no walk of what is under it: a VS Code window has its own file
+    picker, so enumerating checkouts here would be this program guessing at a
+    directory layout to duplicate a feature the editor already ships.
     """
-    home = pwd.getpwuid(os.getuid()).pw_dir
-    workspaces = [{"name": "home", "url": vscode_url(vm_name, home)}]
-
-    root = os.path.join(home, PROJECTS_DIRECTORY)
-    try:
-        entries = sorted(os.scandir(root), key=lambda entry: entry.name)
-    except OSError:
-        return workspaces
-
-    workspaces.extend(
-        {"name": entry.name, "url": vscode_url(vm_name, entry.path)}
-        for entry in entries
-        if not entry.name.startswith(".") and entry.is_dir()
-    )
-    return workspaces
+    return vscode_url(vm_name, pwd.getpwuid(os.getuid()).pw_dir)
 
 
 def read_zellij_sessions(row: Row) -> tuple[str, ...]:
@@ -554,10 +542,9 @@ def scan_forever(broadcast: Broadcast, own_port: int, vm: Vm) -> None:
             else row_dict
             for row, row_dict in zip(rows, public)
         ]
-        # Workspaces are owner-only for the same reason session names are: a
-        # checkout name is a project name. Ideally this would follow the VM's
-        # sharing grants, but reflection does not publish them, so ownership is
-        # the only distinction available to draw.
+        # Owner-only: the link only works for someone with SSH access anyway, and
+        # ideally this would follow the VM's sharing grants, but reflection does
+        # not publish them, so ownership is the only distinction available.
         # Name and emoji are not owner-only: the name is already in the URL of
         # whoever is reading, and together they title and badge the tab for
         # everyone.
@@ -565,7 +552,7 @@ def scan_forever(broadcast: Broadcast, own_port: int, vm: Vm) -> None:
         broadcast.publish(
             json.dumps(common | {"rows": public}, sort_keys=True),
             json.dumps(
-                common | {"rows": owner, "workspaces": read_workspaces(vm.name)},
+                common | {"rows": owner, "vscode_url": read_home_workspace(vm.name)},
                 sort_keys=True,
             ),
         )
@@ -604,10 +591,6 @@ h1 { font-size: 1.15rem; margin: 0; font-weight: 600; letter-spacing: -.01em; }
 #workspaces {
   display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem;
   margin-bottom: .9rem;
-}
-#workspaces .label {
-  font-size: .72rem; color: var(--dim); text-transform: uppercase;
-  letter-spacing: .05em; margin-right: .2rem;
 }
 .workspace {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .76rem;
@@ -755,21 +738,14 @@ function render(payload) {
 
   // Absent for anyone but the owner, and off exe.dev, where there is no
   // <vm>.exe.xyz for Remote-SSH to reach.
-  const places = (payload.workspaces || []).filter((place) => place.url);
-  workspaces.hidden = places.length === 0;
+  workspaces.hidden = !payload.vscode_url;
   workspaces.innerHTML = "";
-  if (places.length) {
-    const label = document.createElement("span");
-    label.className = "label";
-    label.textContent = "VS Code";
-    workspaces.appendChild(label);
-    places.forEach((place) => {
-      const link = document.createElement("a");
-      link.className = "workspace";
-      link.href = place.url;
-      link.textContent = place.name;
-      workspaces.appendChild(link);
-    });
+  if (payload.vscode_url) {
+    const link = document.createElement("a");
+    link.className = "workspace";
+    link.href = payload.vscode_url;
+    link.textContent = "open in VS Code";
+    workspaces.appendChild(link);
   }
   openable = [];
   const keep = new Set();
