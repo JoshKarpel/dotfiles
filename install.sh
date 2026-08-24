@@ -145,7 +145,6 @@ function do_mise() {
 
   "$HOME/.local/bin/mise" install
   "$HOME/.local/bin/mise" upgrade
-  "$HOME/.local/bin/mise" prune --yes
 }
 
 # `systemctl --user` finds its manager through XDG_RUNTIME_DIR, which a login

@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
-# Reclaim disk by pruning the caches of every tool installed on this machine.
-# `update` runs this after install.sh; it is also safe to run by hand.
+# Reclaim disk by removing what the tools installed on this machine can get back
+# on their own. `update` runs this after install.sh; it is also safe to run by hand.
 #
 # Every step is user-level, so this never asks for a password. apt and brew are
 # the two caches deliberately absent: install.sh already runs those package
 # managers under sudo, and clearing their archives belongs in that phase rather
 # than dragging root into this one.
 #
-# Everything removed here is a cache: the tool rebuilds or re-downloads it on
-# next use. What that costs varies from seconds (cargo re-extracting sources it
-# still has archived) to a gigabyte of download (the browser bundles), so each
-# step below says which it is where the answer isn't obvious.
+# Nothing removed here is authoritative: the tool rebuilds, re-downloads, or
+# re-installs it on next use. Most of it is a cache; the exceptions are the tool
+# versions no config names any more and the server builds no editor reaches for,
+# which are installed artifacts rather than cached ones. What the loss costs
+# varies from seconds (cargo re-extracting sources it still has archived) to a
+# gigabyte of download (the browser bundles), so each step below says which it is
+# where the answer isn't obvious.
 #
 # `set -e` is deliberately absent: one tool's prune failing, because its daemon
 # isn't running or another process holds its cache, must not skip every prune
@@ -68,6 +71,42 @@ function prune_cargo() {
   rm -rf "$CARGO_HOME"/registry/{cache,src} "$CARGO_HOME"/git/checkouts
 }
 
+# Two things behind one name. `prune` drops tool versions no longer named by any
+# config mise has seen, which it reads from ~/.local/state/mise/tracked-configs
+# rather than from the working directory, so it prunes the same set wherever it
+# runs. `cache prune` drops the separate cache of downloads and remote-version
+# lookups. Only the first costs a re-download, and only if a config later names
+# that version again.
+function prune_mise() {
+  mise prune --yes && mise cache prune
+}
+
+# The CLI downloads a server build per VS Code client commit and never removes an
+# old one, so these accumulate at ~700M each. `lru.json` is the CLI's own record
+# of the builds it still tracks; one missing from that list is not reached for
+# again. The running-process check is a safety net rather than the policy:
+# deleting the tree under a live server breaks the editor session attached to it,
+# which is not a cost the next connect can undo. Without pgrep there is no way to
+# establish that, so the whole step fails rather than guessing.
+function prune_vscode_servers() {
+  local servers="$HOME/.vscode-server/cli/servers"
+
+  [[ -d $servers ]] || return 0
+  have pgrep || return 1
+
+  local dir name
+  for dir in "$servers"/*/; do
+    [[ -d $dir ]] || continue
+
+    name=$(basename "$dir")
+    grep -qF "\"$name\"" "$servers/lru.json" 2> /dev/null && continue
+    pgrep -f "$dir" > /dev/null 2>&1 && continue
+
+    echo "  removing $name"
+    rm -rf "$dir"
+  done
+}
+
 # Neither tool prunes to just the current revision. Playwright's `uninstall
 # --all` and `npx @puppeteer/browsers clear` each remove everything, and
 # puppeteer's has to fetch its CLI over the network to do it, so removing the
@@ -79,9 +118,7 @@ function prune_browser_bundles() {
 
 before=$(available_kb)
 
-# Tool versions no longer named by any config are install.sh's `mise prune`;
-# this is the separate cache of downloads and remote-version lookups.
-have mise && step "Pruning mise cache..." mise cache prune
+have mise && step "Pruning mise..." prune_mise
 
 # Hook environments for repos and revisions no longer referenced by any
 # .pre-commit-config.yaml this machine has run.
@@ -109,6 +146,8 @@ have docker && step "Pruning docker..." docker system prune --all --volumes --fo
 have podman && step "Pruning podman..." podman system prune --all --volumes --force
 
 step "Removing browser bundles..." prune_browser_bundles
+
+step "Removing dead VS Code servers..." prune_vscode_servers
 
 after=$(available_kb)
 

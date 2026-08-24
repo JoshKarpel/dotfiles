@@ -69,8 +69,8 @@ can just use the name.
 # Run pre-commit hooks manually
 pre-commit run
 
-# Prune every installed tool's cache to reclaim disk. `update` runs this after
-# install.sh; run it by hand to reclaim now.
+# Reclaim disk by removing what installed tools can re-download or rebuild.
+# `update` runs this after install.sh; run it by hand to reclaim now.
 tidy
 
 # Count Claude tokens in files/dirs via the Anthropic count_tokens API
