@@ -6,8 +6,7 @@
 #   . "$HOME/.commonrc-post" bash
 #
 # This can't fold into commonrc-pre, which runs too early: mise has to activate
-# before anything can find a mise-installed tool on PATH, and the zellij
-# handoff has to come after everything because it replaces the shell.
+# before anything can find a mise-installed tool on PATH.
 #
 # The shell name is passed in rather than detected: each rc file already knows
 # which shell it is, so injecting it keeps this file free of any dependency on
@@ -60,8 +59,9 @@ unset prefix gnubin
 
 . "$HOME/.cargo/env"
 
-# Keep last: on exe.dev VMs this execs zellij, replacing the shell, so anything
-# below it would never run. Defined in sources/exe.sh, absent everywhere else.
-if exists start_zellij_session; then
-  start_zellij_session
+# Keep last: this reports work that is already lost, so it wants to be the final
+# thing on screen before the prompt rather than scrolled off by the rest of
+# startup. Defined in sources/zellij.sh, and silent unless something is stranded.
+if [[ $- == *i* ]]; then
+  warn_stranded_zellij_servers
 fi

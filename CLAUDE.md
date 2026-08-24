@@ -48,11 +48,16 @@ are only occasionally opened start at 4000, where the codex is.
 ## The Work Session
 
 A dev box holds one long-lived zellij session named after its short hostname.
-`zellij-session.service` creates it at boot and `start_zellij_session` attaches
-each login to it, which is the whole of the split: the unit owns whether the
-session exists, the shell owns joining it. Creating it from the login shell
-instead would tie its existence to somebody having connected, so a reboot would
-quietly discard it until the next login.
+`zellij-session.service` creates it at boot, which is what makes it outlive the
+last logout rather than only the last dropped connection. Creating it from the
+login shell instead would tie its existence to somebody having connected, so a
+reboot would quietly discard it until the next login.
+
+Joining it is a deliberate act, never a side effect of a shell starting: `za`
+(`sources/zellij.sh`) from a terminal, or the atlas link to the web client. A
+login lands at a plain prompt, so a tool that opens a shell for its own purposes
+(VS Code resolving its environment, an editor terminal) gets a shell rather than
+a client attached to the session someone is looking at elsewhere.
 
 `zellij-web.service` then serves that session at
 `https://<vm>.exe.xyz:3000/<session>`, which needs `web_sharing "on"` in
@@ -91,15 +96,17 @@ Zellij keys its session sockets off `$XDG_RUNTIME_DIR` and falls back to
 here never does, so the unit and the logins it exists to serve build two separate
 sessions of the same name unless both pin `ZELLIJ_SOCKET_DIR`. Both do.
 
-A server the login cannot see through that socket directory may as well not
+A server the shell cannot see through that socket directory may as well not
 exist: `attach --create` builds a second session of the same name beside it and
 nothing about the result looks wrong. Zellij covers the ordinary case itself,
 declining to clobber a live server whose socket is on disk even when that server
 is too busy to answer, so what is left is the server whose socket was unlinked
 under it and the server started against a different directory. Neither is
 recoverable, since an unlinked socket cannot be relinked and the panes live in
-the server's memory, so `warn_stranded_zellij_servers` reports them at login
-rather than letting the loss pass silently.
+the server's memory, so `warn_stranded_zellij_servers` reports them rather than
+letting the loss pass silently. It runs at the end of login rather than inside
+`za`, where the message would be wiped by zellij taking the terminal, and it is
+what makes the warning readable at all: a prompt holds it on screen.
 
 `zellij attach --create-background` is the only way to make a session with no
 controlling terminal, and it exits 1 with "Session already exists" rather than
@@ -126,13 +133,12 @@ afterwards.
 
 `bashrc`/`zshrc` → `~/.commonrc-pre` (sources every file in `sources/`, adds `bin/`
 to PATH) → shell-specific setup → `~/.commonrc-post <shell>` (tool, prompt, and
-completion integrations, late PATH overrides, then `start_zellij_session`)
+completion integrations, late PATH overrides, then the stranded-server warning)
 
 The split exists because the two ends of startup have different constraints.
 `commonrc-pre` runs early, before mise puts its tools on PATH. `commonrc-post` runs
 last and takes the shell's name as an argument, since everything in it is either
-shell-parameterised or has to come after the rest of startup: `start_zellij_session`
-`exec`s zellij on exe.dev VMs, so nothing after it would run.
+shell-parameterised or has to come after the rest of startup.
 
 Within `commonrc-pre`, `sources/` loads before `bin/` joins PATH, so a file there
 reaches a bin script only by absolute path through `$DOTFILES` (`sources/exe.sh`

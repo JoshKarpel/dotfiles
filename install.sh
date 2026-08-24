@@ -272,10 +272,10 @@ EOF
 # 101, so tolerating 1 does not swallow one.
 #
 # Note that it returns before the session registers, so nothing may order itself
-# after this unit expecting the session to be there. Logins handle that race by
-# running `attach --create` rather than a bare `attach`.
+# after this unit expecting the session to be there. The `za` function handles
+# that race by running `attach --create` rather than a bare `attach`.
 #
-# %l is the short hostname, matching what start_zellij_session computes, so the
+# %l is the short hostname, matching what sources/zellij.sh computes, so the
 # unit names no box and survives a rename.
 #
 # ZELLIJ_SOCKET_DIR is pinned to the same path sources/exe.sh pins, and for the
