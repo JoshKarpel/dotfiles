@@ -210,17 +210,17 @@ EOF
   "$BASEDIR/bin/cloister-codex"
 }
 
-# Runs bin/port-atlas on 8000, the port the bare `https://<vm>.exe.xyz/` hostname
-# is proxied to, so the box's front door is an index of everything else listening
-# on a proxied port rather than any one of those things.
-function do_port_atlas() {
+# Runs bin/exe-dev-atlas on 8000, the port the bare `https://<vm>.exe.xyz/`
+# hostname is proxied to, so the box's front door is an index of everything else
+# worth opening rather than any one of those things.
+function do_exe_dev_atlas() {
   local units=~/.config/systemd/user
 
   "$BASEDIR/bin/is-dev-box" || return 0
 
   use_user_bus
 
-  log "Serving the port atlas..."
+  log "Serving the atlas..."
 
   mkdir -p "$units"
 
@@ -232,12 +232,12 @@ function do_port_atlas() {
   # Restart=always covers the scan thread dying on a kernel interface that
   # answered differently than it used to; there is nothing to lose by starting
   # over, and a box whose front door 502s is one nobody can navigate.
-  cat > "$units/port-atlas.service" << EOF
+  cat > "$units/exe-dev-atlas.service" << EOF
 [Unit]
-Description=Index this machine's proxied ports on the default hostname
+Description=Index this VM's ports, sessions, and workspaces on the default hostname
 
 [Service]
-ExecStart=$BASEDIR/bin/port-atlas
+ExecStart=$BASEDIR/bin/exe-dev-atlas
 Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Restart=always
 RestartSec=5
@@ -247,12 +247,12 @@ WantedBy=default.target
 EOF
 
   systemctl --user daemon-reload
-  systemctl --user enable port-atlas.service
+  systemctl --user enable exe-dev-atlas.service
 
   # Unconditionally, rather than `enable --now`: the file above may have changed
   # under a service that is already running, and a daemon this cheap to start has
   # no work in flight worth preserving.
-  systemctl --user restart port-atlas.service
+  systemctl --user restart exe-dev-atlas.service
 }
 
 # Owns the box's work session, so that it exists because the box is up rather
@@ -339,7 +339,7 @@ function do_zellij_web() {
 
   mkdir -p "$units"
 
-  # A daemon rather than a converge job, so like port-atlas there is no timer.
+  # A daemon rather than a converge job, so like the atlas there is no timer.
   # Restarting it is safe at any time: sessions live in their own processes and
   # outlive this one, which only brokers connections to them.
   cat > "$units/zellij-web.service" << 'EOF'
@@ -360,7 +360,7 @@ EOF
   systemctl --user daemon-reload
   systemctl --user enable zellij-web.service
 
-  # Unconditionally, for the same reason as port-atlas: the file above may have
+  # Unconditionally, for the same reason as the atlas: the file above may have
   # changed under a running server, and there is no work in flight to preserve.
   systemctl --user restart zellij-web.service
 }
@@ -375,6 +375,6 @@ do_locale
 do_brew
 do_mise
 do_cloister
-do_port_atlas
+do_exe_dev_atlas
 do_zellij_session
 do_zellij_web

@@ -7,13 +7,17 @@
 # one, so a service that never exits blocks every prune on the machine forever.
 # There are no dependencies to download, so the cost is rebuilding a bare venv on
 # each start.
-"""Serve an index of everything listening on this machine's proxied ports.
+"""Serve a front door for this exe.dev VM: what is listening, and what to open.
 
 exe.dev forwards ports 3000-9999 to `https://<vm>.exe.xyz:<port>/` with no
 configuration, so a dev server started on one already has a URL. What it has no
 way to tell you is which ports are live and what is on them. This serves that
 list, on the port the bare hostname points at, so `https://<vm>.exe.xyz/` is a
-launcher for everything else on the box.
+launcher for everything else on the box, alongside the zellij sessions and VS
+Code workspaces that have no port of their own.
+
+Written for exe.dev and not portable off it: the proxy's port range, its
+authentication headers, and the reflection integration are all assumed.
 
 Listeners are found by polling, because the kernel offers no other way: netlink's
 inet_diag answers a query rather than announcing a new socket, and /proc/net/tcp
@@ -83,6 +87,11 @@ OWNER_TIMEOUT_SECONDS = 5.0
 # which is the one machine this must not point at.
 VSCODE_URL = "vscode://vscode-remote/ssh-remote+{host}{directory}?windowId=_blank"
 VM_SUFFIX = ".exe.xyz"
+
+# Workspaces offered alongside the home directory. Shallow on purpose: one level
+# down is a checkout, two levels down is a subdirectory of one, and opening the
+# latter as a workspace loses the repo the editor is meant to be looking at.
+PROJECTS_DIRECTORY = "projects"
 
 # The proxy sets this from the exe.dev session and overwrites whatever the client
 # sent, so a forged value does not survive the hop. It is absent entirely when the
@@ -183,23 +192,58 @@ def read_owner_email() -> str:
         return ""
 
 
-def read_vscode_url() -> str:
-    """A VS Code Remote-SSH link to this VM's home, or "" off exe.dev.
+@dataclass(frozen=True)
+class Vm:
+    """How this machine identifies itself, per exe.dev's reflection integration."""
 
-    Empty is the honest answer anywhere reflection does not resolve: a laptop
-    running this has no `<vm>.exe.xyz` to hand VS Code, and an empty string
-    renders as no link rather than as a broken one.
+    name: str
+    emoji: str
+
+
+def read_vm() -> Vm:
+    """This VM's name and emoji, or empty strings if reflection did not answer.
+
+    Empty is the honest answer rather than a guess: the page falls back to
+    whatever hostname the browser used, keeps the built-in favicon, and offers no
+    VS Code links, since Remote-SSH would have no host to reach.
     """
     try:
         with urllib.request.urlopen(REFLECTION_URL, timeout=OWNER_TIMEOUT_SECONDS) as response:
-            name = str(json.load(response).get("name") or "")
+            published = json.load(response)
     except (urllib.error.URLError, OSError, ValueError):
-        return ""
+        return Vm(name="", emoji="")
 
-    if not name:
-        return ""
+    return Vm(name=str(published.get("name") or ""), emoji=str(published.get("emoji") or ""))
 
-    return VSCODE_URL.format(host=f"{name}{VM_SUFFIX}", directory=pwd.getpwuid(os.getuid()).pw_dir)
+
+def vscode_url(vm_name: str, directory: str) -> str:
+    """A VS Code Remote-SSH workspace link, or "" when there is no VM to name."""
+    if not vm_name:
+        return ""
+    return VSCODE_URL.format(host=f"{vm_name}{VM_SUFFIX}", directory=directory)
+
+
+def read_workspaces(vm_name: str) -> list[dict[str, str]]:
+    """Home, then each checkout under it, as VS Code workspace links.
+
+    Rebuilt every scan rather than at startup so a repo cloned while the page is
+    open shows up, which is the same liveness the port list already offers.
+    """
+    home = pwd.getpwuid(os.getuid()).pw_dir
+    workspaces = [{"name": "home", "url": vscode_url(vm_name, home)}]
+
+    root = os.path.join(home, PROJECTS_DIRECTORY)
+    try:
+        entries = sorted(os.scandir(root), key=lambda entry: entry.name)
+    except OSError:
+        return workspaces
+
+    workspaces.extend(
+        {"name": entry.name, "url": vscode_url(vm_name, entry.path)}
+        for entry in entries
+        if not entry.name.startswith(".") and entry.is_dir()
+    )
+    return workspaces
 
 
 def read_zellij_sessions(row: Row) -> tuple[str, ...]:
@@ -331,7 +375,7 @@ def probe_port(port: int) -> Probe:
     """Ask a port for a page, to tell a web server from a database socket."""
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}/",
-        headers={"User-Agent": "port-atlas", "Accept": "text/html"},
+        headers={"User-Agent": "exe-dev-atlas", "Accept": "text/html"},
     )
     now = time.time()
     try:
@@ -485,7 +529,7 @@ class Broadcast:
             return self._version, (self._owner if is_owner else self._public)
 
 
-def scan_forever(broadcast: Broadcast, own_port: int, vscode_url: str) -> None:
+def scan_forever(broadcast: Broadcast, own_port: int, vm: Vm) -> None:
     """Rescan, and publish whenever the result differs from the last one.
 
     A probe finishing does not push on its own: it lands in the cache and the
@@ -510,10 +554,20 @@ def scan_forever(broadcast: Broadcast, own_port: int, vscode_url: str) -> None:
             else row_dict
             for row, row_dict in zip(rows, public)
         ]
-        common = {"own_port": own_port, "vscode_url": vscode_url}
+        # Workspaces are owner-only for the same reason session names are: a
+        # checkout name is a project name. Ideally this would follow the VM's
+        # sharing grants, but reflection does not publish them, so ownership is
+        # the only distinction available to draw.
+        # Name and emoji are not owner-only: the name is already in the URL of
+        # whoever is reading, and together they title and badge the tab for
+        # everyone.
+        common = {"own_port": own_port, "vm_name": vm.name, "vm_emoji": vm.emoji}
         broadcast.publish(
             json.dumps(common | {"rows": public}, sort_keys=True),
-            json.dumps(common | {"rows": owner}, sort_keys=True),
+            json.dumps(
+                common | {"rows": owner, "workspaces": read_workspaces(vm.name)},
+                sort_keys=True,
+            ),
         )
         time.sleep(SCAN_INTERVAL_SECONDS)
 
@@ -523,7 +577,9 @@ PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ports</title>
+<title>Atlas</title>
+<link id="favicon" rel="icon" href="data:,">
+
 <style>
 :root {
   color-scheme: light dark;
@@ -545,11 +601,20 @@ main { max-width: 62rem; margin: 0 auto; }
 header { display: flex; align-items: baseline; gap: .75rem; margin-bottom: 1.25rem; }
 h1 { font-size: 1.15rem; margin: 0; font-weight: 600; letter-spacing: -.01em; }
 #host { color: var(--dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
-#vscode {
-  font-size: .76rem; color: var(--accent); text-decoration: none;
-  border: 1px solid var(--line); border-radius: 5px; padding: .1rem .45rem;
+#workspaces {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem;
+  margin-bottom: .9rem;
 }
-#vscode:hover { border-color: var(--accent); }
+#workspaces .label {
+  font-size: .72rem; color: var(--dim); text-transform: uppercase;
+  letter-spacing: .05em; margin-right: .2rem;
+}
+.workspace {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .76rem;
+  color: var(--accent); text-decoration: none; background: var(--card);
+  border: 1px solid var(--line); border-radius: 5px; padding: .12rem .45rem;
+}
+.workspace:hover { border-color: var(--accent); }
 #state { margin-left: auto; font-size: .78rem; color: var(--dim); }
 #state.stale { color: #c2622f; }
 ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
@@ -611,11 +676,11 @@ kbd {
 <body>
 <main>
   <header>
-    <h1>Ports</h1>
+    <h1>Atlas</h1>
     <span id="host"></span>
-    <a id="vscode" hidden>open in VS&nbsp;Code</a>
     <span id="state">connecting</span>
   </header>
+  <nav id="workspaces" hidden></nav>
   <ul id="ports"></ul>
   <p id="empty" hidden>Nothing listening on a proxied port (3000-9999).</p>
   <footer>Press <kbd>1</kbd>&ndash;<kbd>9</kbd> to open a service. Updates live.</footer>
@@ -624,7 +689,8 @@ kbd {
 const list = document.getElementById("ports");
 const empty = document.getElementById("empty");
 const state = document.getElementById("state");
-const vscode = document.getElementById("vscode");
+const workspaces = document.getElementById("workspaces");
+const favicon = document.getElementById("favicon");
 document.getElementById("host").textContent = location.hostname;
 
 let openable = [];
@@ -663,12 +729,47 @@ function render(payload) {
   const rows = payload.rows || [];
   empty.hidden = rows.length > 0;
 
-  // Absent off exe.dev, where there is no <vm>.exe.xyz for Remote-SSH to reach.
-  if (payload.vscode_url) {
-    vscode.href = payload.vscode_url;
-    vscode.hidden = false;
-  } else {
-    vscode.hidden = true;
+  // The VM's own name where reflection knew it, otherwise whatever hostname got
+  // us here, which through a tunnel is `localhost` but still tells the reader
+  // which tab is which.
+  document.title = "Atlas - " + (payload.vm_name || location.hostname);
+
+  // The VM's emoji as the tab icon, drawn as SVG text so there is no image to
+  // fetch or generate. dominant-baseline rather than a dy nudge, since the glyph
+  // comes from whichever font the reader's system picked and its metrics are not
+  // ours to predict.
+  if (payload.vm_emoji) {
+    const glyph = payload.vm_emoji.replace(/[&<>]/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]
+    );
+    favicon.href =
+      "data:image/svg+xml," +
+      encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
+          '<text x="50" y="50" font-size="88" text-anchor="middle" ' +
+          'dominant-baseline="central">' +
+          glyph +
+          "</text></svg>"
+      );
+  }
+
+  // Absent for anyone but the owner, and off exe.dev, where there is no
+  // <vm>.exe.xyz for Remote-SSH to reach.
+  const places = (payload.workspaces || []).filter((place) => place.url);
+  workspaces.hidden = places.length === 0;
+  workspaces.innerHTML = "";
+  if (places.length) {
+    const label = document.createElement("span");
+    label.className = "label";
+    label.textContent = "VS Code";
+    workspaces.appendChild(label);
+    places.forEach((place) => {
+      const link = document.createElement("a");
+      link.className = "workspace";
+      link.href = place.url;
+      link.textContent = place.name;
+      workspaces.appendChild(link);
+    });
   }
   openable = [];
   const keep = new Set();
@@ -868,7 +969,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    port = int(os.environ.get("PORT_ATLAS_PORT", "8000"))
+    port = int(os.environ.get("EXE_DEV_ATLAS_PORT", "8000"))
     broadcast = Broadcast()
     Handler.broadcast = broadcast
 
@@ -879,7 +980,7 @@ def main() -> None:
 
     scanner = threading.Thread(
         target=scan_forever,
-        args=(broadcast, port, read_vscode_url()),
+        args=(broadcast, port, read_vm()),
         name="scan",
         daemon=True,
     )

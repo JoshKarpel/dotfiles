@@ -40,7 +40,7 @@ TOOL="github:JoshKarpel/claude-scriptorium"
 # running as rather than how it was invoked; that is what turns tomorrow's
 # upgrade into a restart instead of a unit that looks unchanged.
 #
-# Off 8000, which port-atlas holds because that is the port the bare
+# Off 8000, which exe-dev-atlas holds because that is the port the bare
 # `https://<vm>.exe.xyz/` hostname is proxied to. The codex is one of the things
 # the atlas indexes, reached at `https://<vm>.exe.xyz:3001/` like anything else.
 #

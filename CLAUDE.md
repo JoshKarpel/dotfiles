@@ -16,7 +16,7 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 - **`bin/`** — Scripts added to PATH via `dotfiles/bin`; add any executable scripts here and they will be available in the shell (e.g., for Claude Code hooks)
 
 Systemd user units are the exception to `config/`. `install.sh` writes
-`cloister-codex.{service,timer}`, `port-atlas.service`,
+`cloister-codex.{service,timer}`, `exe-dev-atlas.service`,
 `zellij-session.service`, and `zellij-web.service` into
 `~/.config/systemd/user/` rather than symlinking them from here, because a unit
 has to name the absolute path of the clone it was installed from, and only
@@ -38,8 +38,8 @@ connection that the box exists to not need. Nothing here sets it; it comes with
 the exeuntu image.
 
 exe.dev proxies one port per VM to the bare `https://<vm>.exe.xyz/` hostname and
-forwards 3000-9999 to `https://<vm>.exe.xyz:<port>/`. `port-atlas` takes the bare
-hostname's port so the front door is an index of everything else listening. The
+forwards 3000-9999 to `https://<vm>.exe.xyz:<port>/`. `exe-dev-atlas` takes the
+bare hostname's port so the front door is an index of everything else. The
 atlas sorts by port, so the bottom of the forwarded range is the top of the
 index: the work session takes 3000 and the codex 3001, putting the two things
 worth opening first ahead of whatever a dev server later binds.
@@ -58,16 +58,18 @@ quietly discard it until the next login.
 `config/zellij/config.kdl`: the web server serves sessions it created itself
 whatever that setting says, and the work session is created outside it.
 
-`port-atlas` links each session directly and deliberately does not link the port
+`exe-dev-atlas` links each session directly and deliberately does not link the port
 itself: arriving at a zellij web server without a session named in the path
 creates a new one, so a link to its root would leave an empty session behind on
-every visit. It shows those names only to the VM's owner, comparing the
-`X-ExeDev-Email` the exe.dev proxy injects (which overwrites whatever the
-client sent) against the owner address from reflection. A session
-name is often a project name and the atlas is reachable by anyone the VM is
-shared with, so the default is to withhold: an unauthenticated caller and a
-failed reflection lookup both produce an empty string, and the check requires
-both sides non-empty rather than letting those compare equal.
+every visit. Session names, and the VS Code links to each checkout under
+`~/projects`, go only to the VM's owner, comparing the `X-ExeDev-Email` the
+exe.dev proxy injects (which overwrites whatever the client sent) against the
+owner address from reflection. Both are project names and the atlas is reachable
+by anyone the VM is shared with, so the default is to withhold: an
+unauthenticated caller and a failed reflection lookup both produce an empty
+string, and the check requires both sides non-empty rather than letting those
+compare equal. Following the VM's actual sharing grants would be better, but
+reflection does not publish them.
 
 Three details are worth knowing before touching any of this.
 
@@ -150,10 +152,11 @@ setup-tailscale
 # schedules it daily, so running it by hand is only for wanting a release now.
 cloister-codex
 
-# Serve an index of everything listening on a proxied port, with a link to each.
-# install.sh runs this as a systemd user service on the port the bare
-# `https://<vm>.exe.xyz/` hostname reaches; run it by hand to serve it elsewhere.
-PORT_ATLAS_PORT=9100 port-atlas
+# Serve this VM's front door: proxied ports, zellij sessions, and VS Code
+# workspaces, with a link to each. install.sh runs this as a systemd user service
+# on the port the bare `https://<vm>.exe.xyz/` hostname reaches; run it by hand to
+# serve it elsewhere.
+EXE_DEV_ATLAS_PORT=9100 exe-dev-atlas
 
 # Exit 0 only on an exe.dev VM tagged `dev-box`. The guard the services that
 # exist to be looked at by a person are gated on.
@@ -301,7 +304,7 @@ would apply a style to every session on every machine. The `harry` alias in
   third-party dependencies; the Python hooks (`claude-rm-scope-check`,
   `claude-gh-api-check`) use the same shebang with an empty dependency set. `--quiet`
   keeps `uv`'s own output off stdout, which matters for hooks whose stdout must stay
-  clean (parseable JSON or empty). `port-atlas` adds `--no-cache` to that shebang
+  clean (parseable JSON or empty). `exe-dev-atlas` adds `--no-cache` to that shebang
   because it runs as a service: a `uv run` holds a shared lock on the uv cache for
   its whole life, so a process that never exits blocks every `uv cache prune` on the
   machine.
