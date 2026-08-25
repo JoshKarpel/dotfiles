@@ -21,6 +21,9 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   t 2 'python -m http.server 8000'
   t 2 'uv run python -m http.server'
   t 2 'python3 -m http.server 8080 --directory site'
+  t 2 'python3 -mhttp.server'
+  t 2 'python3 -mhttp.server 8080 --directory site'
+  t 0 'python3 -mhttp.server --bind 127.0.0.1'
   t 0 'python3 -m http.server --bind 127.0.0.1'
   t 0 'python3 -m http.server -b 127.0.0.1'
   t 0 'python3 -m http.server -b127.0.0.1'
@@ -38,7 +41,9 @@ INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 
 # Only fire on the http.server module invocation (python, python3, uv run python, etc.)
-if ! echo "$COMMAND" | grep -qE '\-m[[:space:]]+http\.server'; then
+# `-m` takes its value with or without a space (`-m http.server` and `-mhttp.server`
+# both work), so the space between them is optional here too.
+if ! echo "$COMMAND" | grep -qE '\-m[[:space:]]*http\.server'; then
   exit 0
 fi
 
