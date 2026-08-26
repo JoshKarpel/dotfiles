@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # Show current Claude Code API usage limits
 
-usage=$(claude-fetch-usage 2>/dev/null)
+# claude-fetch-usage writes a specific reason to stderr on failure (missing
+# token vs. an HTTP status and body); surface it instead of a generic message.
+err_file=$(mktemp)
+trap 'rm -f "$err_file"' EXIT
+usage=$(claude-fetch-usage 2>"$err_file")
 if [[ -z "$usage" ]]; then
-  echo "Could not fetch usage data (no token or API error)"
+  detail=$(<"$err_file")
+  echo "Could not fetch usage data: ${detail:-claude-fetch-usage produced no output or diagnostic}" >&2
   exit 1
 fi
 
