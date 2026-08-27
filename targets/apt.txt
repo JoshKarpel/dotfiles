@@ -33,6 +33,7 @@ pulseaudio-utils
 python3
 software-properties-common
 sound-theme-freedesktop
+sox
 sqlite3
 tree
 unzip
