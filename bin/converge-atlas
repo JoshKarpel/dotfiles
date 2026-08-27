@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Serve this VM's ports, sessions, and workspaces from a systemd user service,
+# running the latest published exe-dev-atlas.
+#
+# Run by install.sh's do_atlas on every converge, and by converge-atlas.timer
+# once a day, so a release published today is being served tomorrow with nobody
+# touching the box. Both paths are the same three steps, and every one of them
+# is idempotent: `exe-dev-atlas install` rewrites the unit only when the
+# interpreter or its arguments changed, and the restart it does either way costs
+# a scan that the next one re-derives from the kernel anyway.
+
+set -euo pipefail
+
+BASEDIR="$(dirname "$(realpath "$0")")"
+
+# Every row the atlas serves carries a process's full command line, and command
+# lines carry secrets. On a box someone works on, reachable only through the
+# platform's authenticated proxy, that is the point; on a laptop, or on a VM
+# running a workload rather than a person, it is a daemon nobody asked for.
+"$BASEDIR/is-dev-box" || exit 0
+
+# By absolute path. This runs from a systemd user unit as readily as from a
+# shell, and that unit gets an environment with neither mise nor its shims on
+# PATH.
+MISE="$HOME/.local/bin/mise"
+
+# Named, rather than a bare `mise upgrade`, which would drag every other tool
+# along on a timer that was asked for one. It restates the id from
+# config/mise/config.toml, since mise offers no way to ask which entry provides a
+# given binary that is cheaper than the duplication.
+TOOL="pipx:exe-dev-atlas"
+
+# install covers the machine that has never had it, upgrade the machine that has
+# an older one. Neither says anything when there is nothing to do.
+"$MISE" install "$TOOL"
+"$MISE" upgrade "$TOOL"
+
+# Through the resolved binary rather than the shim, which would need mise on PATH
+# to reach the same place. The unit this writes names the interpreter it was
+# reached through, which for a mise install is a version-specific path, so
+# tomorrow's upgrade renders a different unit rather than one that looks
+# unchanged.
+#
+# No `--port`: the atlas already defaults to the port exe.dev proxies the bare
+# `https://<vm>.exe.xyz/` hostname to, and for the same reason this wants it
+# there. Restating it here would pin this box to a number the tool would move on
+# its own if exe.dev ever moved.
+"$("$MISE" which exe-dev-atlas)" install

@@ -210,10 +210,12 @@ EOF
   "$BASEDIR/bin/cloister-codex"
 }
 
-# Runs bin/exe-dev-atlas on 8000, the port the bare `https://<vm>.exe.xyz/`
-# hostname is proxied to, so the box's front door is an index of everything else
-# worth opening rather than any one of those things.
-function do_exe_dev_atlas() {
+# Schedules bin/converge-atlas, which does the work of serving the box's front
+# door on 8000, the port the bare `https://<vm>.exe.xyz/` hostname is proxied to,
+# and is where the dev-box guard lives. The atlas writes its own unit, so this
+# owns only the timer that keeps it on the current release, plus one run so the
+# box is serving now rather than whenever the timer first comes round.
+function do_atlas() {
   local units=~/.config/systemd/user
 
   "$BASEDIR/bin/is-dev-box" || return 0
@@ -224,35 +226,35 @@ function do_exe_dev_atlas() {
 
   mkdir -p "$units"
 
-  # A daemon rather than a converge job, so unlike cloister-codex there is no
-  # timer: the unit is the whole of it.
-  #
-  # The PATH is spelled out because a user unit inherits none of a login shell's,
-  # and the script's `uv run` shebang has to resolve `uv` through mise's shims.
-  # Restart=always covers the scan thread dying on a kernel interface that
-  # answered differently than it used to; there is nothing to lose by starting
-  # over, and a box whose front door 502s is one nobody can navigate.
-  cat > "$units/exe-dev-atlas.service" << EOF
+  cat > "$units/converge-atlas.service" << EOF
 [Unit]
-Description=Index this VM's ports, sessions, and workspaces on the default hostname
+Description=Update exe-dev-atlas and converge this VM's index
 
 [Service]
-ExecStart=$BASEDIR/bin/exe-dev-atlas
-Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-Restart=always
-RestartSec=5
+Type=oneshot
+ExecStart=$BASEDIR/bin/converge-atlas
+EOF
+
+  # Daily with a randomised delay, for the same reasons as the codex: a box that
+  # was shut down through its window still catches up, and every box does not
+  # reach for the same release at the same instant.
+  cat > "$units/converge-atlas.timer" << EOF
+[Unit]
+Description=Keep the atlas on the latest published exe-dev-atlas
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
 
 [Install]
-WantedBy=default.target
+WantedBy=timers.target
 EOF
 
   systemctl --user daemon-reload
-  systemctl --user enable exe-dev-atlas.service
+  systemctl --user enable --now converge-atlas.timer
 
-  # Unconditionally, rather than `enable --now`: the file above may have changed
-  # under a service that is already running, and a daemon this cheap to start has
-  # no work in flight worth preserving.
-  systemctl --user restart exe-dev-atlas.service
+  "$BASEDIR/bin/converge-atlas"
 }
 
 # Owns the box's work session, so that it exists because the box is up rather
@@ -339,7 +341,8 @@ function do_zellij_web() {
 
   mkdir -p "$units"
 
-  # A daemon rather than a converge job, so like the atlas there is no timer.
+  # A daemon this repo starts directly, rather than a released tool that installs
+  # its own unit, so there is no timer here: the unit is the whole of it.
   # Restarting it is safe at any time: sessions live in their own processes and
   # outlive this one, which only brokers connections to them.
   cat > "$units/zellij-web.service" << 'EOF'
@@ -360,8 +363,8 @@ EOF
   systemctl --user daemon-reload
   systemctl --user enable zellij-web.service
 
-  # Unconditionally, for the same reason as the atlas: the file above may have
-  # changed under a running server, and there is no work in flight to preserve.
+  # Unconditionally, rather than `enable --now`: the file above may have changed
+  # under a running server, and there is no work in flight to preserve.
   systemctl --user restart zellij-web.service
 }
 
@@ -423,7 +426,7 @@ do_locale
 do_brew
 do_mise
 do_cloister
-do_exe_dev_atlas
+do_atlas
 do_zellij_session
 do_zellij_web
 do_vscode_web

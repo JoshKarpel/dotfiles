@@ -8,9 +8,13 @@ minimum_release_age = "7d"
 # The cooldown buys time for a compromised publish to be noticed by someone
 # else. That is worth a week of lag for a dependency, and nothing for a release
 # cut from an account whose compromise would already be my own problem to
-# notice. Exempted so a release is servable the day it ships: `cloister` on the
-# exe.dev boxes runs whatever version this resolves to.
-minimum_release_age_excludes = ["github:JoshKarpel/claude-scriptorium"]
+# notice. Exempted so a release is servable the day it ships: the services the
+# exe.dev boxes run (`cloister`, the atlas) take whatever version this resolves
+# to.
+minimum_release_age_excludes = [
+  "github:JoshKarpel/claude-scriptorium",
+  "pipx:exe-dev-atlas",
+]
 
 [settings.node]
 # Run `corepack enable` after installing node, activating the bundled
@@ -37,6 +41,13 @@ just = "latest"
 k9s = "latest"
 kubectl = "latest"
 node = "lts"
+# The atlas, whose `install` subcommand points a systemd unit at the interpreter
+# it was reached through, so the version mise resolves here is the one the box
+# serves its front door from. `pipx:` rather than `github:` because it publishes
+# to PyPI rather than release binaries; the name is historical, since the backend
+# runs `uv tool install` wherever uv is on the box, which is everywhere this
+# config is.
+"pipx:exe-dev-atlas" = "latest"
 ripgrep = "latest"
 rust = "stable"
 sd = "latest"

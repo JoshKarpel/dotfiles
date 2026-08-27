@@ -16,13 +16,13 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 - **`bin/`** — Scripts added to PATH via `dotfiles/bin`; add any executable scripts here and they will be available in the shell (e.g., for Claude Code hooks)
 
 Systemd user units are the exception to `config/`. `install.sh` writes
-`cloister-codex.{service,timer}`, `exe-dev-atlas.service`,
+`cloister-codex.{service,timer}`, `converge-atlas.{service,timer}`,
 `zellij-session.service`, `zellij-web.service`, and `vscode-web.service` into
 `~/.config/systemd/user/` rather than symlinking them from here, because a unit
 has to name the absolute path of the clone it was installed from, and only
 `install.sh` knows where that is. The same directory is where
-`claude-scriptorium` writes the codex service it manages itself, so symlinking
-the tree in would point that tool's writes at this repo.
+`claude-scriptorium` and `exe-dev-atlas` write the units they manage themselves,
+so symlinking the tree in would point those tools' writes at this repo.
 
 All of those are for a person to look at, so all are gated on `is-dev-box`
 rather than `is-exe-dev`: a VM running a workload has nobody reading its session
@@ -38,12 +38,21 @@ connection that the box exists to not need. Nothing here sets it; it comes with
 the exeuntu image.
 
 exe.dev proxies one port per VM to the bare `https://<vm>.exe.xyz/` hostname and
-forwards 3000-9999 to `https://<vm>.exe.xyz:<port>/`. `exe-dev-atlas` takes the
-bare hostname's port so the front door is an index of everything else. The
-atlas sorts by port, so the bottom of the forwarded range is the top of the
-index, and the two ways in to the box take it: the work session on 3000 and VS
-Code on 3001. A dev server lands wherever it lands above those, and services that
-are only occasionally opened start at 4000, where the codex is.
+forwards 3000-9999 to `https://<vm>.exe.xyz:<port>/`.
+[exe-dev-atlas](https://github.com/JoshKarpel/exe-dev-atlas) takes the bare
+hostname's port so the front door is an index of everything else. The atlas
+sorts by port, so the bottom of the forwarded range is the top of the index, and
+the two ways in to the box take it: the work session on 3000 and VS Code on
+3001. A dev server lands wherever it lands above those, and services that are
+only occasionally opened start at 4000, where the codex is.
+
+Neither the atlas nor the codex is implemented here. Both are published tools
+this repo installs through mise and converges on a daily timer
+(`bin/converge-atlas`, `bin/cloister-codex`), and each writes its own unit
+naming the interpreter or binary mise resolved, so an upgrade renders a changed
+unit rather than one that looks untouched. Both are exempt from the mise
+cooldown in `config/mise/config.toml`, so a release is being served the day
+after it ships.
 
 ## The Work Session
 
@@ -64,27 +73,18 @@ a client attached to the session someone is looking at elsewhere.
 `config/zellij/config.kdl`: the web server serves sessions it created itself
 whatever that setting says, and the work session is created outside it.
 
-`exe-dev-atlas` links each session directly and deliberately does not link the port
-itself: arriving at a zellij web server without a session named in the path
-creates a new one, so a link to its root would leave an empty session behind on
-every visit. Session names, and the Remote-SSH link to the VM, go only to its
-owner, comparing the `X-ExeDev-Email` the exe.dev proxy injects (which overwrites
-whatever the client sent) against the owner address from reflection. A session
-name is often a project name and the atlas is reachable by anyone the VM is
-shared with, so the default is to withhold: an unauthenticated caller and a
-failed reflection lookup both produce an empty string, and the check requires
-both sides non-empty rather than letting those compare equal. Following the VM's
-actual sharing grants would be better, but reflection does not publish them.
+The atlas links each session by name rather than linking the web server's root,
+because arriving there without a session in the path creates a new one. It
+offers a VS Code Remote-SSH link to the box alongside them, and withholds both
+from a caller who is not the VM's owner. How it decides that belongs to
+[exe-dev-atlas](https://github.com/JoshKarpel/exe-dev-atlas) rather than to
+anything here.
 
-That link opens the home directory rather than no directory. A `vscode://` URL
-with no path resolves to `/` rather than to a folderless window, so the choice is
-home or the whole filesystem, not home or nothing (microsoft/vscode#232345).
-
-`vscode-web.service` is the other half of that: `code serve-web` on 3001, kept
-alongside the Remote-SSH link rather than replacing it. The two differ in where
-the workbench runs, which decides where its settings come from. Remote-SSH runs
-it on the laptop and inherits the settings already there. `serve-web` runs it
-here and keeps user settings in the browser's IndexedDB rather than on disk, so a
+`vscode-web.service` is the other half of that link: `code serve-web` on 3001,
+kept alongside it rather than replacing it. The two differ in where the
+workbench runs, which decides where its settings come from. Remote-SSH runs it
+on the laptop and inherits the settings already there. `serve-web` runs it here
+and keeps user settings in the browser's IndexedDB rather than on disk, so a
 `settings.json` on the box is not read and Settings Sync has to be signed in per
 browser. The CLI comes from mise rather than the copy Remote-SSH pushes to
 `~/.vscode-server/code-<commit>`, whose path moves with every VS Code update.
@@ -181,11 +181,11 @@ setup-tailscale
 # schedules it daily, so running it by hand is only for wanting a release now.
 cloister-codex
 
-# Serve this VM's front door: proxied ports, zellij sessions, and VS Code
-# workspaces, with a link to each. install.sh runs this as a systemd user service
-# on the port the bare `https://<vm>.exe.xyz/` hostname reaches; run it by hand to
-# serve it elsewhere.
-EXE_DEV_ATLAS_PORT=9100 exe-dev-atlas
+# Update exe-dev-atlas and converge the systemd user service that serves this
+# VM's front door: proxied ports, zellij sessions, and VS Code workspaces, with a
+# link to each. Dev-box VMs only; a no-op anywhere else. install.sh schedules it
+# daily, so running it by hand is only for wanting a release now.
+converge-atlas
 
 # Exit 0 only on an exe.dev VM tagged `dev-box`. The guard the services that
 # exist to be looked at by a person are gated on.
@@ -333,10 +333,10 @@ would apply a style to every session on every machine. The `harry` alias in
   third-party dependencies; the Python hooks (`claude-rm-scope-check`,
   `claude-gh-api-check`) use the same shebang with an empty dependency set. `--quiet`
   keeps `uv`'s own output off stdout, which matters for hooks whose stdout must stay
-  clean (parseable JSON or empty). `exe-dev-atlas` adds `--no-cache` to that shebang
-  because it runs as a service: a `uv run` holds a shared lock on the uv cache for
-  its whole life, so a process that never exits blocks every `uv cache prune` on the
-  machine.
+  clean (parseable JSON or empty). Every one of them is a short-lived command, which
+  is what makes that shebang safe here: a `uv run` holds a shared lock on the uv cache
+  for its whole life, so anything long-lived would need `--no-cache` to keep from
+  blocking every `uv cache prune` on the machine.
 - Shell scripts use 2-space indentation (enforced by beautysh via pre-commit)
 - Target files in `targets/` are auto-sorted by the `file-contents-sorter` pre-commit hook
 - Pre-commit hooks run via [pre-commit.ci](https://pre-commit.ci) on push; see
