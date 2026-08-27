@@ -41,6 +41,8 @@
       "WebFetch(domain:keepachangelog.com)",
       "WebFetch(domain:mise.jdx.dev)",
       "WebFetch(domain:more-itertools.readthedocs.io)",
+      "WebFetch(domain:mypy.readthedocs.io)",
+      "WebFetch(domain:mypyc.readthedocs.io)",
       "WebFetch(domain:packaging.python.org)",
       "WebFetch(domain:pre-commit.com)",
       "WebFetch(domain:pyo3.rs)",
