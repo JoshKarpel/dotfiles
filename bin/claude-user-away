@@ -32,7 +32,14 @@ controlling_tty() {
 # No terminal anywhere up the tree means nothing is displaying a TUI to miss.
 TTY_PATH=$(controlling_tty) || exit 0
 [[ -e "$TTY_PATH" ]] || exit 0
-ATIME=$(stat -c %X "$TTY_PATH" 2>/dev/null) || exit 0
+
+atime() {
+  case "$(uname -s)" in
+    Darwin) stat -f %a "$1" 2>/dev/null ;;
+    *) stat -c %X "$1" 2>/dev/null ;;
+  esac
+}
+ATIME=$(atime "$TTY_PATH") || exit 0
 
 IDLE=$(( $(date +%s) - ATIME ))
 [[ $IDLE -ge $IDLE_THRESHOLD ]]
