@@ -3,6 +3,59 @@
 
 set -euo pipefail
 
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
+# line is how `claude-hook-selftests` discovers participating hooks. This hook decides
+# whether Claude sees a finishing-pass nudge from a single branch on
+# claude-changeset-guard's exit code; run these with
+# `CLAUDE_HOOK_SELFTEST=1 claude-stop-finish`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  stubs=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$stubs"' EXIT
+
+  stub_guard() {
+    local exit_code="$1" output="$2"
+    printf '#!/bin/sh\nprintf %%s "%s"\nexit %s\n' "$output" "$exit_code" >"$stubs/claude-changeset-guard"
+    chmod +x "$stubs/claude-changeset-guard"
+  }
+
+  call() {
+    EXIT=0
+    OUT=$(PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" </dev/null 2>&1) || EXIT=$?
+  }
+
+  check() {
+    local desc="$1" want_exit="$2"
+    [[ "$EXIT" == "$want_exit" ]] ||
+    { printf 'FAIL %s: want_exit=%s got_exit=%s :: %s\n' "$desc" "$want_exit" "$EXIT" "$OUT"; fails=1; }
+  }
+
+  # --- no fresh change-set: the guard suppresses, and this hook stays silent ---
+  stub_guard 1 ""
+  call
+  check "no change-set to nudge about is silent" 0
+  [[ -z "$OUT" ]] ||
+  { printf 'FAIL silent pass-through: expected no output :: %s\n' "$OUT"; fails=1; }
+
+  # --- a fresh change-set: the guard's porcelain surfaces inside the nudge ---
+  stub_guard 0 "M some/file.txt"
+  call
+  check "a fresh change-set nudges" 0
+  [[ "$OUT" == *"M some/file.txt"* ]] ||
+  { printf 'FAIL nudge: output missing porcelain change-set :: %s\n' "$OUT"; fails=1; }
+  EVENT=$(jq -r '.hookSpecificOutput.hookEventName' <<<"$OUT" 2>/dev/null)
+  [[ "$EVENT" == "Stop" ]] ||
+  { printf 'FAIL nudge: hookEventName is %q, want Stop :: %s\n' "$EVENT" "$OUT"; fails=1; }
+  [[ "$OUT" == *"finishing pass triggered"* ]] ||
+  { printf 'FAIL nudge: output missing systemMessage :: %s\n' "$OUT"; fails=1; }
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
 cat >/dev/null  # drain the hook payload off stdin; the guard works from git state alone
 PORCELAIN=$(claude-changeset-guard finish) || exit 0
 
