@@ -2,9 +2,21 @@
 
 # https://stackoverflow.com/questions/10374520/gsettings-with-cron
 
-PID=$(pgrep gnome-session | tail -n1)
-export DBUS_SESSION_BUS_ADDRESS=$(grep -z DBUS_SESSION_BUS_ADDRESS /proc/"$PID"/environ | cut -d= -f2-)
+set -euo pipefail
 
-img=$(random_file "$WALLPAPERS")
+PID=$(pgrep gnome-session | tail -n1)
+if [[ -z "$PID" ]]; then
+  echo "random-background-ubuntu: no gnome-session process found; is a graphical session running?" >&2
+  exit 1
+fi
+
+DBUS_ADDRESS=$(grep -z DBUS_SESSION_BUS_ADDRESS /proc/"$PID"/environ | cut -d= -f2-)
+if [[ -z "$DBUS_ADDRESS" ]]; then
+  echo "random-background-ubuntu: DBUS_SESSION_BUS_ADDRESS not found in /proc/$PID/environ" >&2
+  exit 1
+fi
+export DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDRESS"
+
+img=$(random_file "${WALLPAPERS:-}")
 
 background_set_ubuntu "$img"
