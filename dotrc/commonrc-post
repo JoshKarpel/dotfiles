@@ -57,7 +57,13 @@ for prefix in /opt/homebrew /usr/local; do
 done
 unset prefix gnubin
 
-. "$HOME/.cargo/env"
+# rustup's own shell setup, written by mise's rust core plugin (which wraps
+# rustup) the first time `mise install` resolves `rust` from config/mise/config.toml.
+# A machine that hasn't reached that step yet (install.sh still running, or a
+# `mise install` that failed) has no such file, and sourcing a missing one
+# unconditionally would print a raw "No such file or directory" on every shell
+# start rather than the kind of skip notice the rest of this file gives.
+[[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
 
 # Keep last: this reports work that is already lost, so it wants to be the final
 # thing on screen before the prompt rather than scrolled off by the rest of
