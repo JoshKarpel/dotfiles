@@ -3,6 +3,42 @@
 
 set -euo pipefail
 
+# CLAUDE_HOOK_SELFTEST: set this env var to run the hook's embedded self-tests. This
+# marker line is how `claude-hook-selftests` discovers participating hooks. The hook
+# always exits 0, so the tests assert on stdout instead: silence outside a pre-commit
+# project, and the reminder surfacing inside one.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+
+  plain="$workdir/plain"
+  precommit="$workdir/precommit"
+  mkdir -p "$plain" "$precommit"
+  git init -q "$plain"
+  git init -q "$precommit"
+  touch "$precommit/.pre-commit-config.yaml"
+
+  t() {
+    local desc="$1" dir="$2" want="$3" out
+    out=$(cd "$dir" && CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1)
+    if [[ "$want" == "<empty>" ]]; then
+      [[ -z "$out" ]] || { printf 'FAIL %s: want empty, got:\n%s\n' "$desc" "$out"; fails=1; }
+    else
+      [[ "$out" =~ $want ]] || { printf 'FAIL %s: want match /%s/, got:\n%s\n' "$desc" "$want" "$out"; fails=1; }
+    fi
+  }
+
+  t "non-pre-commit repo stays silent" "$plain"     "<empty>"
+  t "pre-commit repo gets the reminder" "$precommit" 'pre-commit-autofix'
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
 is-pre-commit-project 2>/dev/null || exit 0
 
 cat <<EOF

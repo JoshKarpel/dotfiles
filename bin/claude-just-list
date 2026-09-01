@@ -3,6 +3,41 @@
 
 set -euo pipefail
 
+# CLAUDE_HOOK_SELFTEST: set this env var to run the hook's embedded self-tests. This
+# marker line is how `claude-hook-selftests` discovers participating hooks. The hook
+# always exits 0, so the tests assert on stdout instead: silence outside a justfile,
+# and the recipe list surfacing inside one.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+
+  plain="$workdir/plain"
+  withjust="$workdir/withjust"
+  mkdir -p "$plain" "$withjust"
+  printf 'build:\n    echo hi\n' >"$withjust/justfile"
+
+  t() {
+    local desc="$1" dir="$2" want="$3" out
+    out=$(cd "$dir" && CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1)
+    if [[ "$want" == "<empty>" ]]; then
+      [[ -z "$out" ]] || { printf 'FAIL %s: want empty, got:\n%s\n' "$desc" "$out"; fails=1; }
+    else
+      [[ "$out" =~ $want ]] || { printf 'FAIL %s: want match /%s/, got:\n%s\n' "$desc" "$want" "$out"; fails=1; }
+    fi
+  }
+
+  t "no justfile stays silent" "$plain"    "<empty>"
+  t "justfile prints reminder" "$withjust" 'This project has a justfile'
+  t "justfile lists its recipes" "$withjust" 'build'
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
 JUST_OUTPUT=$(just --list --list-prefix='' --no-aliases 2>/dev/null) || exit 0
 
 cat <<EOF
