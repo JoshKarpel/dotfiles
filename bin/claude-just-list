@@ -11,7 +11,18 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   SELF=$(realpath "$0")
   fails=0
   workdir=$(realpath "$(mktemp -d)")
-  trap 'rm -rf "$workdir"' EXIT
+  stubs=$(mktemp -d)
+  trap 'rm -rf "$workdir" "$stubs"' EXIT
+
+  # A stub `just`, since a CI checkout has no reason to have the real binary installed.
+  # It mirrors just's own behavior closely enough for this hook: fail outside a justfile,
+  # list recipes inside one.
+  cat >"$stubs/just" <<'STUB'
+#!/bin/sh
+[ -f justfile ] || exit 1
+printf 'build\n'
+STUB
+  chmod +x "$stubs/just"
 
   plain="$workdir/plain"
   withjust="$workdir/withjust"
@@ -20,7 +31,7 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
 
   t() {
     local desc="$1" dir="$2" want="$3" out
-    out=$(cd "$dir" && CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1)
+    out=$(cd "$dir" && PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1)
     if [[ "$want" == "<empty>" ]]; then
       [[ -z "$out" ]] || { printf 'FAIL %s: want empty, got:\n%s\n' "$desc" "$out"; fails=1; }
     else
