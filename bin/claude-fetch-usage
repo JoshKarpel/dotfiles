@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Fetch Claude Code usage limits from the Anthropic API, with caching.
-# Outputs the raw JSON from the API, or exits silently if unavailable.
+# Outputs the raw JSON from the API on stdout. On failure, outputs nothing on
+# stdout, exits 0, and writes the specific reason (no token vs. an HTTP status
+# and body) to stderr; claude-usage surfaces that reason, claude-statusline
+# discards it since it renders every prompt.
 # Cache is stored globally (shared across Claude Code instances on this machine).
 
 CACHE_FILE="${TMPDIR:-/tmp}/claude-usage-cache.json"
