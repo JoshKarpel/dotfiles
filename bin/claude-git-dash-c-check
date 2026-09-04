@@ -36,7 +36,8 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   t "plain git allows"               "$repo"     "git status"                       0
   t "outside any repo allows"        "$workdir"  "git -C $repo status"              0
   t "-C after && still detected"     "$repo"     "echo hi && git -C . status"       2
-  t "first of multiple -C wins"      "$repo"     "git -C $other status; git -C $repo log" 0
+  t "a later -C targeting the repo still blocks" "$repo" "git -C $other status; git -C $repo log" 2
+  t "an earlier -C targeting the repo still blocks" "$repo" "git -C $repo status; git -C $other log" 2
 
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
@@ -47,19 +48,23 @@ fi
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 
-# Extract the path argument from the first "git -C <dir>" in the command
-DIR=$(echo "$COMMAND" | grep -oE '(^|[|;&[:space:]])git[[:space:]]+-C[[:space:]]+[^[:space:]]+' | head -1 | awk '{print $NF}') || DIR=""
+# Extract the path argument from every "git -C <dir>" in the command. A compound
+# command can chain more than one; checking only the first let a redundant -C
+# later in the chain slip through unblocked.
+DIRS=$(echo "$COMMAND" | grep -oE '(^|[|;&[:space:]])git[[:space:]]+-C[[:space:]]+[^[:space:]]+' | awk '{print $NF}') || DIRS=""
 
-if [[ -z "$DIR" ]]; then
+if [[ -z "$DIRS" ]]; then
   exit 0
 fi
 
 GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
-TARGET=$(realpath "$DIR" 2>/dev/null) || TARGET=""
 
-if [[ -n "$TARGET" && "$TARGET" == "$GIT_ROOT" ]]; then
-  echo "Do not use 'git -C $DIR' when targeting the current repository. Just run the git command without -C." >&2
-  exit 2
-fi
+while IFS= read -r DIR; do
+  TARGET=$(realpath "$DIR" 2>/dev/null) || TARGET=""
+  if [[ -n "$TARGET" && "$TARGET" == "$GIT_ROOT" ]]; then
+    echo "Do not use 'git -C $DIR' when targeting the current repository. Just run the git command without -C." >&2
+    exit 2
+  fi
+done <<< "$DIRS"
 
 exit 0
