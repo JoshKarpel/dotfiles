@@ -39,6 +39,8 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   t "python in package name allowed"            "$uv_project"    "uv pip install python-dotenv"         0
   t "quoted python in grep pattern allowed"     "$uv_project"    'grep "requires-python\|python" x.toml' 0
   t "plain python allowed outside uv project"   "$plain_project" "python foo.py"                        0
+  t "python -m uvicorn blocked despite 'uv' substring" "$uv_project" "python -m uvicorn app:app"        2
+  t "python script named with uv substring blocked"    "$uv_project" "python run_uvloop_bench.py"       2
 
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
@@ -56,7 +58,12 @@ fi
 # Check if python is invoked as a command: preceded by start or a command separator, and
 # followed by whitespace, a version digit, or end. The trailing check keeps `python` inside a
 # quoted argument from matching, e.g. grep "requires-python\|python" (the `\|` looks like a pipe).
-if echo "$COMMAND" | grep -qE '(^|[|;&(])[[:space:]]*python([[:space:]]|[0-9]|$)' && ! echo "$COMMAND" | grep -q 'uv'; then
+# `uv run python ...` never matches this at all, since `python` there is preceded by `run `, not
+# by a command separator; there's no legitimate case where a *bare* python invocation needs an
+# escape hatch, so this used to grep the whole command for the substring `uv` and skip blocking
+# if found. That let `python -m uvicorn app:app` (and anything else with `uv` in an arg or
+# filename) straight through unblocked.
+if echo "$COMMAND" | grep -qE '(^|[|;&(])[[:space:]]*python([[:space:]]|[0-9]|$)'; then
   echo "Use 'uv run python' instead of 'python' directly." >&2
   exit 2
 fi

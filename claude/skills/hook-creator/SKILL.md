@@ -109,7 +109,7 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 if ! is-uv-project; then
   exit 0
 fi
-if echo "$COMMAND" | grep -q 'python' && ! echo "$COMMAND" | grep -q 'uv'; then
+if echo "$COMMAND" | grep -q 'python'; then
   echo "Use 'uv run python' instead of 'python' directly." >&2
   exit 2
 fi
