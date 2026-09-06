@@ -109,7 +109,10 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 if ! is-uv-project; then
   exit 0
 fi
-if echo "$COMMAND" | grep -q 'python'; then
+# Matches `python` only where it starts a command (after a separator or at the
+# start of the line), not as a substring of a filename or argument: a naive
+# `grep -q 'python'` also fires on `python -m uvicorn` and `run_uvloop_bench.py`.
+if echo "$COMMAND" | grep -qE '(^|[|;&(])[[:space:]]*python([[:space:]]|[0-9]|$)'; then
   echo "Use 'uv run python' instead of 'python' directly." >&2
   exit 2
 fi
