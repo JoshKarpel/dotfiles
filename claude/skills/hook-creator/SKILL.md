@@ -126,49 +126,48 @@ Use `matcher` to scope to specific tools:
 
 ### 2. Pre-Stop Work (Stop)
 
-Do work before Claude stops (staging, linting) and optionally block with
-feedback. Must guard against `stop_hook_active`.
+Do work before Claude stops (staging, linting) and optionally report back with
+feedback. A hook that blocks by exiting 2 must guard `stop_hook_active` (see
+above); one that reports through the `additionalContext` JSON below does not,
+since it always exits 0 and never re-triggers the loop that field guards against.
 
-Example: `claude-stop-precommit`, which stages tracked changes and runs the pre-commit loop:
+Example: `claude-stop-precommit`, which nudges about untracked files, stages
+tracked changes, and runs `pre-commit-autofix`:
 ```bash
-INPUT=$(cat)
-STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
-[[ "$STOP_HOOK_ACTIVE" == "true" ]] && exit 0
+git rev-parse --show-toplevel &>/dev/null || exit 0
 
-REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
-git add --update  # stage tracked modifications only, not untracked files
-
-[[ -f "$REPO_ROOT/.pre-commit-config.yaml" || -f "$REPO_ROOT/.pre-commit-config.yml" ]] || exit 0
-
-if is-uv-project 2>/dev/null; then
-  RUNNER="uv run pre-commit"
-elif command -v pre-commit &>/dev/null; then
-  RUNNER="pre-commit"
-elif command -v uv &>/dev/null; then
-  RUNNER="uvx pre-commit"
-else
+UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null)
+if [[ -n "$UNTRACKED" ]]; then
+  jq -n --arg ctx "There are untracked files: $UNTRACKED" \
+    '{"systemMessage":"untracked files","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$ctx}}'
   exit 0
 fi
 
-$RUNNER run > /dev/null 2>&1 || true  # first run: auto-fix
-git add --update                       # re-stage auto-fixes
-
-if OUTPUT=$($RUNNER run 2>&1); then
+if ! is-pre-commit-project; then
+  git add --update  # stage tracked modifications only, not untracked files
   exit 0
 fi
 
-cat >&2 <<EOF
-pre-commit is still failing after auto-fixing. Fix the issues before committing:
+if OUTPUT=$(pre-commit-autofix 2>&1); then
+  exit 0
+fi
 
-$OUTPUT
-EOF
-exit 2
+jq -n --arg ctx "pre-commit is still failing after auto-fixing:
+
+$OUTPUT" '{"systemMessage":"pre-commit failing","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$ctx}}'
+exit 0
 ```
 
 Key preferences:
 - Use `git add --update` not `git add -A`: handle untracked files separately
-  with a dedicated hook
-- Run pre-commit twice: first run auto-fixes, second run validates
+  with a dedicated nudge, since staging them silently would commit files
+  nobody decided belong in the repo
+- Reach for a shared wrapper like `pre-commit-autofix` (stage, run, re-stage
+  fixes, run again) instead of hand-rolling runner detection and a double run
+  inline
+- Feed Claude a `hookSpecificOutput.additionalContext` JSON object on stdout
+  with exit 0 rather than blocking via exit 2/stderr: it surfaces the same
+  information without forcing a retry loop
 
 ### 3. Context Injection (SessionStart)
 
