@@ -2,7 +2,7 @@
 # Kill whatever process(es) are using a TCP/UDP port.
 # Usage: port-kill [-9|--force] <port>
 # Sends SIGTERM by default; pass -9/--force for SIGKILL. Reports each PID it
-# signals. Exits 1 if nothing is using the port.
+# signals. Exits 1 if nothing is using the port, or if any signal fails to land.
 # Requires lsof; exits 2 if it is missing.
 
 set -euo pipefail
@@ -37,8 +37,14 @@ if ((${#PIDS[@]} == 0)); then
   exit 1
 fi
 
+FAILED=0
 for PID in "${PIDS[@]}"; do
   if kill "-$SIGNAL" "$PID"; then
     echo "port-kill: sent SIG$SIGNAL to PID $PID (port $PORT)"
+  else
+    echo "port-kill: failed to signal PID $PID (port $PORT); it may need sudo or may have already exited" >&2
+    FAILED=1
   fi
 done
+
+exit "$FAILED"
