@@ -244,10 +244,11 @@ dependency.
 
 Each participating hook carries a `# CLAUDE_HOOK_SELFTEST` marker comment line as an
 explicit declaration. The `claude-hook-selftests` runner discovers the set from those
-markers, so there's no separate list to drift. It's wired into pre-commit
-(`files: ^bin/`), so a hook regression fails the commit. A missing dependency (`jq`,
-`python3`) surfaces as a failed run rather than a silent pass, since the hook whose
-tests can't run exits non-zero.
+markers, scanning `bin/` and the `hooks/` directory of each plugin under
+`claude/skills/`, so there's no separate list to drift. It's wired into pre-commit
+(`files: ^(bin|claude/skills)/`), so a hook regression fails the commit. A missing
+dependency (`jq`, `python3`) surfaces as a failed run rather than a silent pass,
+since the hook whose tests can't run exits non-zero.
 
 - **Bash hooks** embed a block right after the `set` line, before reading stdin. A
   matching hook defines a `t <want-exit> <command>` helper that re-invokes the hook
@@ -289,6 +290,25 @@ tests can't run exits non-zero.
 ## Claude Code Skills
 
 When asked to write a skill, place it in `claude/skills/` in this dotfiles repo (not in `~/.claude/`); `bin/link-claude` symlinks it into place. Use the `skill-creator` skill for structure and best practices.
+
+## Claude Code Plugins
+
+A directory under `claude/skills/` holding a `.claude-plugin/plugin.json` loads as a
+*plugin* named `<name>@skills-dir`, not as a skill. Claude Code discovers it in place,
+with no marketplace and no install step, which is why plugins live under `claude/skills/`
+here rather than somewhere more obvious: it's the one deployment path `bin/link-claude`
+already serves. `claude/skills/fauxto/` is the worked example, hooks included.
+
+Two constraints that only bite once you're inside one:
+
+- A plugin can ship hooks, skills, agents, and commands, but not permission rules. Its
+  own `settings.json` honors only `agent` and `subagentStatusLine`, so a plugin needing
+  an entry in `permissions.allow` documents it in its README for the user to add by hand.
+- A plugin that changes how the harness behaves sets `defaultEnabled: false`, so linking
+  it into place is not the same as turning it on. Enable with `/plugin` or an
+  `enabledPlugins` entry.
+
+Validate a plugin with `claude plugin validate <dir>` before trusting that it loads.
 
 ## Claude Code Rules
 

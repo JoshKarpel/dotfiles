@@ -1,0 +1,23 @@
+# Regexes (Python `re.search`, one per line, `#` starts a comment) matched against a
+# Bash command *before* it would be rewritten into a script file. A match means
+# "leave this one alone": the command reaches the permission system in its original
+# text, so `deny` and `ask` rules written against that text still see it.
+#
+# This list is the counterweight to what the rewrite gives up. Rewriting hides the
+# command text from rule matching, and a `deny` rule is the one thing that cannot be
+# recovered by reading the script afterwards, because by then it has already run.
+#
+# A false positive costs one permission prompt, so err toward listing things.
+
+# Word boundaries rather than whitespace: an invocation tucked inside quotes
+# (`sh -c 'sudo rm -rf /'`) has no space in front of it and would otherwise slip past.
+
+\bsudo\b
+\bdoas\b
+\brm\s+(-\S+\s+)*(/|~|\$HOME)
+\bgit\s+push\b
+\bgit\s+reset\s+--hard\b
+\|\s*(sudo\s+)?(ba|z|k)?sh\b
+\b(shutdown|reboot|halt|mkfs|fdisk|dd)\b
+\bchmod\s+(-\S+\s+)*777\b
+\b(curl|wget)\s[^|]*>\s*/(etc|usr|bin|sbin)/
