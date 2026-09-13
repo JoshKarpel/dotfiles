@@ -25,7 +25,7 @@ Before reasoning about anything, get the mechanical facts. Run with `uv` (not
 `python3`):
 
 ```bash
-uv run /home/jtk/.claude/skills/review-claude-config/scripts/inventory.py
+uv run ${CLAUDE_SKILL_DIR}/scripts/inventory.py
 ```
 
 It locates this dotfiles repo from its own location and reports, only for the
