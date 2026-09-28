@@ -132,7 +132,7 @@ ignore = [
     "N818",  # exception names are deliberately descriptive (e.g. ClientDisconnect), not Error-suffixed
     "G004",  # logging-f-string: f-strings in log calls are allowed (readability over lazy %-formatting)
     # pydocstyle: enforce well-formed docstrings, but don't mandate their presence or dictate mood.
-    "D1",    # undocumented-*: docstrings are written where they add value (and never on modules, per house style)
+    "D1",    # undocumented-*: house style is a docstring on everything, but a presence check rewards padding
     "D203",  # incompatible with D211 (no blank line before a class docstring)
     "D205",  # would force a single-physical-line summary; summary sentences wrap naturally over a few lines
     "D212",  # incompatible with D213 (the multi-line summary belongs on the second line)

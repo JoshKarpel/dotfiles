@@ -93,14 +93,9 @@ class Order(BaseModel):
 
 ## Docstrings
 
-- **Never write module-level docstrings.** The module's name and contents
-  already document it; a top-of-file docstring is noise that drifts out of
-  date. (See the comments rule: capture the non-obvious *why*, never the
-  obvious *what*.)
-- **Write docstrings in Markdown by default.** Use Markdown formatting
-  (backticks for identifiers, `-` lists, fenced code blocks) for any docstring
-  worth writing. If the project has an established docstring convention
-  (reStructuredText, Google, NumPy style), follow that instead.
+Write docstrings in **Markdown** by default: backticks for identifiers, `-`
+lists, fenced code blocks. If the project has an established docstring
+convention (reStructuredText, Google, NumPy style), follow that instead.
 
 ## Module Privacy
 
