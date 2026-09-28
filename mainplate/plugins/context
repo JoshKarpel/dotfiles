@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+# What a session is told about the repository it opens on, composed once at setup.
+#
+# This is the port of the `SessionStart` hooks in claude/settings.json, and it is one plugin rather
+# than four because `setup` returns a single `instructions` string: what was four processes writing
+# to one context window in Claude Code is one process composing one block here.
+#
+# **Instructions rather than an event, because they sit in front of the cached prefix.** Composing
+# them again on a later turn would re-price every remaining request in the session, so this is asked
+# once and settled for the session's life. That is also why nothing here reports anything that moves:
+# a git status composed at setup and never refreshed is a fact about when the session started, which
+# is what the hook it came from reported too.
+#
+# **The sources are the hook scripts themselves, unchanged.** Each one is already written to print
+# plain text when it has something to say and to stay silent otherwise, which is exactly what
+# composing wants, and each already carries its own self-tests. Reimplementing their logic here would
+# be a second copy that drifts.
+#
+# Two of the five SessionStart hooks are deliberately left out:
+#
+# - `claude-just-list` tells the model to prefer `just <recipe>`, and `just` is not reachable from
+#   where a mainplate command runs. The sandbox binds /usr, /bin, /sbin, /lib*, /etc and /opt, and
+#   `just` is a mise tool under ~/.local/share, so the advice would send the model at a command that
+#   does not exist. `uv`, `git`, `gh`, `jq` and `rg` are all there; `just` and `fd` are not.
+# - `claude-pre-commit-reminder` points at `pre-commit-autofix`, which is in this repo's `bin/` and
+#   therefore equally unreachable, and the `pre-commit` plugin beside this one covers what it was for.
+#
+# Nothing here imports mainplate. `echo '{"event":"setup","worktree":"/some/repo"}' | ./context` is
+# the whole of how to try it by hand.
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+# The hooks whose output still means something here, in the order they are composed. The Python
+# version first because it is a standing fact about the project, and the git status second because it
+# is the one thing true only right now: a reader reaching the end of the block has the durable part
+# behind them.
+SOURCES = ("claude-python-version", "claude-git-status")
+
+# The clone this plugin was installed from, found by resolving its own path. `resolve()` rather than
+# `parent`, because what mainplate runs is the symlink `link-mainplate` put in
+# ~/.config/mainplate/plugins, and the siblings this needs are beside the real file.
+DOTFILES = Path(__file__).resolve().parents[2]
+
+
+def reaching() -> dict[str, str]:
+    """
+    The environment the hook scripts need, which is this process's with one directory in front.
+
+    A user-tier plugin runs unconfined, so it inherits the console's own environment, and the console
+    is a systemd unit whose PATH is the standard system set and nothing more. `bin/` is what is
+    missing, which is how these hooks reach each other.
+
+    **The mise shims are deliberately not here.** A shim runs mise, mise reads the config of the
+    directory it is invoked in, and an untrusted `mise.toml` is a hard error. These run in the
+    session's worktree, which is an arbitrary repository, so a shim on this PATH turns "that project
+    carries a mise.toml" into a hook that exits non-zero and contributes nothing. What the system set
+    already has is enough: `git`, `gh`, `jq`, `rg` and `uv` are all real binaries under /usr.
+    """
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join((str(DOTFILES / "bin"), env.get("PATH", "")))
+    return env
+
+
+def said_by(name: str, where: Path) -> str:
+    """
+    What one hook script has to say about this repository, or nothing where it has nothing.
+
+    Stdin is closed rather than inherited, because these are written for a harness that hands them a
+    JSON payload and some of them read it; given the console's own stdin they would block on a pipe
+    that is never written to, and a plugin that hangs is a session that will not start.
+
+    Stderr is left to the console, which logs a plugin's diagnostics: a hook that breaks should be
+    visible rather than silently contributing nothing. A non-zero exit is how a hook says "not
+    applicable" as often as it says "I failed", so it is not treated as either here, and what decides
+    whether anything is contributed is whether it wrote something.
+    """
+    try:
+        done = subprocess.run(
+            [name],
+            cwd=str(where),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            env=reaching(),
+            check=False,
+        )
+    except OSError:
+        # The script is not where this expected, which is a clone that moved or a partial install.
+        # One absent source is not a reason to refuse a session the rest of the block would help.
+        return ""
+    return done.stdout.decode("utf-8", errors="replace").strip()
+
+
+def composing(where: Path) -> str:
+    """Everything the sources have to say, as one block, with the silent ones contributing nothing."""
+    said = (said_by(name, where) for name in SOURCES)
+    return "\n\n".join(block for block in said if block)
+
+
+def setting_up(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    What this plugin contributes, which is instructions and no events at all.
+
+    A session with no worktree gets nothing: every source here answers a question about a repository,
+    and asking them from wherever the console happens to be running would report the console's own
+    clone as if it were the session's.
+    """
+    where = payload.get("worktree")
+    if not isinstance(where, str) or not where:
+        return {}
+    said = composing(Path(where))
+    return {"instructions": said} if said else {}
+
+
+def answer(payload: dict[str, Any]) -> dict[str, Any]:
+    """What this plugin wants done about one event, which is only ever the first one."""
+    if payload.get("event") == "setup":
+        return setting_up(payload)
+    return {}
+
+
+def main() -> int:
+    json.dump(answer(json.load(sys.stdin)), sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

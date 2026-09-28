@@ -4,14 +4,18 @@
 # after auto-fixing), non-zero if it still fails. Arguments forward to
 # `pre-commit run`.
 #
+# The first pass reports on stderr and the last on stdout, so a caller capturing stdout is handed the
+# state the tree is actually in rather than that plus a list of failures a hook has since fixed. At a
+# terminal the two are one stream, so a person still sees both runs, streamed, in order.
+#
 # No `-e`: a failing pre-commit run is expected and handled, not fatal.
 set -uo pipefail
 
 git add --update
-pre-commit-run run "$@" && exit 0
+pre-commit-run run "$@" >&2 && exit 0
 
 git add --update
-pre-commit-run run "$@"
+pre-commit-run run "$@" 2>&1
 rc=$?
 git add --update
 exit "$rc"

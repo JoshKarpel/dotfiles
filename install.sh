@@ -44,6 +44,7 @@ function do_config() {
   done
 
   "$BASEDIR/bin/link-claude"
+  "$BASEDIR/bin/link-mainplate"
 }
 
 function do_ssh_key() {
@@ -257,6 +258,61 @@ EOF
   "$BASEDIR/bin/converge-atlas"
 }
 
+# Schedules bin/converge-mainplate, which does the work of serving a durable
+# coding agent on 3002 and is where the dev-box guard lives. mainplate writes its
+# own unit, so this owns only the timer that keeps it on the current tip of its
+# default branch, plus one run so the box is serving now rather than whenever the
+# timer first comes round.
+#
+# Every five minutes rather than daily, because this is the one of the three that
+# is under active development: a commit lands and the box is serving it within the
+# five minutes, not the next morning. What makes that affordable is that
+# `converge-mainplate` asks what `main` points at before doing anything, so a tick
+# with no new commit is one `git ls-remote` and no restart.
+function do_mainplate() {
+  local units=~/.config/systemd/user
+
+  "$BASEDIR/bin/is-dev-box" || return 0
+
+  use_user_bus
+
+  log "Serving mainplate..."
+
+  mkdir -p "$units"
+
+  cat > "$units/converge-mainplate.service" << EOF
+[Unit]
+Description=Update mainplate and converge this VM's console
+
+[Service]
+Type=oneshot
+ExecStart=$BASEDIR/bin/converge-mainplate
+EOF
+
+  # No `Persistent=true` and only seconds of randomisation, both of which the
+  # codex and the atlas want and this does not. Catching up a missed window is
+  # meaningless when the next window is five minutes out, and an hour of jitter
+  # spread over a five-minute period would reorder the firings rather than spread
+  # them. Thirty seconds is enough that a fleet of boxes does not ask GitHub the
+  # same question on the same second.
+  cat > "$units/converge-mainplate.timer" << EOF
+[Unit]
+Description=Keep mainplate on the current tip of its default branch
+
+[Timer]
+OnCalendar=*:0/5
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl --user daemon-reload
+  systemctl --user enable --now converge-mainplate.timer
+
+  "$BASEDIR/bin/converge-mainplate"
+}
+
 # Owns the box's work session, so that it exists because the box is up rather
 # than because somebody logged in. Without this the session is created lazily by
 # the first interactive login, which means a reboot silently discards it until
@@ -427,6 +483,7 @@ do_brew
 do_mise
 do_cloister
 do_atlas
+do_mainplate
 do_zellij_session
 do_zellij_web
 do_vscode_web

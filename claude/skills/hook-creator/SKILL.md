@@ -131,43 +131,48 @@ feedback. A hook that blocks by exiting 2 must guard `stop_hook_active` (see
 above); one that reports through the `additionalContext` JSON below does not,
 since it always exits 0 and never re-triggers the loop that field guards against.
 
-Example: `claude-stop-precommit`, which nudges about untracked files, stages
-tracked changes, and runs `pre-commit-autofix`:
+Example: `claude-stop-precommit`, which renders whatever `pre-commit-verdict`
+decided about the repository:
 ```bash
-git rev-parse --show-toplevel &>/dev/null || exit 0
+VERDICT=$(pre-commit-verdict)
+case "$(printf '%s' "$VERDICT" | jq -r '.verdict // ""')" in
+  strays)
+    MESSAGE="untracked files"
+    CONTEXT="There are untracked files.
+For each file, decide what to do with it: stage it with git add, add it to .gitignore, or delete it.
+Files:
 
-UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null)
-if [[ -n "$UNTRACKED" ]]; then
-  jq -n --arg ctx "There are untracked files: $UNTRACKED" \
-    '{"systemMessage":"untracked files","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$ctx}}'
-  exit 0
-fi
+$(printf '%s' "$VERDICT" | jq -r '.paths[]')"
+    ;;
+  failing)
+    MESSAGE="pre-commit failing"
+    CONTEXT="pre-commit is still failing after auto-fixing:
 
-if ! is-pre-commit-project; then
-  git add --update  # stage tracked modifications only, not untracked files
-  exit 0
-fi
+$(printf '%s' "$VERDICT" | jq -r '.output')"
+    ;;
+  *)
+    exit 0
+    ;;
+esac
 
-if OUTPUT=$(pre-commit-autofix 2>&1); then
-  exit 0
-fi
-
-jq -n --arg ctx "pre-commit is still failing after auto-fixing:
-
-$OUTPUT" '{"systemMessage":"pre-commit failing","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$ctx}}'
-exit 0
+jq -n --arg message "[claude-stop-precommit] $MESSAGE" --arg ctx "$CONTEXT" \
+  '{systemMessage: $message, hookSpecificOutput: {hookEventName: "Stop", additionalContext: $ctx}}'
 ```
 
 Key preferences:
-- Use `git add --update` not `git add -A`: handle untracked files separately
-  with a dedicated nudge, since staging them silently would commit files
-  nobody decided belong in the repo
+- Keep the decision out of the hook when something else already needs it. The
+  mainplate plugin `pre-commit` renders the same three verdicts into that
+  console's vocabulary, so the logic lives in `pre-commit-verdict` and both
+  tools check a repository identically rather than by being kept in step.
+- Handle untracked files separately from a `git add --update`, with a nudge that
+  names them: staging them silently would commit files nobody decided belong in
+  the repo.
 - Reach for a shared wrapper like `pre-commit-autofix` (stage, run, re-stage
   fixes, run again) instead of hand-rolling runner detection and a double run
-  inline
+  inline.
 - Feed Claude a `hookSpecificOutput.additionalContext` JSON object on stdout
   with exit 0 rather than blocking via exit 2/stderr: it surfaces the same
-  information without forcing a retry loop
+  information without forcing a retry loop.
 
 ### 3. Context Injection (SessionStart)
 

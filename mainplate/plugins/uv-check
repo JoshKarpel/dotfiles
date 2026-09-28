@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+# Keep a bare `python` out of a uv project, by asking the hook that already knows how to tell.
+#
+# This is the port of the `claude-uv-check` PreToolUse hook, and it is an adapter rather than a
+# rewrite: what mainplate calls `before_tool` is what Claude Code calls `PreToolUse`, and a `refuse`
+# is what exit 2 with a sentence on stderr is there. The matching itself stays in one place, which
+# matters more here than anywhere: that regex is subtle enough to have been wrong twice, once letting
+# `python -m uvicorn` through on the substring `uv` and once matching `python` inside a grep pattern,
+# and a second copy of it here would be a third bug waiting with nothing to catch it.
+#
+# **The advice is followable here, which was checked rather than assumed.** A mainplate command runs
+# in a namespace binding /usr, /bin, /sbin, /lib*, /etc and /opt, with PATH set to
+# `/usr/local/bin:/usr/bin:/bin`, so most of what this machine's shell has is absent. `uv` is not: it
+# is a real binary at /usr/local/bin/uv rather than a mise shim, so `uv run python` is a command the
+# model can actually run. Were that to stop being true this plugin would have to go, because a
+# refusal pointing at a command that does not exist is worse than the call it refused.
+#
+# **Only `bash`, because only `bash` carries a command line.** The console's file tools take a path
+# and cannot invoke an interpreter, and a plugin's tools are their own business.
+#
+# Nothing here imports mainplate.
+# `echo '{"event":"before_tool","tool":"bash","args":{"command":"python x.py"},"worktree":"/repo"}' |
+# ./uv-check` is the whole of how to try it by hand.
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+# The script that decides, which is the same one Claude Code runs and carries its own self-tests.
+HOOK = "claude-uv-check"
+
+# The exit code the hook uses to mean "do not run this", which is Claude Code's convention. Named
+# rather than written twice, because the two other outcomes are read against it: 0 is "no opinion",
+# and anything else is the hook itself being broken, which is not the same as a refusal and must not
+# be reported to the model as one.
+BLOCKS = 2
+
+# The clone this was installed from, reached by resolving the symlink mainplate actually runs.
+DOTFILES = Path(__file__).resolve().parents[2]
+
+
+def reaching() -> dict[str, str]:
+    """
+    The environment the hook needs, which is this process's with one directory in front.
+
+    `claude-uv-check` shells out to `is-uv-project` by name, and a user-tier plugin inherits the
+    console's environment, which is a systemd unit carrying the standard system PATH and nothing
+    else. Without `bin/` on it the hook finds neither, fails, and every command is allowed: a guard
+    that silently passes everything.
+
+    **The mise shims are deliberately not here, and this is the one thing to know before adding
+    them.** A shim runs mise, mise reads the config of whatever directory it is invoked in, and a
+    `mise.toml` it has not been told to trust is a hard error. These run in the session's worktree,
+    which is an arbitrary repository somebody cloned, so a shim on this PATH turns "that project
+    carries a mise.toml" into "`jq` exits non-zero", which under the hook's `set -e` is a guard that
+    refuses nothing and says nothing. Everything the hooks need is in the system set already: `jq`,
+    `uv`, `git`, `gh` and `rg` are all real binaries under /usr, and only `bin/` is missing.
+    """
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join((str(DOTFILES / "bin"), env.get("PATH", "")))
+    return env
+
+
+def asking(command: str, where: Path) -> str | None:
+    """
+    Why this command must not run, or nothing where the hook has no objection to it.
+
+    The hook is handed the payload shape it was written for rather than mainplate's, which is the
+    whole of the adaptation: one object with a `tool_input.command`, exactly as Claude Code sends.
+
+    Run *in the worktree*, because what the hook asks first is whether it is standing in a uv
+    project, and that question has no answer anywhere else.
+
+    A hook that fails in some third way is not a refusal and is passed over, since the console has
+    no report to make about a broken guard and refusing every command would be a worse answer than
+    running one. What it wrote to stderr reaches the console's log either way.
+    """
+    try:
+        done = subprocess.run(
+            [HOOK],
+            cwd=str(where),
+            input=json.dumps({"tool_input": {"command": command}}).encode(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=reaching(),
+            check=False,
+        )
+    except OSError:
+        return None
+    sys.stderr.buffer.write(done.stderr)
+    if done.returncode != BLOCKS:
+        return None
+    return done.stderr.decode("utf-8", errors="replace").strip() or None
+
+
+def gating(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Judge the call the model made, and refuse it where the hook says so.
+
+    A refusal reaches the model as the call's own result, saying why, which is what makes it a
+    redirection rather than a command that silently went nowhere: told `uv run python`, the model
+    runs that instead of retrying the same thing.
+    """
+    if payload.get("tool") != "bash":
+        return {}
+    where = payload.get("worktree")
+    if not isinstance(where, str) or not where:
+        return {}
+    args = payload.get("args")
+    command = args.get("command") if isinstance(args, dict) else None
+    if not isinstance(command, str) or not command:
+        return {}
+    said = asking(command, Path(where))
+    return {"refuse": said} if said else {}
+
+
+def answer(payload: dict[str, Any]) -> dict[str, Any]:
+    """What this plugin wants done about one event, which for most events is nothing."""
+    event = payload.get("event")
+    if event == "setup":
+        # Only where there is a repository to be a uv project, so a session with no files spawns no
+        # process per tool call to be told nothing every time.
+        return {"events": ["before_tool"] if payload.get("worktree") else []}
+    if event == "before_tool":
+        return gating(payload)
+    return {}
+
+
+def main() -> int:
+    json.dump(answer(json.load(sys.stdin)), sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

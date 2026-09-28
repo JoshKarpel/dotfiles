@@ -11,18 +11,20 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 - **`dotrc/`** — Files symlinked as `~/.<filename>` (bashrc, zshrc, commonrc-pre, commonrc-post, gitconfig, etc.)
 - **`config/`** — Top-level entries symlinked into `~/.config/` under their own names. An entry that is a file lands as a file, so `starship.toml` becomes `~/.config/starship.toml`, not `~/.config/starship/`. Adding a tool's config needs no change to `install.sh`.
 - **`claude/`** — Source files symlinked into `~/.claude/` via `bin/link-claude`: the global `CLAUDE.md`, `settings.json`, `skills/`, `rules/`, and `output-styles/`. Anything else added here lands at the matching path under `~/.claude/`, and a symlink whose source is later deleted is pruned on the next run wherever it sits. Edit these here, not the symlinks in `~/.claude/`.
+- **`mainplate/`** — Linked into `~/.config/mainplate/` a level at a time by `bin/link-mainplate`, never as a whole directory, because that directory is mainplate's own: `config.yaml` (linked on exe.dev only) and `plugins/`. It cannot live under `config/`, whose loop would link the top-level name and put mainplate's own 0600 files inside this clone.
 - **`sources/`** — Shell scripts sourced by `commonrc-pre` at shell startup (aliases, git helpers, path management, etc.)
 - **`targets/`** — Package lists for apt and brew (one package per line, kept sorted by pre-commit)
 - **`bin/`** — Scripts added to PATH via `dotfiles/bin`; add any executable scripts here and they will be available in the shell (e.g., for Claude Code hooks)
 
 Systemd user units are the exception to `config/`. `install.sh` writes
 `cloister-codex.{service,timer}`, `converge-atlas.{service,timer}`,
-`zellij-session.service`, `zellij-web.service`, and `vscode-web.service` into
-`~/.config/systemd/user/` rather than symlinking them from here, because a unit
-has to name the absolute path of the clone it was installed from, and only
-`install.sh` knows where that is. The same directory is where
-`claude-scriptorium` and `exe-dev-atlas` write the units they manage themselves,
-so symlinking the tree in would point those tools' writes at this repo.
+`converge-mainplate.{service,timer}`, `zellij-session.service`,
+`zellij-web.service`, and `vscode-web.service` into `~/.config/systemd/user/`
+rather than symlinking them from here, because a unit has to name the absolute
+path of the clone it was installed from, and only `install.sh` knows where that
+is. The same directory is where `claude-scriptorium`, `exe-dev-atlas`, and
+`mainplate` write the units they manage themselves, so symlinking the tree in
+would point those tools' writes at this repo.
 
 All of those are for a person to look at, so all are gated on `is-dev-box`
 rather than `is-exe-dev`: a VM running a workload has nobody reading its session
@@ -42,17 +44,19 @@ forwards 3000-9999 to `https://<vm>.exe.xyz:<port>/`.
 [exe-dev-atlas](https://github.com/JoshKarpel/exe-dev-atlas) takes the bare
 hostname's port so the front door is an index of everything else. The atlas
 sorts by port, so the bottom of the forwarded range is the top of the index, and
-the two ways in to the box take it: the work session on 3000 and VS Code on
-3001. A dev server lands wherever it lands above those, and services that are
-only occasionally opened start at 4000, where the codex is.
+the three ways in to the box take it: the work session on 3000, VS Code on 3001,
+and mainplate on 3002. A dev server lands wherever it lands above those, and
+services that are only occasionally opened start at 4000, where the codex is.
 
-Neither the atlas nor the codex is implemented here. Both are published tools
-this repo installs through mise and converges on a daily timer
-(`bin/converge-atlas`, `bin/cloister-codex`), and each writes its own unit
-naming the interpreter or binary mise resolved, so an upgrade renders a changed
-unit rather than one that looks untouched. Both are exempt from the mise
-cooldown in `config/mise/config.toml`, so a release is being served the day
-after it ships.
+None of the atlas, the codex, or mainplate is implemented here. All three are
+published tools this repo installs and converges on a timer
+(`bin/converge-atlas`, `bin/cloister-codex`, `bin/converge-mainplate`), and each
+writes its own unit naming the interpreter or binary the install resolved. The
+atlas and the codex come through mise, where an upgrade renders a changed unit
+rather than one that looks untouched, and both are exempt from the mise cooldown
+in `config/mise/config.toml` so a release is being served the day after it ships.
+Those two are daily; mainplate is every five minutes, because it is the one under
+active development here.
 
 ## The Work Session
 
@@ -129,6 +133,126 @@ a specifier wherever it appears, quoting included), and are written at first boo
 rather than on every converge, so a change to them reaches only boxes built
 afterwards.
 
+## Mainplate
+
+[mainplate](https://joshkarpel.github.io/mainplate/) is the third way in to a dev
+box, on 3002, behind the same private proxy as the other two. What is behind that
+proxy here runs commands, so never `share set-public` this port.
+
+It is installed from the tip of its default branch rather than from the published
+release, because the release is behind the work. `bin/converge-mainplate` uses
+`uv tool install --force` to do it, and the `--force` is load-bearing: a branch is
+a moving ref, so the install has to re-resolve it every run for the timer to mean
+anything.
+
+The timer runs every five minutes, which is affordable only because the script asks
+`git ls-remote` what `main` points at before doing anything and compares it against
+the commit the installer recorded in its `direct_url.json`. That gate is there for
+the restart rather than for the install: `mainplate install` restarts the service
+unconditionally, correctly, since an upgrade in place renders an identical unit, and
+a restart drops the request in flight and leaves the session waiting out its lease
+before a redelivery resumes it. Nothing is lost, because mainplate is durable, but
+288 of those a day would be paid for by whoever is typing. A tick with nothing new
+is one remote call. The other thing that gets it past the gate is the service being
+down, so a stopped console is picked up within five minutes rather than tomorrow.
+
+That is the one service here that does not come through mise, and the reason is a
+limit of the pipx backend rather than a preference. Neither form it offers tracks
+a branch. A bare git URL resolves `latest` against tags, so it installs the
+release this exists to skip; `@main` is recorded as a literal pinned version that
+`mise upgrade` reports up to date forever. Either way the timer would serve the
+same code until somebody noticed. When the release catches up, this becomes an
+ordinary `pipx:` entry in `config/mise/config.toml` with a cooldown exemption
+beside the codex and the atlas, and the `--force` goes with it.
+
+`mainplate install` writes the unit, and writes `config.yaml` itself when there is
+none, discovering the VM's exe.dev LLM integration to fill it in. On an exe.dev box
+this repo owns that file instead (`mainplate/config.yaml`), for a reason discovery
+cannot serve: user-tier plugins are read from `config.yaml` and nowhere else, and a
+file mainplate writes once and never revisits has no way to gain a `plugins:`
+block. Owning it also removes the sharp edge in the generated path, where a box
+whose LLM integration was attached after its first install keeps the commented-out
+template and refuses to start forever.
+
+What that gives up is a machine the committed file is wrong about. It names the
+hostname every exe.dev VM's personal integration answers at, so a team integration
+or a laptop with an API key wants the generated file instead, and `link-mainplate`
+installs it on exe.dev only for exactly that reason. There is no credential in it
+either way: exe.dev injects one at its own edge, so these VMs hold no key, and a
+key would belong in the copy on the box rather than in this repo.
+
+`bin/link-mainplate` makes three links, each a directory or file one level below
+`~/.config/mainplate` so the directory around them stays mainplate's: `guidance`
+at `claude/rules`, `plugins` at `mainplate/plugins`, and `config.yaml`. Directories
+rather than a file apiece, so a rule or a plugin added tomorrow is installed with
+nothing relinked.
+
+Every rule goes into guidance, and there is no scoped half held back, because
+mainplate has no console-side scoping to hold it back for: every `.md` under
+`guidance/` loads into every session, and frontmatter comes off before the model
+sees it, so a rule's `paths:` is dropped rather than honoured. The scoping
+mainplate does have is repository-side and lazy, over nested `AGENTS.md` files in
+the worktree, which is a different mechanism reached by a different path.
+
+## Mainplate Plugins
+
+`mainplate/plugins/` holds the ports of the Claude Code hooks whose reason survives
+the move. Three events carry them: `before_tool` is `PreToolUse` and a `refuse` is
+what exit 2 with a sentence on stderr is there, `before_turn_end` is `Stop` with
+`attempt` in place of `stop_hook_active`, and `setup` is `SessionStart` returning
+one `instructions` string. `Notification`, the status line, and `PreToolUse`
+*allow* hooks have no equivalent at all.
+
+Most hooks should not be ported, and the reason is worth knowing before writing
+another one. The ones that shape auto-approval (`claude-shell-comment-check`,
+`claude-gh-api-check`, `claude-awk-check`) answer a permission matcher mainplate
+does not have. `claude-http-server-bind-check` guards against exposure on a
+network that is switched off. `claude-rm-scope-check` guards an escape a mount
+namespace already prevents, except for a session picking `this whole machine`. So
+the question to ask is not "does this event exist" but "does the sandbox already
+answer it".
+
+Git is where that question changed its answer. A session's checkout is bound
+read-write whole, `.git` included, so `add`, `commit`, `merge` and `rebase` all
+work there against this session's refs and nobody else's; the store it borrows
+objects from is read-only and a confined git has no network, so only `push` is
+still structurally impossible. Whether a session should commit in its own
+checkout is therefore a question for mainplate rather than one the sandbox has
+already settled, where `settings.json`'s `git push` entry needs no equivalent at
+all.
+
+The other edge is what a plugin telling the model to do something has to be
+written around, and it is the one that moved: staging is now an instruction a
+session can follow, so an untracked file can be settled rather than only reported.
+That is what lets `mainplate/plugins/pre-commit` and `claude-stop-precommit` both
+render the one verdict `bin/pre-commit-verdict` reaches, instead of each deciding
+for itself in the only way its own tool allowed. Read that script's header for the
+verdicts and for why untracked files gate the run rather than riding beside it.
+
+**What a command can reach is the other half of that question, and it decides
+whether advice is followable.** A session's `bash` runs in a namespace binding
+/usr, /bin, /sbin, /lib\*, /etc and /opt, with `PATH=/usr/local/bin:/usr/bin:/bin`.
+`uv`, `git`, `gh`, `jq` and `rg` are real binaries there; `just`, `fd` and
+`pre-commit` are mise tools under `~/.local/share` and are not. That is why
+`uv-check` ports and `claude-just-list` does not: one tells the model to run
+something it has, the other names a command that does not exist in there.
+
+A user-tier plugin, unlike a repository's, runs **unconfined**, with the console's
+own environment and network. What it does not get is a useful `PATH`, since the
+console is a systemd unit carrying the standard system set, so each plugin finds
+this repo's `bin/` by resolving its own path back out of the symlink. Everything
+those scripts then reach for has to be in that set: `git` and `jq` under
+`/usr/bin`, and the `uv` that runs a project's own `pre-commit` under
+`/usr/local/bin`. That is why `jq` is in `targets/apt.txt` and not left to mise,
+whose copy exists for an interactive shell and is invisible from here.
+
+**Never put the mise shims on that `PATH`.** A shim runs mise, mise reads the
+config of the directory it is invoked in, and an untrusted `mise.toml` is a hard
+error rather than a warning. These plugins run in the session's worktree, which is
+an arbitrary repository, so a shim turns "this project has a `mise.toml`" into a
+helper that exits non-zero, which for a guard reading exit codes is one that
+refuses nothing and reports nothing. Everything they need is in the system set.
+
 ## Shell Startup Chain
 
 `bashrc`/`zshrc` → `~/.commonrc-pre` (sources every file in `sources/`, adds `bin/`
@@ -186,6 +310,19 @@ cloister-codex
 # link to each. Dev-box VMs only; a no-op anywhere else. install.sh schedules it
 # daily, so running it by hand is only for wanting a release now.
 converge-atlas
+
+# Update mainplate to the current tip of its default branch and converge the
+# systemd user service that serves its console on 3002. Dev-box VMs only, and a
+# no-op anywhere else or whenever `main` has not moved and the console is up.
+# install.sh schedules it every five minutes, so running it by hand is only for
+# not waiting out the rest of them.
+converge-mainplate
+
+# Link what this repo owns into ~/.config/mainplate: console guidance at
+# claude/rules, the plugins, and on exe.dev the config that declares them. Run by
+# install.sh; by hand only after moving the clone, since the links name its
+# absolute path.
+link-mainplate
 
 # Exit 0 only on an exe.dev VM tagged `dev-box`. The guard the services that
 # exist to be looked at by a person are gated on.
@@ -249,6 +386,11 @@ markers, so there's no separate list to drift. It's wired into pre-commit
 `python3`) surfaces as a failed run rather than a silent pass, since the hook whose
 tests can't run exits non-zero.
 
+A participant need not be a hook. `pre-commit-verdict` carries the marker because it
+holds the logic two hooks' worth of renderers share, one of them in mainplate rather
+than in Claude Code, so the tests belong with the decision instead of once per
+caller. Anything executable in `bin/` that declares the marker is run.
+
 - **Bash hooks** embed a block right after the `set` line, before reading stdin. A
   matching hook defines a `t <want-exit> <command>` helper that re-invokes the hook
   (`CLAUDE_HOOK_SELFTEST= "$0"`) with a crafted `{tool_input:{command:…}}` payload and
@@ -293,6 +435,8 @@ When asked to write a skill, place it in `claude/skills/` in this dotfiles repo 
 ## Claude Code Rules
 
 Rules live in `claude/rules/` and load automatically when Claude works with matching file types (if `paths:` frontmatter is set) or globally (if not). Use the `rule-curator` skill to add or update rules; new rules go in `claude/rules/`, not `claude/skills/`.
+
+They are also mainplate's console guidance, where a `paths:` line buys nothing: every rule loads into every session there. A rule written for one file type is still worth scoping for Claude Code, but write it knowing a mainplate session reads it whatever it is working on.
 
 Rules are read at runtime, while the work is being done, so each one describes what it does concretely and on its own terms. A cross-reference is appropriate when it tells Claude what to *do* next ("confirm nothing mutates it, see the verify-empirically rule").
 

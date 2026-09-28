@@ -1,0 +1,190 @@
+#!/usr/bin/env bash
+# What this repository's hooks say about the work in progress, printed as one JSON verdict.
+#
+# The decision two tools want and neither owns. `claude-stop-precommit` renders it as what Claude
+# Code is told when it tries to stop; the mainplate plugin `pre-commit` renders it as what a session
+# is sent back with at a turn boundary. Each decided it for itself until a mainplate session could
+# write a git index: "stage it" is not advice anybody can take in a worktree whose clone is bound
+# read-only, and a gate that cannot clear is not a gate. Now there is one decision and two ways of
+# phrasing it.
+#
+# Exactly one of three verdicts is printed:
+#
+#   {"verdict":"clean"}                  nothing to say
+#   {"verdict":"strays","paths":[...]}   untracked files, and the hooks did not run
+#   {"verdict":"failing","output":"..."} hooks still failing after everything fixable was fixed
+#
+# Tagged rather than a pass/fail flag beside a path list, so "failing with strays" and "clean with
+# output" are states a caller cannot be handed rather than ones every caller has to rule out.
+#
+# **Untracked files stop the run rather than riding beside it.** `pre-commit run` is told what to
+# check by the index, so a file nobody has staged is one the hooks never look at, and a pass reported
+# over the rest is a pass over part of the change. Deciding about them first is what makes the run
+# that follows cover everything.
+#
+# This writes: `git add --update`, and whatever the hooks rewrite in place. So a caller reporting a
+# verdict is reporting on a working tree that may have moved while the verdict was being reached.
+#
+# It exits 0 wherever it reached a verdict; a non-zero exit is this script failing, not the hooks.
+
+# No `-e`: a repository without hooks and a failing run are both expected answers, not faults.
+set -uo pipefail
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker line is how
+# `claude-hook-selftests` discovers participating scripts. This one holds the whole decision its two
+# renderers share, and every branch of it is a git state neither renderer can reach on its own; run
+# these with `CLAUDE_HOOK_SELFTEST=1 pre-commit-verdict`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  BIN_DIR=$(dirname "$SELF")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+
+  mkrepo() {
+    local dir="$1"
+    mkdir -p "$dir"
+    git init -q "$dir"
+    git -C "$dir" config user.email "test@example.com"
+    git -C "$dir" config user.name "test"
+    echo base >"$dir/file"
+    git -C "$dir" add file
+    git -C "$dir" commit -q -m init
+  }
+
+  add_hooks() {
+    local dir="$1"
+    echo "repos: []" >"$dir/.pre-commit-config.yaml"
+    git -C "$dir" add .pre-commit-config.yaml
+    git -C "$dir" commit -q -m "add pre-commit config"
+  }
+
+  # A `pre-commit-autofix` that records having been called, because the gate and a passing run both
+  # print nothing and only the marker tells them apart.
+  stub_autofix() {
+    local dir="$1" code="$2" output="$3"
+    printf '#!/bin/sh\n: > "%s/autofix.called"\nprintf %%s "%s"\nexit %s\n' \
+      "$dir" "$output" "$code" >"$dir/pre-commit-autofix"
+    chmod +x "$dir/pre-commit-autofix"
+    rm -f "$dir/autofix.called"
+  }
+
+  call() {
+    local cwd="$1" path="$2"
+    EXIT=0
+    OUT=$(cd "$cwd" && PATH="$path" CLAUDE_HOOK_SELFTEST= "$SELF" </dev/null 2>&1) || EXIT=$?
+    [[ "$EXIT" == 0 ]] ||
+    { printf 'FAIL %s: exited %s :: %s\n' "$cwd" "$EXIT" "$OUT"; fails=1; }
+  }
+
+  want() {
+    local desc="$1" filter="$2" expected="$3" got
+    got=$(printf '%s' "$OUT" | jq -r "$filter" 2>/dev/null) || got="<not json: $OUT>"
+    [[ "$got" == "$expected" ]] ||
+    { printf 'FAIL %s: %s want=%q got=%q\n' "$desc" "$filter" "$expected" "$got"; fails=1; }
+  }
+
+  # --- outside any repository: nothing to say ---
+  call "$workdir" "$BIN_DIR:$PATH"
+  want "outside any repo" '.verdict' clean
+
+  # --- untracked files gate the run: the hooks are never reached ---
+  gated="$workdir/gated"
+  mkrepo "$gated"
+  add_hooks "$gated"
+  stubs_gate=$(mktemp -d --tmpdir="$workdir")
+  stub_autofix "$stubs_gate" 0 ""
+  touch "$gated/stray.txt"
+  call "$gated" "$stubs_gate:$BIN_DIR:$PATH"
+  want "strays gate the run" '.verdict' strays
+  want "strays name the file" '.paths | join(",")' stray.txt
+  [[ ! -e "$stubs_gate/autofix.called" ]] ||
+  { printf 'FAIL strays gate the run: the hooks ran anyway\n'; fails=1; }
+
+  # --- a path git would quote survives as itself, which is what `-z` is for ---
+  odd="$workdir/odd"
+  mkrepo "$odd"
+  touch "$odd/$(printf 'two\nlines.txt')"
+  call "$odd" "$BIN_DIR:$PATH"
+  want "a newline in a path round-trips" '.paths[0]' "$(printf 'two\nlines.txt')"
+
+  # --- no strays and no hooks: tracked changes are staged and there is nothing to say ---
+  plain="$workdir/plain"
+  mkrepo "$plain"
+  echo changed >>"$plain/file"
+  call "$plain" "$BIN_DIR:$PATH"
+  want "a repo without hooks" '.verdict' clean
+  STAGED=$(git -C "$plain" diff --cached --name-only)
+  [[ "$STAGED" == "file" ]] ||
+  { printf 'FAIL a repo without hooks: tracked change was not staged :: %s\n' "$STAGED"; fails=1; }
+
+  # --- hooks that pass, after fixing or without ---
+  passing="$workdir/passing"
+  mkrepo "$passing"
+  add_hooks "$passing"
+  echo changed >>"$passing/file"
+  stubs_pass=$(mktemp -d --tmpdir="$workdir")
+  stub_autofix "$stubs_pass" 0 ""
+  call "$passing" "$stubs_pass:$BIN_DIR:$PATH"
+  want "hooks that pass" '.verdict' clean
+  [[ -e "$stubs_pass/autofix.called" ]] ||
+  { printf 'FAIL hooks that pass: the hooks never ran\n'; fails=1; }
+
+  # --- hooks still failing: the output is carried, not summarised ---
+  stubs_fail=$(mktemp -d --tmpdir="$workdir")
+  stub_autofix "$stubs_fail" 1 "trailing whitespace failed"
+  call "$passing" "$stubs_fail:$BIN_DIR:$PATH"
+  want "hooks still failing" '.verdict' failing
+  want "the failure is carried whole" '.output' "trailing whitespace failed"
+
+  # --- only the last pass is reported: what the first one said is already out of date ---
+  stubs_two=$(mktemp -d --tmpdir="$workdir")
+  cat >"$stubs_two/pre-commit-autofix" <<'EOF'
+#!/bin/sh
+echo "black....Failed - files were modified by this hook" >&2
+echo "mypy....Failed - needs a human"
+exit 1
+EOF
+  chmod +x "$stubs_two/pre-commit-autofix"
+  call "$passing" "$stubs_two:$BIN_DIR:$PATH"
+  want "only the last pass is reported" '.output' "mypy....Failed - needs a human"
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || { printf '{"verdict":"clean"}\n'; exit 0; }
+cd "$ROOT" || exit 1
+
+# Read with `read -d ''` rather than `mapfile -d ''`, which macOS's bash 3.2 has no `-d` for. `-z`
+# rather than the readable listing because git quotes and escapes a path with a newline or a
+# non-ASCII byte in it, and a quoted path is not one anything downstream can open.
+STRAYS=()
+while IFS= read -r -d '' stray; do
+  STRAYS+=("$stray")
+done < <(git ls-files --others --exclude-standard -z)
+
+if (( ${#STRAYS[@]} > 0 )); then
+  jq -n '{verdict: "strays", paths: $ARGS.positional}' --args "${STRAYS[@]}"
+  exit 0
+fi
+
+if ! is-pre-commit-project; then
+  git add --update
+  printf '{"verdict":"clean"}\n'
+  exit 0
+fi
+
+# Stdout only, which is where `pre-commit-autofix` puts its last pass; its first pass goes to stderr
+# and is discarded here rather than carried through, both because a failure a hook has since fixed is
+# not something to send anybody back over, and because this script's own stderr is read by the tools
+# that call it - Claude Code shows a hook's stderr in the TUI. A runner that cannot start says so on
+# both passes, and the last pass folds its stderr into stdout, so that is not what gets dropped.
+if OUTPUT=$(pre-commit-autofix 2>/dev/null); then
+  printf '{"verdict":"clean"}\n'
+  exit 0
+fi
+
+jq -n --arg output "$OUTPUT" '{verdict: "failing", output: $output}'

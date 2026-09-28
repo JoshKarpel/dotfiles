@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Serve a durable coding agent from a systemd user service, running the current
+# tip of mainplate's default branch.
+#
+# Run by install.sh's do_mainplate on every converge, and by
+# converge-mainplate.timer every five minutes, so a commit pushed now is being
+# served within five minutes with nobody touching the box. Both paths are the same
+# two steps, and both are idempotent: the install resolves the branch afresh, and
+# `mainplate install` rewrites the unit only when the interpreter or its arguments
+# changed.
+#
+# What it does *not* rewrite conditionally is the service: `mainplate install`
+# restarts unconditionally, because an upgrade in place renders an identical unit
+# and a converge that stopped at "no difference" would report success while the old
+# code kept serving. Correct, and at this cadence it is the expensive half: a
+# restart drops whatever request was in flight and the session waits out its lease
+# (a minute by default) before a redelivery resumes it. Durable, so nothing is
+# lost, but not free, and 288 of them a day would be paid for by whoever is typing.
+#
+# So the resolved commit is the gate. `main` is asked what it points at, which is
+# one cheap remote call, and where the answer is already installed and the service
+# is up there is nothing to do. That leaves the restart happening when there is new
+# code to serve, which is the only time it was ever the point.
+
+set -euo pipefail
+
+BASEDIR="$(dirname "$(realpath "$0")")"
+
+# A console that hands out an agent with file and bash tools over the whole
+# machine. On a box someone works on, reachable only through the platform's
+# authenticated proxy, that is the point; on a laptop, or on a VM running a
+# workload rather than a person, it is a daemon nobody asked for.
+"$BASEDIR/is-dev-box" || exit 0
+
+# By absolute path. This runs from a systemd user unit as readily as from a
+# shell, and that unit gets an environment with neither mise nor its shims on
+# PATH.
+MISE="$HOME/.local/bin/mise"
+
+# The tip of the default branch rather than the published release, because
+# mainplate is early enough that the release is behind the work. When that stops
+# being true this becomes the bare package name, and the `--force` below can go
+# with it.
+#
+# Not `mise` like the codex and the atlas, and that is a limit of the pipx
+# backend rather than a preference. Neither form it offers tracks a branch: the
+# bare git URL resolves `latest` against *tags*, so it installs the release this
+# exists to skip, and `@main` is recorded as a literal pinned version that
+# `mise upgrade` reports up to date forever. Either way the timer would serve the
+# same code until somebody noticed.
+#
+# What that costs is worth saying plainly: the cooldown in config/mise/config.toml
+# is not waived here so much as never reached, because nothing about this install
+# goes through mise. A commit lands and this box is running it five minutes later,
+# with no aging at all. That is the same judgement the codex and the atlas are
+# granted there by name, for the same reason: this is code from an account whose
+# compromise would already be its author's own problem to notice.
+SPEC="git+https://github.com/JoshKarpel/mainplate.git@main"
+
+# uv is the one Python that can put this on the box: mainplate wants 3.14, and
+# uv fetches an interpreter for itself rather than taking whatever the machine
+# has. Resolved through mise rather than reached by name, for the same reason as
+# the absolute MISE above.
+UV="$("$MISE" which uv)"
+
+# What this box is serving, taken from the file the installer wrote rather than from
+# a note this script keeps: a PEP 610 `direct_url.json` records the commit a VCS
+# install actually resolved to, where the uv receipt records only `rev=main`. So
+# there is no state of our own to fall out of step with what is installed. The glob
+# carries the package version and the interpreter's, both of which move.
+#
+# Nothing where the file is absent or unreadable, which reads as "not installed" and
+# is exactly right: every path below then runs.
+INSTALLED=$(
+  cat "$HOME"/.local/share/uv/tools/mainplate/lib/python*/site-packages/mainplate-*.dist-info/direct_url.json 2>/dev/null |
+  jq -r '.vcs_info.commit_id // empty' 2>/dev/null
+) || INSTALLED=""
+
+# What it should be serving. `ls-remote` rather than a resolve through uv, because
+# the point is to answer "is there anything new" without building anything, and this
+# is one round trip against the remote's refs.
+#
+# Nothing where the remote cannot be reached, which must *not* read as "up to date":
+# an empty answer falls through to the install, where uv's own failure is the one
+# that gets reported rather than a silent skip that claims the box is current.
+WANTED=$(git ls-remote "https://github.com/JoshKarpel/mainplate.git" main 2>/dev/null | cut -f1) || WANTED=""
+
+# `systemctl --user` from a user unit has XDG_RUNTIME_DIR and from an ssh login
+# frequently does not, so it is set rather than assumed. Nothing else here needs it:
+# `mainplate install` sets it for its own systemctl calls.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+# The service being down is drift worth repairing whether or not a commit landed, and
+# at this cadence that repair is within five minutes rather than by tomorrow morning.
+if [[ -n "$WANTED" && "$INSTALLED" == "$WANTED" ]] && systemctl --user is-active --quiet mainplate; then
+  exit 0
+fi
+
+# `--force` rather than a plain install, and it is what makes the timer work: a
+# branch is a moving ref, so the install has to re-resolve it every run. The gate
+# above has already established that there is something to re-resolve, but uv is
+# still the only thing that knows how to build it, so this stays unconditional in
+# the one place it is reached.
+"$UV" tool install --force "$SPEC"
+
+# mainplate writes its own unit, naming the interpreter it was reached through,
+# which for a uv tool install is a path that does not move across upgrades.
+#
+# 3002, behind the work session on 3000 and VS Code on 3001. The atlas sorts by
+# port, so the 3000s are the top of its index, and this belongs there: it is a
+# third way to work on the box rather than a service that is occasionally opened,
+# which is what the 4000s are for.
+#
+# No `--host`: mainplate binds loopback already, and exe.dev terminates TLS at
+# its proxy. Two gates sit in front of this and both matter, because what is
+# behind them runs commands: the proxy bounces an unauthenticated request to an
+# exe.dev login, and mainplate itself refuses to start until config.yaml names an
+# endpoint. Never `share set-public` this port.
+"$HOME/.local/bin/mainplate" install --port 3002
