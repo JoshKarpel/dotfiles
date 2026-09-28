@@ -179,7 +179,7 @@
     "ask": [],
     "defaultMode": "auto"
   },
-  "model": "opus[1m]",
+  "model": "opus",
   "hooks": {
     "SessionStart": [
       {
@@ -304,6 +304,11 @@
   },
   "feedbackSurveyRate": 0,
   "effortLevel": "high",
+  "modelSettings": {
+    "claude-opus-5-5": {
+      "effortLevel": "high"
+    }
+  },
   "askUserQuestionTimeout": "never",
   "voice": {
     "enabled": true,
@@ -312,6 +317,7 @@
   },
   "autoMemoryEnabled": false,
   "showThinkingSummaries": true,
+  "promptSuggestionEnabled": false,
   "skipWorkflowUsageWarning": true,
   "theme": "dark",
   "autoCompactEnabled": true,
