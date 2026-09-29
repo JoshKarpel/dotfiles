@@ -15,6 +15,7 @@ graphviz
 gzip
 imagemagick
 inotify-tools
+jq
 libncurses-dev
 libsqlite3-dev
 libssl-dev

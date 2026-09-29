@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Point mainplate at what this repo owns: its console guidance, its plugins, and
+# on an exe.dev VM its configuration.
+#
+# Not an entry under config/, which install.sh links a whole top-level name at a
+# time: ~/.config/mainplate is mainplate's own directory, where `mainplate
+# install` writes the environment file at 0600 and where the sessions database is
+# named from. Linking the name would put those inside a git clone. This links one
+# level down instead, and the directory around it stays mainplate's.
+#
+# Directories rather than a file apiece, unlike link-claude: there are three links
+# to make, so a rule or a plugin added tomorrow is installed with nothing relinked
+# and no orphan to prune.
+#
+# Every .md under guidance/ loads into every session, and frontmatter comes off
+# before the model sees it, so a rule's `paths:` is dropped rather than honoured.
+# That is why the whole rules directory goes rather than some scoped subset of it:
+# mainplate has no console-side scoping to send one into.
+
+set -euo pipefail
+
+BASEDIR="$(dirname "$(dirname "$(realpath "$0")")")"
+BACKUPS=~/.dotfiles-backups
+
+mkdir -p ~/.config/mainplate
+
+# Something somebody wrote by hand where this wants a symlink. Kept rather than
+# clobbered, matching what install.sh does in the same situation.
+function keeping() {
+  local target="$1" name="$2"
+
+  if [[ -e $target && ! -L $target ]]; then
+    mkdir -p "$BACKUPS"
+    local backup="$BACKUPS/$name"
+    echo "mv $target -> $backup"
+    mv "$target" "$backup"
+  fi
+}
+
+function linking() {
+  local source="$1" target="$2" name="$3"
+
+  keeping "$target" "$name"
+  echo "link $target -> $source"
+  ln -nsf "$source" "$target"
+}
+
+linking "$BASEDIR/claude/rules" ~/.config/mainplate/guidance mainplate-guidance
+linking "$BASEDIR/mainplate/plugins" ~/.config/mainplate/plugins mainplate-plugins
+
+# The configuration, and only where it is true. It names the hostname every
+# exe.dev VM's personal LLM integration answers at, which is wrong for a team
+# integration and meaningless on a laptop; both of those want the file `mainplate
+# install` generates for them, so this leaves that path alone rather than
+# overwriting it with a gateway that is not there.
+#
+# Where it does go in, it is what carries the `plugins:` block: user-tier plugins
+# are read from config.yaml and nowhere else, and the file mainplate writes once
+# and never revisits has no way to gain one.
+if "$BASEDIR/bin/is-exe-dev"; then
+  linking "$BASEDIR/mainplate/config.yaml" ~/.config/mainplate/config.yaml mainplate-config.yaml
+fi

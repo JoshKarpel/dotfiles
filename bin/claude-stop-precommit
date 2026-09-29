@@ -1,98 +1,66 @@
 #!/usr/bin/env bash
-# Stop hook: warn about untracked files, then stage tracked changes and run pre-commit if configured
+# Stop hook: what `pre-commit-verdict` decided about this repository, as what Claude is told.
+#
+# The decision is not here. `pre-commit-verdict` reaches it, and the mainplate plugin `pre-commit`
+# renders the same three verdicts into that console's own vocabulary, so the two tools check a
+# repository the same way and differ only in how they say so.
 
-set -euo pipefail
+# No `-e`: a verdict of "the hooks are failing" arrives as JSON, not as a non-zero exit, and this
+# hook's own exit status is read by `claude-stop` as whether the hook itself worked.
+set -uo pipefail
 
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
-# line is how `claude-hook-selftests` discovers participating hooks. This hook decides
-# what Claude sees at stop time (nothing, an untracked-files nudge, or a pre-commit
-# failure) from three branches that never get exercised otherwise; run these with
-# `CLAUDE_HOOK_SELFTEST=1 claude-stop-precommit`.
+# line is how `claude-hook-selftests` discovers participating hooks. This hook turns each
+# verdict into what Claude sees at stop time (nothing, an untracked-files nudge, or a
+# pre-commit failure), and a stubbed verdict is the only way to reach all three; run these
+# with `CLAUDE_HOOK_SELFTEST=1 claude-stop-precommit`.
 if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   SELF=$(realpath "$0")
-  BIN_DIR=$(dirname "$SELF")
   fails=0
-  workdir=$(realpath "$(mktemp -d)")
-  trap 'rm -rf "$workdir"' EXIT
+  stubs=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$stubs"' EXIT
 
-  mkrepo() {
-    local dir="$1"
-    mkdir -p "$dir"
-    git init -q "$dir"
-    git -C "$dir" config user.email "test@example.com"
-    git -C "$dir" config user.name "test"
-    echo base >"$dir/file"
-    git -C "$dir" add file
-    git -C "$dir" commit -q -m init
-  }
+  # The verdict is driven by an env var rather than spliced into the stub, so no test's expected
+  # JSON has to survive being quoted into a generated script.
+  cat >"$stubs/pre-commit-verdict" <<'EOF'
+#!/bin/sh
+printf '%s' "$STUB_VERDICT"
+EOF
+  chmod +x "$stubs/pre-commit-verdict"
 
-  stub_autofix() {
-    local dir="$1" exit_code="$2" output="$3"
-    printf '#!/bin/sh\nprintf %%s "%s"\nexit %s\n' "$output" "$exit_code" >"$dir/pre-commit-autofix"
-    chmod +x "$dir/pre-commit-autofix"
-  }
+  t() {
+    local desc="$1" verdict="$2" want_message="$3" want_context="$4"
+    local out exit_code=0
+    out=$(env STUB_VERDICT="$verdict" PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" </dev/null 2>&1) ||
+    exit_code=$?
 
-  call() {
-    local cwd="$1" path="$2"
-    EXIT=0
-    OUT=$(cd "$cwd" && PATH="$path" CLAUDE_HOOK_SELFTEST= "$SELF" </dev/null 2>&1) || EXIT=$?
-  }
+    [[ "$exit_code" == 0 ]] ||
+    { printf 'FAIL %s: exited %s :: %s\n' "$desc" "$exit_code" "$out"; fails=1; }
 
-  check() {
-    local desc="$1" want_exit="$2" want_pattern="${3:-}"
-    [[ "$EXIT" == "$want_exit" ]] ||
-    { printf 'FAIL %s: want_exit=%s got_exit=%s :: %s\n' "$desc" "$want_exit" "$EXIT" "$OUT"; fails=1; }
-    if [[ -n "$want_pattern" ]]; then
-      [[ "$OUT" == *"$want_pattern"* ]] ||
-      { printf 'FAIL %s: output missing %q :: %s\n' "$desc" "$want_pattern" "$OUT"; fails=1; }
-    else
-      [[ -z "$OUT" ]] ||
-      { printf 'FAIL %s: expected no output :: %s\n' "$desc" "$OUT"; fails=1; }
+    if [[ -z "$want_message" ]]; then
+      [[ -z "$out" ]] ||
+      { printf 'FAIL %s: expected no output :: %s\n' "$desc" "$out"; fails=1; }
+      return
     fi
+
+    local got_message got_context
+    got_message=$(printf '%s' "$out" | jq -r '.systemMessage' 2>/dev/null) || got_message="<not json: $out>"
+    got_context=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null) || got_context=""
+    [[ "$got_message" == "$want_message" ]] ||
+    { printf 'FAIL %s: want_message=%q got=%q\n' "$desc" "$want_message" "$got_message"; fails=1; }
+    [[ "$got_context" == *"$want_context"* ]] ||
+    { printf 'FAIL %s: context missing %q :: %s\n' "$desc" "$want_context" "$got_context"; fails=1; }
   }
 
-  # --- outside any repo: no-op ---
-  call "$workdir" "$BIN_DIR:$PATH"
-  check "outside any repo is a no-op" 0
-
-  # --- untracked files: nudge, don't stage or run pre-commit ---
-  repo_untracked="$workdir/repo_untracked"
-  mkrepo "$repo_untracked"
-  touch "$repo_untracked/new_file.txt"
-  call "$repo_untracked" "$BIN_DIR:$PATH"
-  check "untracked files nudge" 0 "untracked files"
-  [[ "$OUT" == *"new_file.txt"* ]] ||
-  { printf 'FAIL untracked files nudge: output missing new_file.txt :: %s\n' "$OUT"; fails=1; }
-
-  # --- no untracked files, not a pre-commit project: stage tracked changes ---
-  repo_plain="$workdir/repo_plain"
-  mkrepo "$repo_plain"
-  echo modified >>"$repo_plain/file"
-  call "$repo_plain" "$BIN_DIR:$PATH"
-  check "plain project is a silent no-op" 0
-  STAGED=$(git -C "$repo_plain" diff --cached --name-only)
-  [[ "$STAGED" == "file" ]] ||
-  { printf 'FAIL plain project: tracked change was not staged :: %s\n' "$STAGED"; fails=1; }
-
-  # --- pre-commit project: passes through silently when autofix succeeds ---
-  repo_pc="$workdir/repo_pc"
-  mkrepo "$repo_pc"
-  echo "repos: []" >"$repo_pc/.pre-commit-config.yaml"
-  git -C "$repo_pc" add .pre-commit-config.yaml
-  git -C "$repo_pc" commit -q -m "add pre-commit config"
-
-  stubs_ok=$(mktemp -d)
-  stub_autofix "$stubs_ok" 0 ""
-  call "$repo_pc" "$stubs_ok:$BIN_DIR:$PATH"
-  check "pre-commit project with passing autofix is silent" 0
-
-  # --- pre-commit project: surfaces the failure when autofix still fails ---
-  stubs_fail=$(mktemp -d)
-  stub_autofix "$stubs_fail" 1 "trailing whitespace failed"
-  call "$repo_pc" "$stubs_fail:$BIN_DIR:$PATH"
-  check "pre-commit project with failing autofix reports it" 0 "pre-commit failing"
-  [[ "$OUT" == *"trailing whitespace failed"* ]] ||
-  { printf 'FAIL failing autofix: output missing pre-commit output :: %s\n' "$OUT"; fails=1; }
+  t "clean says nothing" '{"verdict":"clean"}' "" ""
+  t "strays are listed" '{"verdict":"strays","paths":["new.txt","also/new.txt"]}' \
+    "[claude-stop-precommit] untracked files" "also/new.txt"
+  t "strays carry the three ways to settle one" '{"verdict":"strays","paths":["new.txt"]}' \
+    "[claude-stop-precommit] untracked files" "add it to .gitignore"
+  t "a failure carries the hooks' own output" \
+    '{"verdict":"failing","output":"ruff....Failed\n- files were modified"}' \
+    "[claude-stop-precommit] pre-commit failing" "ruff....Failed"
+  t "an unknown verdict says nothing" '{"verdict":"invented"}' "" ""
 
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
@@ -100,28 +68,26 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   exit "$fails"
 fi
 
-git rev-parse --show-toplevel &>/dev/null || exit 0
-
-UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null)
-if [[ -n "$UNTRACKED" ]]; then
-  jq -n --arg ctx "There are untracked files.
+VERDICT=$(pre-commit-verdict)
+case "$(printf '%s' "$VERDICT" | jq -r '.verdict // ""')" in
+  strays)
+    MESSAGE="untracked files"
+    CONTEXT="There are untracked files.
 For each file, decide what to do with it: stage it with git add, add it to .gitignore, or delete it. If you're not sure, ask for help.
 Files:
 
-$UNTRACKED" '{"systemMessage":"[claude-stop-precommit] untracked files","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$ctx}}'
-  exit 0
-fi
+$(printf '%s' "$VERDICT" | jq -r '.paths[]')"
+    ;;
+  failing)
+    MESSAGE="pre-commit failing"
+    CONTEXT="pre-commit is still failing after auto-fixing. Fix the issues before committing:
 
-if ! is-pre-commit-project; then
-  git add --update
-  exit 0
-fi
+$(printf '%s' "$VERDICT" | jq -r '.output')"
+    ;;
+  *)
+    exit 0
+    ;;
+esac
 
-if OUTPUT=$(pre-commit-autofix 2>&1); then
-  exit 0
-fi
-
-jq -n --arg ctx "pre-commit is still failing after auto-fixing. Fix the issues before committing:
-
-$OUTPUT" '{"systemMessage":"[claude-stop-precommit] pre-commit failing","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$ctx}}'
-exit 0
+jq -n --arg message "[claude-stop-precommit] $MESSAGE" --arg ctx "$CONTEXT" \
+  '{systemMessage: $message, hookSpecificOutput: {hookEventName: "Stop", additionalContext: $ctx}}'

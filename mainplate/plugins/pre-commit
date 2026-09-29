@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+# This machine's `pre-commit`, over this repository's work in progress, whenever the model tries to
+# stop.
+#
+# The port of the `Stop` hook `claude-stop-precommit` runs, and it keeps that hook's shape: check
+# when the model would finish, and where anything is unfinished send it back with what is wrong so it
+# fixes what it broke while it still remembers writing it. `before_turn_end` is where that lands, and
+# an `inject` is what sends it back inside the same turn.
+#
+# **Neither of them decides anything.** `pre-commit-verdict`, in this repo's `bin/`, reaches the
+# verdict; the hook renders it as a `Stop` hook's `additionalContext` and this renders it as an
+# `inject`. So the two tools check a repository the same way by construction rather than by two
+# implementations being kept in step, and the three verdicts it can reach are the three things either
+# of them ever says. It went that way round because a mainplate session can now write a git index:
+# "stage it" is not advice anybody can take in a worktree whose clone is bound read-only, and a gate
+# that cannot clear is not a gate.
+#
+# Mainplate ships a plugin of this name in its own repository, which is where the design below comes
+# from. This is the user-tier version of it, and the difference is not only where it is installed:
+#
+# - **It runs unconfined**, because only a repository's plugin is sandboxed. So it has the machine's
+#   own environment, a network at every event rather than only at `setup`, and no need to build a
+#   Python environment for itself. What it needs instead is `PATH`, since the console is a systemd
+#   unit carrying the standard system set.
+# - **It runs whatever `pre-commit-run` finds**, by way of `pre-commit-verdict`, rather than pinning
+#   a `pre-commit` of its own through a PEP 723 block. That script already answers "which runner does
+#   this project want", preferring the project's own `uv run pre-commit` over a global copy, which is
+#   the answer this wants in a repository that pins its hooks and the only answer available in one
+#   that does not.
+# - **It builds nothing at `setup`.** The repository version installs hook environments there because
+#   every later event has the network shut; here there is no such moment, so `pre-commit` installing
+#   what it needs on first use is both correct and one less thing to fail at session start.
+#
+# **What it runs is the repository's, and it runs as the operator.** A session writes both
+# `.pre-commit-config.yaml` and its checkout's `.git/config`, and each of them names programs the
+# verdict's `git` and `pre-commit` then execute outside every sandbox, with the console's network.
+# Nothing here narrows that, and no arrangement of this plugin could: running a project's own hooks
+# is what it is for. It is what installing it at user tier buys, and the confined answer is the
+# repository-tier plugin mainplate ships.
+#
+# Nothing here imports mainplate.
+# `echo '{"event":"before_turn_end","worktree":"/repo","attempt":0}' | ./pre-commit` tries it by hand.
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+# How many times in one turn this will send the model back before it lets the model stop.
+#
+# The number that is here because a console is not a terminal. The hook this came from blocked every
+# stop for as long as anything was unfinished, and that was free: what it interrupted was a person
+# who could see it happening. Here every push-back is another model request, so a check the model
+# cannot satisfy would otherwise be a turn that bills for itself until somebody notices.
+#
+# Four, because three is what it takes to converge on the hooks alone - two cannot tell "the fix did
+# not work" from "the fix worked and uncovered the next thing" - and the untracked-files gate can
+# spend one before the hooks have run at all. Per turn, because `attempt` is: the next thing a person
+# says opens a turn the count starts over in.
+MOST = 4
+
+# The clone this was installed from, reached by resolving the symlink mainplate actually runs.
+DOTFILES = Path(__file__).resolve().parents[2]
+
+TOOL = """Run this repository's `pre-commit` hooks over the work in progress.
+
+Files git does not track are settled first: while any exist you are told about those instead, because
+`pre-commit` is told what to check by the index and a file nobody has staged is one the hooks never
+look at. Otherwise the hooks run, anything they can fix they fix in place, and what comes back is
+what is still failing after that.
+
+Call it when you think you are finished, rather than after every edit: it is the same check that runs
+whenever you try to stop, and calling it is how you see the result without being sent back."""
+
+PASSES = "`pre-commit` passes over this repository's work in progress."
+
+STRAY = (
+    "This session is leaving behind files git does not track, and the hooks have not run: "
+    "`pre-commit` is told what to check by the index, so a file nobody has staged is one it never "
+    "looks at. Settle each of them - stage it with `git add`, add it to `.gitignore`, or delete it - "
+    "and the hooks run on the next attempt. Ask rather than guess where which one it wants is not "
+    "obvious."
+)
+
+FAILING = (
+    "`pre-commit` is failing on this repository's work in progress, so you are not finished yet. "
+    "Anything a hook could fix has been fixed in place already, so what is below needs your "
+    "judgement rather than another run:"
+)
+
+BROKEN = (
+    "`pre-commit-verdict` did not answer, so nothing has been checked. It lives in the dotfiles "
+    "clone this plugin was installed from, and the links name that clone by absolute path, so a "
+    "clone that moved without `link-mainplate` being run again is the usual cause:"
+)
+
+STRAYS = "strays"
+FAILED = "failing"
+UNREADABLE = "broken"
+
+
+def reaching() -> dict[str, str]:
+    """
+    The environment `pre-commit-verdict` needs, which is this process's with one directory in front.
+
+    It and the scripts it reaches - `is-pre-commit-project`, `pre-commit-autofix`, `pre-commit-run` -
+    live in this repo's `bin/` and find each other by name. A user-tier plugin inherits the console's
+    environment, and the console is a systemd unit whose PATH is
+    `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`, so `bin/` is the one thing
+    missing. Everything else the verdict wants is a real binary under that PATH already: `git` and
+    `jq` in /usr/bin, and the `uv` that runs the project's own `pre-commit` in /usr/local/bin.
+
+    **The mise shims are deliberately not here.** A shim runs mise, mise reads the config of the
+    directory it is invoked in, and an untrusted `mise.toml` is a hard error. This runs in the
+    session's worktree, which is an arbitrary repository, so a shim on this PATH would turn "that
+    project carries a mise.toml" into a `pre-commit` run that cannot start.
+    """
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join((str(DOTFILES / "bin"), env.get("PATH", "")))
+    return env
+
+
+def ran(argv: list[str], where: Path) -> subprocess.CompletedProcess[bytes]:
+    """One command in the worktree, with its output kept and its failure left to the caller to read."""
+    return subprocess.run(
+        argv,
+        cwd=str(where),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=reaching(),
+        check=False,
+    )
+
+
+def uses_pre_commit(where: Path) -> bool:
+    """Whether this repository has hooks to run, asked of the script that already answers it."""
+    try:
+        return ran(["is-pre-commit-project"], where).returncode == 0
+    except OSError:
+        return False
+
+
+def verdict(where: Path) -> dict[str, Any]:
+    """
+    What `pre-commit-verdict` decided, or an unreadable verdict naming what came back instead.
+
+    **A verdict of its own rather than a raise**, which is the one place this diverges from failing
+    loud. A plugin that exits non-zero at `setup` is caught, recorded, and drawn as a sentence
+    somebody can act on; one that does it at a turn boundary is not, so the pass fails and the worker
+    redelivers the lease, which is a session retried for ever with a log line to show for it. What
+    replaces the raise is loud in the other direction: the sentence goes to the operator as a note in
+    the transcript rather than to the model, because a script missing from the operator's own clone
+    is not something the session can do anything about.
+    """
+    try:
+        done = ran(["pre-commit-verdict"], where)
+    except OSError as unreachable:
+        return {"verdict": UNREADABLE, "output": str(unreachable)}
+    said = done.stdout.decode("utf-8", errors="replace").strip()
+    if done.returncode != 0:
+        return {"verdict": UNREADABLE, "output": f"exited {done.returncode}: {said or 'saying nothing'}"}
+    try:
+        answer = json.loads(said)
+    except json.JSONDecodeError:
+        return {"verdict": UNREADABLE, "output": said or "saying nothing"}
+    if not isinstance(answer, dict):
+        return {"verdict": UNREADABLE, "output": said}
+    return answer
+
+
+def quoted(output: object) -> str:
+    """One command's output as a fenced block, or an empty block where there was none to quote."""
+    said = output.strip() if isinstance(output, str) else ""
+    return "```\n" + said + "\n```"
+
+
+def saying(found: dict[str, Any]) -> str | None:
+    """
+    What to say about one verdict, or nothing where it is the verdict that needs no sentence.
+
+    One sentence and not a list, which is what the gate buys: untracked files stop the hooks running,
+    so there is never both a stray to settle and a failure to read at the same moment.
+    """
+    kind = found.get("verdict")
+    if kind == STRAYS:
+        paths = [path for path in found.get("paths") or [] if isinstance(path, str)]
+        return STRAY + "\n\n" + "\n".join(paths)
+    if kind == FAILED:
+        return FAILING + "\n\n" + quoted(found.get("output"))
+    if kind == UNREADABLE:
+        return BROKEN + "\n\n" + quoted(found.get("output"))
+    return None
+
+
+def delivery(said: str, tone: str) -> dict[str, Any]:
+    """One verdict as the note it becomes, in whichever ink the reason for delivering it calls for."""
+    return {
+        "said": said,
+        "label": "pre-commit",
+        "title": "This repository's own hooks, over the work in progress.",
+        "tone": tone,
+    }
+
+
+def setting_up(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Say what this plugin contributes, which for a repository without hooks is nothing at all.
+
+    An inert plugin rather than a failure: this is installed for every session on the machine, and
+    most repositories in the world have no `.pre-commit-config.yaml`. What that costs is one process
+    at the start of a session and nothing after it, because the events it would be asked about are
+    the ones it declines to declare here.
+
+    **The untracked-files gate rides that decision**, which is narrower than the hook it came from:
+    that one raised stray files in every repository, and staged a plain repository's tracked changes
+    on the way past, because it was a single `Stop` hook covering everything rather than a plugin
+    named after one tool. Widening this one to fire without hooks to run would mean declaring
+    `before_turn_end` while withholding the tool, the card and the answer that only make sense with
+    them, which is a second shape for this plugin rather than a setting on it. A nudge for every
+    repository wants a plugin of its own.
+    """
+    where = payload.get("worktree")
+    if not isinstance(where, str) or not where or not uses_pre_commit(Path(where)):
+        return {}
+    return {
+        "events": ["tool", "before_turn_end", "compose"],
+        # Named after the plugin and not `run`, which is what the repository version calls both of
+        # these. That one is prefixed by its tier, so it lands as `repo_pre-commit_run` and
+        # `/pre-commit:run`; a user-tier plugin's names land bare, and `/run` is the console's own
+        # word for running a command, which the console refuses a plugin at the first message. The
+        # tool name is bare too, and `run` beside `bash` would tell the model nothing about which
+        # hooks it runs.
+        "tools": [{"name": "pre_commit", "description": TOOL, "schema": {"type": "object", "properties": {}}}],
+        "answers": [
+            {"leader": "pre-commit", "saying": "run this repository's hooks over what has changed", "demands": False}
+        ],
+        "card": {
+            "heading": "pre-commit",
+            "rows": [
+                {"switch": {"name": "checks", "label": "before stopping", "default": True}},
+                {"number": {"name": "most", "label": "attempts per turn", "default": MOST, "least": 1}},
+            ],
+        },
+    }
+
+
+def stopping(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Check what the model is about to stop having done, and send it back where anything is unfinished.
+
+    Past `most` the model is let go with the work unfinished, and quietly: a sentence saying so would
+    itself be another request, and the transcript already shows what was said the last time.
+
+    **A run that only fixed things says nothing**, which is the hook's own behaviour. Sending the
+    model back costs a request, so announcing work that is already done would spend one to say "carry
+    on"; and a model that goes on to edit a file the hooks rewrote finds out anyway, because `edit`
+    is anchored on what was read and a stale anchor is refused.
+
+    **An unreadable verdict is delivered rather than injected**, so a broken script in the operator's
+    clone reads as a note to the operator instead of a push-back the session cannot act on.
+    """
+    settings = payload.get("settings") or {}
+    if not settings.get("checks", True):
+        return {}
+    if int(payload.get("attempt") or 0) >= int(settings.get("most", MOST)):
+        return {}
+    where = payload.get("worktree")
+    if not isinstance(where, str) or not where:
+        return {}
+
+    found = verdict(Path(where))
+    said = saying(found)
+    if said is None:
+        return {}
+    if found.get("verdict") == UNREADABLE:
+        return {"deliver": [delivery(said, "strong")]}
+    return {"inject": [said]}
+
+
+def answer(payload: dict[str, Any]) -> dict[str, Any]:
+    """What this plugin wants done about one event, which for most events is nothing."""
+    event = payload.get("event")
+    if event == "setup":
+        return setting_up(payload)
+    if event == "before_turn_end":
+        return stopping(payload)
+    where = payload.get("worktree")
+    if not isinstance(where, str) or not where:
+        return {}
+    if event == "tool":
+        # A value back to the model and no delivery: the model asked, so the answer belongs in the
+        # call it made rather than as a message somebody has to read in the transcript.
+        return {"return": saying(verdict(Path(where))) or PASSES}
+    if event == "compose":
+        # Asked by a person, so it answers whether or not anything is wrong.
+        found = verdict(Path(where))
+        tone = "strong" if found.get("verdict") == UNREADABLE else "quiet"
+        return {"deliver": [delivery(saying(found) or PASSES, tone)]}
+    return {}
+
+
+def main() -> int:
+    json.dump(answer(json.load(sys.stdin)), sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

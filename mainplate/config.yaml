@@ -1,0 +1,64 @@
+# Which endpoints mainplate answers on, and which plugins it runs.
+#
+# Linked to ~/.config/mainplate/config.yaml by bin/link-mainplate, on exe.dev VMs only. `mainplate
+# install` writes this file itself when it is absent, discovering the VM's exe.dev LLM integration,
+# and never overwrites one that is there. Owning it here trades that discovery for two things:
+#
+# - **The `plugins:` block can exist at all.** User-tier plugins are read from this file and nowhere
+#   else, and a file mainplate writes once and never touches again has no way to gain one.
+# - **A box whose LLM integration was attached after its first install still works.** Discovery runs
+#   at install time only, so on a generated file that case keeps the commented-out template forever
+#   and the service refuses to start. Here the endpoints are written down, so attaching the
+#   integration is the whole of the fix.
+#
+# What it gives up is a machine this file is wrong about: the hostname below is the personal
+# integration every exe.dev VM answers at, so a team integration (`https://<name>.team.exe.xyz`) or a
+# laptop with an API key needs its own file rather than this one. `link-mainplate` does not install
+# it off exe.dev for that reason.
+#
+# No credential, here or anywhere: exe.dev injects one at its own edge, so these VMs hold no key to
+# store, rotate, or keep out of a git clone. Were a key ever needed it would belong in the copy on
+# the box, never in this file.
+
+default: llm-openai
+
+# One hostname, two endpoints, because exe.dev answers both API formats there and each reaches models
+# the other does not. The OpenAI format serves GPT, Grok, and the Fireworks models; the Anthropic
+# format serves every Claude and the Fireworks models again. Note the `/v1`, which only the OpenAI
+# SDK wants: it appends `/responses` where the Anthropic SDK appends `/v1/messages`.
+#
+# The OpenAI one is first and is the default. What it costs is the picker: that list carries no
+# display names, so a card there is an id under a provider heading.
+#
+# Nothing lists models, and that is not an omission: mainplate asks each endpoint what it serves, at
+# startup and on a timer after that, and offers whatever comes back.
+endpoints:
+  llm-openai:
+    format: openai
+    url: https://llm.int.exe.xyz/v1
+
+  llm-anthropic:
+    format: anthropic
+    url: https://llm.int.exe.xyz
+
+# This machine's own plugins, as the name each is installed under and the executable to run.
+#
+# Through ~/.config/mainplate/plugins rather than by naming this clone, because mainplate expands `~`
+# in a user-tier path and expands nothing else: an absolute path here would pin the file to one
+# machine's home directory. `link-mainplate` points that name at mainplate/plugins/ in the clone, and
+# each plugin finds this repo's `bin/` back through its own resolved path.
+#
+# The key is the whole of a plugin's name; nothing here shadows or turns off a bundled plugin of the
+# same name, so `guidance` and `handoff` keep running alongside these.
+plugins:
+  context: ~/.config/mainplate/plugins/context
+  pre-commit: ~/.config/mainplate/plugins/pre-commit
+  uv-check: ~/.config/mainplate/plugins/uv-check
+
+# Where to look up what the endpoints do not publish: what a model costs, how much it reads, and what
+# it can do. No gateway reached so far publishes a price at all, so without this the model cards show
+# a name and an id and nothing else. Delete these three lines and mainplate calls nobody but the
+# endpoints above.
+model_reference:
+  source: https://models.dev/api.json
+  format: models.dev
