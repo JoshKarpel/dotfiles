@@ -43,7 +43,7 @@ repos:
         entry: bin/claude-hook-selftests
         language: script
         pass_filenames: false
-        files: ^bin/
+        files: ^(bin|claude/skills)/
 
 ci:
   # The self-tests shell out to hooks that expect a real dev environment

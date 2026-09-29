@@ -7,10 +7,13 @@
 set -uo pipefail
 
 bin_dir="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+repo_dir="$(dirname "$bin_dir")"
 
 fails=0
 found=0
-for hook in "$bin_dir"/*; do
+# Hooks live in bin/, and in the hooks/ directory of each plugin under claude/skills/.
+# An unmatched glob expands to itself; the -f/-x guard drops it.
+for hook in "$bin_dir"/* "$repo_dir"/claude/skills/*/hooks/*; do
   [[ -f "$hook" && -x "$hook" ]] || continue
   grep -qE '^# CLAUDE_HOOK_SELFTEST' "$hook" || continue
   found=$((found + 1))
