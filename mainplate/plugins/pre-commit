@@ -39,7 +39,7 @@
 # repository-tier plugin mainplate ships.
 #
 # Nothing here imports mainplate.
-# `echo '{"event":"before_turn_end","worktree":"/repo","attempt":0}' | ./pre-commit` tries it by hand.
+# `echo '{"event":"before_turn_end","checkout":"/repo","attempt":0}' | ./pre-commit` tries it by hand.
 
 from __future__ import annotations
 
@@ -116,7 +116,7 @@ def reaching() -> dict[str, str]:
 
     **The mise shims are deliberately not here.** A shim runs mise, mise reads the config of the
     directory it is invoked in, and an untrusted `mise.toml` is a hard error. This runs in the
-    session's worktree, which is an arbitrary repository, so a shim on this PATH would turn "that
+    session's checkout, which is an arbitrary repository, so a shim on this PATH would turn "that
     project carries a mise.toml" into a `pre-commit` run that cannot start.
     """
     env = dict(os.environ)
@@ -125,7 +125,7 @@ def reaching() -> dict[str, str]:
 
 
 def ran(argv: list[str], where: Path) -> subprocess.CompletedProcess[bytes]:
-    """One command in the worktree, with its output kept and its failure left to the caller to read."""
+    """One command in the checkout, with its output kept and its failure left to the caller to read."""
     return subprocess.run(
         argv,
         cwd=str(where),
@@ -223,7 +223,7 @@ def setting_up(payload: dict[str, Any]) -> dict[str, Any]:
     them, which is a second shape for this plugin rather than a setting on it. A nudge for every
     repository wants a plugin of its own.
     """
-    where = payload.get("worktree")
+    where = payload.get("checkout")
     if not isinstance(where, str) or not where or not uses_pre_commit(Path(where)):
         return {}
     return {
@@ -268,7 +268,7 @@ def stopping(payload: dict[str, Any]) -> dict[str, Any]:
         return {}
     if int(payload.get("attempt") or 0) >= int(settings.get("most", MOST)):
         return {}
-    where = payload.get("worktree")
+    where = payload.get("checkout")
     if not isinstance(where, str) or not where:
         return {}
 
@@ -288,7 +288,7 @@ def answer(payload: dict[str, Any]) -> dict[str, Any]:
         return setting_up(payload)
     if event == "before_turn_end":
         return stopping(payload)
-    where = payload.get("worktree")
+    where = payload.get("checkout")
     if not isinstance(where, str) or not where:
         return {}
     if event == "tool":

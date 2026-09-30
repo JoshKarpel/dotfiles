@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+# One finishing pass over each change-set, asked of the model when it first tries to stop with it.
+#
+# The port of the `Stop` hook `claude-stop-finish`, and an adapter rather than a rewrite: the hook is
+# run unchanged and what it would have put in `additionalContext` becomes an `inject`. So the two
+# tools decide the same way by construction. The decision is `claude-changeset-guard`'s, which nudges
+# once per never-before-seen diff and records a fingerprint under the checkout's git directory, so a
+# model that finishes the pass without changing anything stops on its next attempt.
+#
+# Two things the hook had do not come across:
+#
+# - **The question hand-back.** `claude-stop` lets Claude stop without any check when its last
+#   message asks something, since it is waiting on a person. `before_turn_end` carries no messages,
+#   so a turn that ends on a question with work in progress is sent back once here.
+# - **The ordering behind `pre-commit`.** `claude-stop` runs the pre-commit check first and this
+#   one only once that passes. Plugins answering one event are asked alike, so both can inject at
+#   once, and the model gets the failing hooks and the finishing pass in one push-back.
+#
+# **It runs git in the checkout as the operator**, by way of the guard, in every repository a session
+# opens. The checkout's `.git/config` is the session's to write, so whatever it names that `git
+# status` runs (`core.fsmonitor`) runs unconfined. That is a choice made for sharing the guard, and
+# its tests, with the hook rather than reading the index through a git directory of this plugin's own
+# the way mainplate's bundled `guidance` does; the `pre-commit` plugin beside this one already takes
+# the same exposure in repositories it runs in.
+#
+# Nothing here imports mainplate.
+# `echo '{"event":"before_turn_end","checkout":"/repo","attempt":0}' | ./finish` tries it by hand.
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+# The script that decides and says, which is the same one Claude Code runs and carries its own
+# self-tests.
+HOOK = "claude-stop-finish"
+
+# Past this many push-backs in one turn, by any plugin, the model is let stop without the pass. The
+# guard already goes quiet once the diff stops changing, so this only binds a model that edits on
+# every attempt, which in a console is a turn billing for itself rather than a person watching one.
+# The same bound the `pre-commit` plugin uses, since the two push back on the same turns.
+MOST = 4
+
+# The clone this was installed from, reached by resolving the symlink mainplate actually runs.
+DOTFILES = Path(__file__).resolve().parents[2]
+
+
+def reaching() -> dict[str, str]:
+    """
+    The environment the hook needs, which is this process's with one directory in front.
+
+    `claude-stop-finish` calls `claude-changeset-guard` by name, and a user-tier plugin inherits the
+    console's environment, a systemd unit carrying the standard system PATH. `git`, `jq` and the
+    coreutils the guard reaches for are all under /usr/bin already, so `bin/` is the one thing
+    missing. **The mise shims stay off it**: a shim runs mise, which refuses an untrusted
+    `mise.toml` in the checkout it is invoked in, and a guard that exits non-zero nudges nobody.
+    """
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join((str(DOTFILES / "bin"), env.get("PATH", "")))
+    return env
+
+
+def nudge(where: Path) -> str | None:
+    """
+    What the hook would tell the model about this checkout, or nothing where it stays silent.
+
+    The hook drains its stdin and decides from git state alone, so it is handed an empty object. Its
+    stderr goes to the console's log rather than the model: a hook that breaks is the operator's to
+    notice, and a non-zero exit is read as no nudge, which is what the hook itself does with a guard
+    that fails.
+    """
+    try:
+        done = subprocess.run(
+            [HOOK],
+            cwd=str(where),
+            input=b"{}",
+            stdout=subprocess.PIPE,
+            env=reaching(),
+            check=False,
+        )
+    except OSError:
+        return None
+    if done.returncode != 0:
+        return None
+    said = done.stdout.decode("utf-8", errors="replace").strip()
+    if not said:
+        return None
+    context = json.loads(said).get("hookSpecificOutput", {}).get("additionalContext")
+    return context if isinstance(context, str) and context else None
+
+
+def setting_up(payload: dict[str, Any]) -> dict[str, Any]:
+    """Ask for turn ends wherever there is a checkout to have changed, with a switch to stop asking."""
+    if not payload.get("checkout"):
+        return {}
+    return {
+        "events": ["before_turn_end"],
+        "card": {
+            "heading": "finishing pass",
+            "rows": [{"switch": {"name": "checks", "label": "before stopping", "default": True}}],
+        },
+    }
+
+
+def stopping(payload: dict[str, Any]) -> dict[str, Any]:
+    """Send the model back for one finishing pass when the change-set is one it has not seen."""
+    settings = payload.get("settings") or {}
+    if not settings.get("checks", True):
+        return {}
+    if int(payload.get("attempt") or 0) >= MOST:
+        return {}
+    where = payload.get("checkout")
+    if not isinstance(where, str) or not where:
+        return {}
+    said = nudge(Path(where))
+    return {"inject": [said]} if said else {}
+
+
+def answer(payload: dict[str, Any]) -> dict[str, Any]:
+    """What this plugin wants done about one event, which for most events is nothing."""
+    event = payload.get("event")
+    if event == "setup":
+        return setting_up(payload)
+    if event == "before_turn_end":
+        return stopping(payload)
+    return {}
+
+
+def main() -> int:
+    json.dump(answer(json.load(sys.stdin)), sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

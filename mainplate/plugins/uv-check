@@ -19,7 +19,7 @@
 # and cannot invoke an interpreter, and a plugin's tools are their own business.
 #
 # Nothing here imports mainplate.
-# `echo '{"event":"before_tool","tool":"bash","args":{"command":"python x.py"},"worktree":"/repo"}' |
+# `echo '{"event":"before_tool","tool":"bash","args":{"command":"python x.py"},"checkout":"/repo"}' |
 # ./uv-check` is the whole of how to try it by hand.
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def reaching() -> dict[str, str]:
 
     **The mise shims are deliberately not here, and this is the one thing to know before adding
     them.** A shim runs mise, mise reads the config of whatever directory it is invoked in, and a
-    `mise.toml` it has not been told to trust is a hard error. These run in the session's worktree,
+    `mise.toml` it has not been told to trust is a hard error. These run in the session's checkout,
     which is an arbitrary repository somebody cloned, so a shim on this PATH turns "that project
     carries a mise.toml" into "`jq` exits non-zero", which under the hook's `set -e` is a guard that
     refuses nothing and says nothing. Everything the hooks need is in the system set already: `jq`,
@@ -73,7 +73,7 @@ def asking(command: str, where: Path) -> str | None:
     The hook is handed the payload shape it was written for rather than mainplate's, which is the
     whole of the adaptation: one object with a `tool_input.command`, exactly as Claude Code sends.
 
-    Run *in the worktree*, because what the hook asks first is whether it is standing in a uv
+    Run *in the checkout*, because what the hook asks first is whether it is standing in a uv
     project, and that question has no answer anywhere else.
 
     A hook that fails in some third way is not a refusal and is passed over, since the console has
@@ -108,7 +108,7 @@ def gating(payload: dict[str, Any]) -> dict[str, Any]:
     """
     if payload.get("tool") != "bash":
         return {}
-    where = payload.get("worktree")
+    where = payload.get("checkout")
     if not isinstance(where, str) or not where:
         return {}
     args = payload.get("args")
@@ -125,7 +125,7 @@ def answer(payload: dict[str, Any]) -> dict[str, Any]:
     if event == "setup":
         # Only where there is a repository to be a uv project, so a session with no files spawns no
         # process per tool call to be told nothing every time.
-        return {"events": ["before_tool"] if payload.get("worktree") else []}
+        return {"events": ["before_tool"] if payload.get("checkout") else []}
     if event == "before_tool":
         return gating(payload)
     return {}

@@ -192,7 +192,7 @@ mainplate has no console-side scoping to hold it back for: every `.md` under
 `guidance/` loads into every session, and frontmatter comes off before the model
 sees it, so a rule's `paths:` is dropped rather than honoured. The scoping
 mainplate does have is repository-side and lazy, over nested `AGENTS.md` files in
-the worktree, which is a different mechanism reached by a different path.
+the checkout, which is a different mechanism reached by a different path.
 
 ## Mainplate Plugins
 
@@ -248,7 +248,7 @@ whose copy exists for an interactive shell and is invisible from here.
 
 **Never put the mise shims on that `PATH`.** A shim runs mise, mise reads the
 config of the directory it is invoked in, and an untrusted `mise.toml` is a hard
-error rather than a warning. These plugins run in the session's worktree, which is
+error rather than a warning. These plugins run in the session's checkout, which is
 an arbitrary repository, so a shim turns "this project has a `mise.toml`" into a
 helper that exits non-zero, which for a guard reading exit codes is one that
 refuses nothing and reports nothing. Everything they need is in the system set.

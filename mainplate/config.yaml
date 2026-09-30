@@ -52,6 +52,7 @@ endpoints:
 # same name, so `guidance` and `handoff` keep running alongside these.
 plugins:
   context: ~/.config/mainplate/plugins/context
+  finish: ~/.config/mainplate/plugins/finish
   pre-commit: ~/.config/mainplate/plugins/pre-commit
   uv-check: ~/.config/mainplate/plugins/uv-check
 

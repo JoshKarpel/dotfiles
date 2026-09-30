@@ -25,7 +25,7 @@
 # - `claude-pre-commit-reminder` points at `pre-commit-autofix`, which is in this repo's `bin/` and
 #   therefore equally unreachable, and the `pre-commit` plugin beside this one covers what it was for.
 #
-# Nothing here imports mainplate. `echo '{"event":"setup","worktree":"/some/repo"}' | ./context` is
+# Nothing here imports mainplate. `echo '{"event":"setup","checkout":"/some/repo"}' | ./context` is
 # the whole of how to try it by hand.
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def reaching() -> dict[str, str]:
 
     **The mise shims are deliberately not here.** A shim runs mise, mise reads the config of the
     directory it is invoked in, and an untrusted `mise.toml` is a hard error. These run in the
-    session's worktree, which is an arbitrary repository, so a shim on this PATH turns "that project
+    session's checkout, which is an arbitrary repository, so a shim on this PATH turns "that project
     carries a mise.toml" into a hook that exits non-zero and contributes nothing. What the system set
     already has is enough: `git`, `gh`, `jq`, `rg` and `uv` are all real binaries under /usr.
     """
@@ -107,11 +107,11 @@ def setting_up(payload: dict[str, Any]) -> dict[str, Any]:
     """
     What this plugin contributes, which is instructions and no events at all.
 
-    A session with no worktree gets nothing: every source here answers a question about a repository,
+    A session with no checkout gets nothing: every source here answers a question about a repository,
     and asking them from wherever the console happens to be running would report the console's own
     clone as if it were the session's.
     """
-    where = payload.get("worktree")
+    where = payload.get("checkout")
     if not isinstance(where, str) or not where:
         return {}
     said = composing(Path(where))
