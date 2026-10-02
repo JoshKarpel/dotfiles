@@ -30,6 +30,10 @@
 # - **It builds nothing at `setup`.** The repository version installs hook environments there because
 #   every later event has the network shut; here there is no such moment, so `pre-commit` installing
 #   what it needs on first use is both correct and one less thing to fail at session start.
+# - **It offers no tool and no composer answer.** Running the hooks mid-turn is the model's own
+#   `pre-commit`, in its own shell, which a repository's `setup` makes possible by installing it there
+#   while the network is open. What this owns is only the check at the stop, which runs whether or not
+#   the repository did that.
 #
 # **What it runs is the repository's, and it runs as the operator.** A session writes both
 # `.pre-commit-config.yaml` and its checkout's `.git/config`, and each of them names programs the
@@ -65,18 +69,6 @@ MOST = 4
 
 # The clone this was installed from, reached by resolving the symlink mainplate actually runs.
 DOTFILES = Path(__file__).resolve().parents[2]
-
-TOOL = """Run this repository's `pre-commit` hooks over the work in progress.
-
-Files git does not track are settled first: while any exist you are told about those instead, because
-`pre-commit` is told what to check by the index and a file nobody has staged is one the hooks never
-look at. Otherwise the hooks run, anything they can fix they fix in place, and what comes back is
-what is still failing after that.
-
-Call it when you think you are finished, rather than after every edit: it is the same check that runs
-whenever you try to stop, and calling it is how you see the result without being sent back."""
-
-PASSES = "`pre-commit` passes over this repository's work in progress."
 
 STRAY = (
     "This session is leaving behind files git does not track, and the hooks have not run: "
@@ -196,13 +188,13 @@ def saying(found: dict[str, Any]) -> str | None:
     return None
 
 
-def delivery(said: str, tone: str) -> dict[str, Any]:
-    """One verdict as the note it becomes, in whichever ink the reason for delivering it calls for."""
+def delivery(said: str) -> dict[str, Any]:
+    """One verdict as a note to the operator, in strong ink because it is only ever a breakage."""
     return {
         "said": said,
         "label": "pre-commit",
         "title": "This repository's own hooks, over the work in progress.",
-        "tone": tone,
+        "tone": "strong",
     }
 
 
@@ -218,26 +210,14 @@ def setting_up(payload: dict[str, Any]) -> dict[str, Any]:
     **The untracked-files gate rides that decision**, which is narrower than the hook it came from:
     that one raised stray files in every repository, and staged a plain repository's tracked changes
     on the way past, because it was a single `Stop` hook covering everything rather than a plugin
-    named after one tool. Widening this one to fire without hooks to run would mean declaring
-    `before_turn_end` while withholding the tool, the card and the answer that only make sense with
-    them, which is a second shape for this plugin rather than a setting on it. A nudge for every
-    repository wants a plugin of its own.
+    named after one tool. A nudge for every repository wants a plugin of its own rather than this one
+    firing where there are no hooks to run.
     """
     where = payload.get("checkout")
     if not isinstance(where, str) or not where or not uses_pre_commit(Path(where)):
         return {}
     return {
-        "events": ["tool", "before_turn_end", "compose"],
-        # Named after the plugin and not `run`, which is what the repository version calls both of
-        # these. That one is prefixed by its tier, so it lands as `repo_pre-commit_run` and
-        # `/pre-commit:run`; a user-tier plugin's names land bare, and `/run` is the console's own
-        # word for running a command, which the console refuses a plugin at the first message. The
-        # tool name is bare too, and `run` beside `bash` would tell the model nothing about which
-        # hooks it runs.
-        "tools": [{"name": "pre_commit", "description": TOOL, "schema": {"type": "object", "properties": {}}}],
-        "answers": [
-            {"leader": "pre-commit", "saying": "run this repository's hooks over what has changed", "demands": False}
-        ],
+        "events": ["before_turn_end"],
         "card": {
             "heading": "pre-commit",
             "rows": [
@@ -277,7 +257,7 @@ def stopping(payload: dict[str, Any]) -> dict[str, Any]:
     if said is None:
         return {}
     if found.get("verdict") == UNREADABLE:
-        return {"deliver": [delivery(said, "strong")]}
+        return {"deliver": [delivery(said)]}
     return {"inject": [said]}
 
 
@@ -288,18 +268,6 @@ def answer(payload: dict[str, Any]) -> dict[str, Any]:
         return setting_up(payload)
     if event == "before_turn_end":
         return stopping(payload)
-    where = payload.get("checkout")
-    if not isinstance(where, str) or not where:
-        return {}
-    if event == "tool":
-        # A value back to the model and no delivery: the model asked, so the answer belongs in the
-        # call it made rather than as a message somebody has to read in the transcript.
-        return {"return": saying(verdict(Path(where))) or PASSES}
-    if event == "compose":
-        # Asked by a person, so it answers whether or not anything is wrong.
-        found = verdict(Path(where))
-        tone = "strong" if found.get("verdict") == UNREADABLE else "quiet"
-        return {"deliver": [delivery(saying(found) or PASSES, tone)]}
     return {}
 
 
