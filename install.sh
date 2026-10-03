@@ -142,6 +142,11 @@ function do_mise() {
     curl https://mise.run | sh
   fi
 
+  # `mise upgrade` updates the tools mise manages, never mise itself.
+  log "Updating mise..."
+
+  "$HOME/.local/bin/mise" self-update --yes
+
   log "Updating mise tools..."
 
   "$HOME/.local/bin/mise" install

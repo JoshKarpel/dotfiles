@@ -18,7 +18,9 @@ Maintain both, deliberately, because they have different audiences:
   across projects, including tools no single repo declares (a profiler, a
   benchmarking harness, a diff viewer).
 - A **project's `mise.toml`** declares only what that project needs, pinned, so a
-  contributor gets a working setup from a clone.
+  contributor gets a working setup from a clone. Every repo has one, holding the
+  tools its primary languages' package managers can't (see the supply-chain
+  rule).
 
 A tool appearing in both is not duplication to resolve. The project's entry is the
 contract; the global one is your convenience, and neither can stand in for the
@@ -51,6 +53,19 @@ other.
   also verifies GitHub artifact attestations and SLSA provenance on install.
 - Prefer `github:` over `cargo:` for a Rust tool that publishes release binaries:
   `cargo:` builds it from source, which can take minutes per install.
+
+## mise.lock
+
+Commit a `mise.lock` in every repo, and install from it in CI with
+`mise install --locked`.
+
+For `pipx:`/`pypi:` tools, run `mise lock --upgrade` once to move the lockfile to
+version 2, which records each tool's full dependency graph in a uv sidecar under
+`.mise/locks/`; commit that directory too. A version-1 lockfile records only the
+tool's own version, so its transitive dependencies float to whatever is newest at
+install time. The sidecar's resolution honors `minimum_release_age`, so the
+cooldown covers the graph even when the tool itself is pinned. Sidecars need
+mise 2026.9.7 or newer and uv 0.12.10 or newer.
 
 ## [env]
 

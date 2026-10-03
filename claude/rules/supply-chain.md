@@ -15,6 +15,19 @@ included, installs the exact same versions, and a changed dependency shows up
 as a reviewable diff. Don't float production dependencies on unpinned ranges
 that silently pull whatever published most recently.
 
+## One Installer per Tool
+
+Every repo we control has a `mise.toml` alongside the package manager of each
+language it's written in, and every development tool comes from exactly one of
+them. A tool that a primary language's package manager can hold as a project dev
+dependency goes there: ruff, `pre-commit-hooks` and zizmor in a Python repo's uv
+dev group. Every other tool goes in `mise.toml`: the same hooks in a Rust or
+shell repo, or a Go linter in a Python repo.
+
+Nothing else installs a tool, pre-commit's hook environments included (see the
+pre-commit style guide). Each tool then has one version, in one lockfile, behind
+one cooldown, and the editor, task runner, hooks and CI all run that version.
+
 ## Floors for Libraries, Locks for Applications
 
 Set a lower bound on each dependency, for the feature or fix you actually need,
