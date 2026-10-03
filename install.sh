@@ -153,6 +153,42 @@ function do_mise() {
   "$HOME/.local/bin/mise" upgrade
 }
 
+# Schedules bin/sync-branches hourly. Cron rather than a systemd timer
+# because it is for every machine, a macOS laptop included, and crontab is the
+# one scheduler both have. This owns a marked block in the user's crontab, the
+# way `git maintenance start --scheduler=crontab` does, and replaces only that,
+# so entries anyone else put there are left alone.
+function do_sync_branches() {
+  exists crontab || return 0
+
+  log "Scheduling branch sync..."
+
+  local begin="# BEGIN dotfiles sync-branches"
+  local end="# END dotfiles sync-branches"
+  local state=~/.local/state
+  mkdir -p "$state"
+
+  # Cron's PATH is /usr/bin:/bin, which on a Mac reaches Apple's git rather
+  # than Homebrew's, so name the directory of the git this install resolved.
+  local line="17 * * * * PATH=$(dirname "$(command -v git)"):/usr/bin:/bin \"$BASEDIR/bin/sync-branches\" > \"$state/sync-branches.log\" 2>&1"
+
+  local current desired
+  current="$(crontab -l 2>/dev/null || true)"
+  desired="$(
+    if [[ -n $current ]]; then
+      printf '%s\n' "$current" | awk -v b="$begin" -v e="$end" '$0 == b { skip = 1 } !skip { print } $0 == e { skip = 0 }'
+    fi
+    printf '%s\n%s\n%s\n' "$begin" "$line" "$end"
+  )"
+
+  if [[ $desired == "$current" ]]; then
+    echo "Already scheduled"
+    return 0
+  fi
+
+  printf '%s\n' "$desired" | crontab -
+}
+
 # `systemctl --user` finds its manager through XDG_RUNTIME_DIR, which a login
 # shell has and the first-boot bootstrap running install.sh over `ssh host
 # <command>` does not. Without it every call fails with "Failed to connect to
@@ -486,6 +522,7 @@ do_apt
 do_locale
 do_brew
 do_mise
+do_sync_branches
 do_cloister
 do_atlas
 do_mainplate

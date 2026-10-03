@@ -26,7 +26,11 @@ is. The same directory is where `claude-scriptorium`, `exe-dev-atlas`, and
 `mainplate` write the units they manage themselves, so symlinking the tree in
 would point those tools' writes at this repo.
 
-All of those are for a person to look at, so all are gated on `is-dev-box`
+`sync-branches` is scheduled through a marked block in the user's
+crontab instead, because it runs on every machine, a macOS laptop included, and
+cron is the one scheduler both have.
+
+All of those units are for a person to look at, so all are gated on `is-dev-box`
 rather than `is-exe-dev`: a VM running a workload has nobody reading its session
 archive and no reason to spend its proxied ports on an index of itself. It reads
 the same `dev-box` tag `exe-dev create-devbox` sets at creation, which is what
@@ -295,6 +299,12 @@ exe-dev --help
 # Run Claude Code billed against exe.dev's LLM allocation rather than the
 # claude.ai subscription. exe.dev VMs only. Takes claude's own flags.
 claude-exe-dev --model opus
+
+# Fast-forward every local branch to its upstream, in every clone under
+# ~/projects and ~/work, skipping any checked out in a worktree with changes to
+# tracked files and reporting any that have diverged. install.sh schedules it
+# hourly through cron, so running it by hand is only for wanting it now.
+sync-branches
 
 # Install Tailscale and join this machine to the tailnet. Run per-machine, not
 # from install.sh: it leaves a daemon running and joins a private network.

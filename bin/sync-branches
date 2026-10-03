@@ -1,0 +1,297 @@
+#!/usr/bin/env bash
+# Fast-forward every local branch to its upstream, in every clone under the
+# given roots (~/projects and ~/work when none are given), so a clone nobody has
+# touched in a week still has a current `main`, and a PR branch picks up what
+# pre-commit.ci or a collaborator pushed to it. install.sh runs it hourly from
+# cron, which is what lets the same schedule work on a laptop with no systemd;
+# running it by hand is safe.
+#
+# A clone is any directory directly under a root with a `.git` directory, so
+# nothing has to be registered. Linked worktrees and submodules have a `.git`
+# file instead and are skipped; their repository is reached through its clone.
+#
+# Branches are only ever fast-forwarded. One with no upstream, or whose
+# upstream was deleted, is left alone, as is one with commits its upstream
+# doesn't have; when the upstream has moved too, that divergence is reported
+# if the upstream is the branch's namesake on its remote.
+# Where a worktree has the branch checked out, that worktree's files move with
+# it, so it is left alone while the worktree has any change to a tracked file:
+# a change there means someone is mid-edit, and updating files under them is
+# worse than a stale branch.
+#
+# Exits non-zero when any clone failed to fetch or had a diverged branch, after
+# trying every clone.
+
+set -euo pipefail
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This
+# marker line is how `claude-hook-selftests` discovers participating scripts;
+# run these with `CLAUDE_HOOK_SELFTEST=1 sync-branches`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+
+  # CI has no gitconfig and a dev box has one with `fetch.prune` set, so hide
+  # it: a case must not pass here only because the installed config helped.
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+  export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
+  export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
+
+  # A root holding one clone of a fresh origin whose default branch is `trunk`
+  # (not `main`, so nothing passes by matching a default), with origin one
+  # commit ahead of the clone and the clone on `work`, which has no upstream.
+  # That commit changes `file` from `one` to `two`, so a fast-forward in a
+  # worktree shows on disk.
+  setup() {
+    local root="$workdir/$1" origin="$workdir/$1-origin"
+    git init -q -b trunk "$origin"
+    echo one >"$origin/file"
+    git -C "$origin" add file
+    git -C "$origin" commit -q -m one
+    mkdir -p "$root"
+    git clone -q "$origin" "$root/clone"
+    echo two >"$origin/file"
+    git -C "$origin" commit -q -am two
+    git -C "$root/clone" switch -q -c work
+    ORIGIN="$origin" CLONE="$root/clone" ROOT="$root"
+  }
+
+  run() {
+    EXIT=0
+    OUT=$(CLAUDE_HOOK_SELFTEST= "$SELF" "$ROOT" 2>&1) || EXIT=$?
+  }
+
+  check() {
+    local desc="$1" want_exit="$2" ref="$3" want_ref="$4" got_ref
+    got_ref=$(git -C "$CLONE" rev-parse -q --verify "$ref" || echo missing)
+    [[ "$EXIT" == "$want_exit" && "$got_ref" == "$want_ref" ]] ||
+    { printf 'FAIL %s: want exit=%s %s=%s, got exit=%s %s=%s :: %s\n' \
+      "$desc" "$want_exit" "$ref" "$want_ref" "$EXIT" "$ref" "$got_ref" "$OUT"; fails=1; }
+  }
+
+  check_file() {
+    local desc="$1" path="$2" want="$3" got
+    got=$(cat "$path")
+    [[ "$got" == "$want" ]] ||
+    { printf 'FAIL %s: want %s to read %s, got %s\n' "$desc" "$path" "$want" "$got"; fails=1; }
+  }
+
+  check_output() {
+    local desc="$1" want="$2"
+    [[ "$OUT" == *"$want"* ]] ||
+    { printf 'FAIL %s: want output containing %s :: %s\n' "$desc" "$want" "$OUT"; fails=1; }
+  }
+
+  check_quiet() {
+    local desc="$1"
+    [[ -z "$OUT" ]] || { printf 'FAIL %s: want no output :: %s\n' "$desc" "$OUT"; fails=1; }
+  }
+
+  setup behind
+  run
+  check "behind and not checked out is fast-forwarded" 0 trunk "$(git -C "$ORIGIN" rev-parse trunk)"
+
+  setup checked-out
+  git -C "$CLONE" switch -q trunk
+  run
+  check "clean checked-out branch is fast-forwarded" 0 trunk "$(git -C "$ORIGIN" rev-parse trunk)"
+  check_file "clean checked-out branch updates its files" "$CLONE/file" two
+
+  setup untracked
+  git -C "$CLONE" switch -q trunk
+  echo scratch >"$CLONE/notes"
+  run
+  check "untracked files don't stop a fast-forward" 0 trunk "$(git -C "$ORIGIN" rev-parse trunk)"
+
+  setup unstaged
+  git -C "$CLONE" switch -q trunk
+  before=$(git -C "$CLONE" rev-parse trunk)
+  echo edited >"$CLONE/file"
+  run
+  check "checked-out branch with unstaged changes is left alone" 0 trunk "$before"
+  check_file "unstaged changes are kept" "$CLONE/file" edited
+
+  setup staged
+  git -C "$CLONE" switch -q trunk
+  before=$(git -C "$CLONE" rev-parse trunk)
+  echo new >"$CLONE/other"
+  git -C "$CLONE" add other
+  run
+  check "checked-out branch with staged changes is left alone" 0 trunk "$before"
+
+  setup other-worktree
+  git -C "$CLONE" worktree add -q "$workdir/other-worktree-wt" trunk
+  run
+  check "branch checked out in another worktree is fast-forwarded" 0 trunk "$(git -C "$ORIGIN" rev-parse trunk)"
+  check_file "the other worktree's files are updated" "$workdir/other-worktree-wt/file" two
+
+  setup checked-out-diverged
+  git -C "$CLONE" switch -q trunk
+  git -C "$CLONE" commit -q --allow-empty -m local
+  before=$(git -C "$CLONE" rev-parse trunk)
+  run
+  check "diverged checked-out branch is left alone and reported" 1 trunk "$before"
+
+  setup diverged
+  git -C "$CLONE" commit -q --allow-empty -m local
+  git -C "$CLONE" branch -q -f trunk HEAD
+  run
+  check "diverged branch is left alone and reported" 1 trunk "$(git -C "$CLONE" rev-parse work)"
+  check_output "diverged report names the clone and branch" "$CLONE: trunk has diverged from origin/trunk"
+
+  setup ahead
+  git -C "$CLONE" fetch -q origin
+  git -C "$CLONE" branch -q -f trunk origin/trunk
+  git -C "$CLONE" switch -q trunk
+  git -C "$CLONE" commit -q --allow-empty -m unpushed
+  before=$(git -C "$CLONE" rev-parse trunk)
+  run
+  check "branch only ahead of its upstream is left alone" 0 trunk "$before"
+  check_quiet "branch only ahead of its upstream is not reported"
+
+  setup feature
+  git -C "$ORIGIN" switch -q -c feature
+  git -C "$CLONE" fetch -q origin
+  git -C "$CLONE" branch -q --track feature origin/feature
+  git -C "$ORIGIN" commit -q --allow-empty -m autofix
+  run
+  check "a non-default branch is fast-forwarded to its upstream" 0 feature "$(git -C "$ORIGIN" rev-parse feature)"
+
+  setup topic
+  git -C "$CLONE" fetch -q origin
+  git -C "$CLONE" branch -q topic origin/trunk~1
+  git -C "$CLONE" branch -q --set-upstream-to origin/trunk topic
+  git -C "$CLONE" switch -q topic
+  git -C "$CLONE" commit -q --allow-empty -m topic-work
+  before=$(git -C "$CLONE" rev-parse topic)
+  run
+  check "a topic branch apart from the differently named branch it tracks is left alone" 0 topic "$before"
+  check_quiet "a topic branch apart from the differently named branch it tracks is not reported"
+
+  setup gone
+  git -C "$ORIGIN" switch -q -c feature
+  git -C "$CLONE" fetch -q origin
+  git -C "$CLONE" branch -q --track feature origin/feature
+  before=$(git -C "$CLONE" rev-parse feature)
+  git -C "$ORIGIN" switch -q trunk
+  git -C "$ORIGIN" branch -q -D feature
+  run
+  check "a branch whose upstream was deleted is left alone" 0 feature "$before"
+  check_quiet "a branch whose upstream was deleted is not reported"
+
+  setup other-remote
+  git -C "$CLONE" remote add fork "$ORIGIN"
+  git -C "$CLONE" fetch -q fork
+  git -C "$CLONE" branch -q --track from-fork fork/trunk
+  git -C "$ORIGIN" commit -q --allow-empty -m three
+  run
+  check "a branch tracking a remote other than origin is fast-forwarded" 0 from-fork "$(git -C "$ORIGIN" rev-parse trunk)"
+
+  # A rebase detaches HEAD, so the branch it is rewriting shows as checked out
+  # nowhere; `--exec false` stops it partway with the branch still behind.
+  setup rebasing
+  git -C "$CLONE" switch -q trunk
+  git -C "$CLONE" rebase -q --root --exec false >/dev/null 2>&1 || true
+  before=$(git -C "$CLONE" rev-parse trunk)
+  run
+  check "a branch mid-rebase is left alone" 1 trunk "$before"
+
+  setup unreachable
+  git -C "$CLONE" remote set-url origin "$workdir/nowhere"
+  mkdir -p "$ROOT/next"
+  git clone -q "$ORIGIN" "$ROOT/next"
+  git -C "$ROOT/next" switch -q -c work
+  git -C "$ORIGIN" commit -q --allow-empty -m three
+  run
+  CLONE="$ROOT/next"
+  check "a failed fetch is reported without stopping the sweep" 1 trunk "$(git -C "$ORIGIN" rev-parse trunk)"
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+# Run from cron there is no terminal, so a credential prompt has to fail rather
+# than wait for an answer that never comes.
+export GIT_TERMINAL_PROMPT=0
+
+# Moves one branch to its upstream by a fast-forward and nothing else, printing
+# git's reason when it can't. A branch checked out in a worktree with changes to
+# tracked files is skipped, which is not a failure.
+fast_forward() {
+  local clone="$1" ref="$2" upstream="$3" worktree="$4"
+
+  if [[ -z $worktree ]]; then
+    # Fetching from `.` is a ref update with no network, and git refuses a
+    # non-fast-forward rather than discarding local commits.
+    git -C "$clone" fetch --quiet . "$upstream:$ref" 2>&1
+    return
+  fi
+
+  # Untracked files don't count as mid-edit, and one the fast-forward would
+  # overwrite makes the merge refuse, which the caller reports.
+  [[ -z $(git -C "$worktree" status --porcelain --untracked-files=no) ]] || return 0
+  git -C "$worktree" merge --ff-only --quiet "$upstream" 2>&1
+}
+
+# Prints why a clone failed to stderr and returns 1; returns 0 for every outcome
+# that is not a failure, including the skips. Called in an `||` list, where
+# `set -e` is suspended, so each step checks its own exit.
+sync_clone() {
+  local clone="$1" err ref upstream worktree branch ahead behind status=0
+
+  # --prune explicitly rather than trusting fetch.prune, so a deleted upstream
+  # stops resolving and its branch is skipped below rather than compared.
+  if ! err=$(git -C "$clone" fetch --quiet --all --prune 2>&1); then
+    printf '%s: fetch failed: %s\n' "$clone" "$err" >&2
+    return 1
+  fi
+
+  while IFS=$'\t' read -r ref upstream worktree; do
+    [[ $upstream == refs/remotes/* ]] || continue
+    git -C "$clone" rev-parse --quiet --verify "$upstream" >/dev/null || continue
+    branch=${ref#refs/heads/}
+
+    # Counted rather than read from %(upstream:track), whose words are
+    # translated and would stop matching under a non-English locale.
+    read -r ahead behind < <(git -C "$clone" rev-list --left-right --count "$ref...$upstream")
+    [[ $behind -gt 0 ]] || continue
+
+    if [[ $ahead -gt 0 ]]; then
+      # A branch tracking a differently named one, typically a topic branch
+      # cut from origin/main, is expected to have moved apart from it, so
+      # only a branch tracking its own namesake is worth reporting.
+      [[ $upstream == refs/remotes/*/"$branch" ]] || continue
+      printf '%s: %s has diverged from %s (%s ahead, %s behind)\n' \
+        "$clone" "$branch" "${upstream#refs/remotes/}" "$ahead" "$behind" >&2
+      status=1
+      continue
+    fi
+
+    if ! err=$(fast_forward "$clone" "$ref" "$upstream" "$worktree"); then
+      printf '%s: %s not fast-forwarded to %s: %s\n' \
+        "$clone" "$branch" "${upstream#refs/remotes/}" "$err" >&2
+      status=1
+    fi
+  done < <(git -C "$clone" for-each-ref --format='%(refname)%09%(upstream)%09%(worktreepath)' refs/heads)
+
+  return "$status"
+}
+
+# Positional parameters rather than an array: macOS runs this under bash 3.2,
+# where expanding an empty array trips `set -u`.
+if [[ $# -eq 0 ]]; then
+  set -- "$HOME/projects" "$HOME/work"
+fi
+
+status=0
+for root in "$@"; do
+  for gitdir in "$root"/*/.git; do
+    [[ -d $gitdir ]] || continue
+    sync_clone "$(dirname "$gitdir")" || status=1
+  done
+done
+exit "$status"
