@@ -318,6 +318,30 @@ EOF
   systemctl --user enable --now tidy.timer
 }
 
+# Ages out Claude Code's per-user scratch under /tmp. The exe.dev image keeps
+# /tmp across reboots and cleans it only of entries 30 days old by every
+# timestamp, so anything that lists a directory (a `du`, a file watcher) resets
+# its clock and the scratchpads pile up for as long as the VM stays up. This is
+# only a rule for the daily systemd-tmpfiles-clean.service the system already
+# runs, so there is no unit or timer to install.
+function do_scratchpad_cleanup() {
+  "$BASEDIR/bin/is-exe-dev" || return 0
+
+  log "Aging out Claude scratchpads..."
+
+  # Written rather than symlinked out of this repo: root reads it, and a rule
+  # that anything able to write the clone could change is a rule that can
+  # delete any path on the machine. The glob is `claude-<uid>`, not `claude-*`,
+  # which also matches files other tools keep in /tmp. `e` cleans inside each
+  # match without creating or re-owning it. `cmM:` ages by modification and
+  # status change alone, leaving out the access times a read or a listing
+  # refreshes, so a file goes a week after it was last written whoever has
+  # looked at it since.
+  sudo tee /etc/tmpfiles.d/claude-scratchpads.conf > /dev/null << 'EOF'
+e /tmp/claude-[0-9]* - - - cmM:7d
+EOF
+}
+
 # Schedules bin/cloister-codex, which does the work of serving this machine's
 # sessions and is where the dev-box guard lives. This only sets up the timer that
 # fires it once a day, then runs it once so the box is serving now rather than
@@ -642,6 +666,7 @@ do_brew
 do_mise
 do_sync_branches
 do_tidy
+do_scratchpad_cleanup
 do_cloister
 do_atlas
 do_mainplate
