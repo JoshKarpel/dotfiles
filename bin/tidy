@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Reclaim disk by removing what the tools installed on this machine can get back
-# on their own. `update` runs this after install.sh; it is also safe to run by hand.
+# on their own. install.sh schedules it weekly on exe.dev VMs, and `update` runs
+# it after install.sh; it is also safe to run by hand.
 #
 # Every step is user-level, so this never asks for a password. apt and brew are
 # the two caches deliberately absent: install.sh already runs those package
@@ -81,30 +82,40 @@ function prune_mise() {
   mise prune --yes && mise cache prune
 }
 
-# The CLI downloads a server build per VS Code client commit and never removes an
-# old one, so these accumulate at ~700M each. `lru.json` is the CLI's own record
-# of the builds it still tracks; one missing from that list is not reached for
-# again. The running-process check is a safety net rather than the policy:
-# deleting the tree under a live server breaks the editor session attached to it,
-# which is not a cost the next connect can undo. Without pgrep there is no way to
-# establish that, so the whole step fails rather than guessing.
-function prune_vscode_servers() {
-  local servers="$HOME/.vscode-server/cli/servers"
+# The CLI downloads a server build per VS Code commit, ~650M each, into one
+# directory per flavour: `servers` for Remote-SSH and `serve-web` for `code
+# serve-web`. `lru.json` lists every build it has kept, not only the live ones,
+# most recently used first, so membership in that list says nothing about whether
+# a build will be reached for again; only its head is the build the next connect
+# wants. Everything else is kept only while a process runs from it: deleting the
+# tree under a live server breaks the editor session attached to it, which is not
+# a cost the next connect can undo. Without pgrep there is no way to establish
+# that, so the whole step fails rather than guessing.
+function prune_vscode_builds() {
+  local builds="$1"
 
-  [[ -d $servers ]] || return 0
+  [[ -d $builds ]] || return 0
   have pgrep || return 1
 
+  local newest
+  newest=$(grep -o '"[^"]*"' "$builds/lru.json" 2> /dev/null | head -n 1 | tr -d '"')
+
   local dir name
-  for dir in "$servers"/*/; do
+  for dir in "$builds"/*/; do
     [[ -d $dir ]] || continue
 
     name=$(basename "$dir")
-    grep -qF "\"$name\"" "$servers/lru.json" 2> /dev/null && continue
+    [[ $name == "$newest" ]] && continue
     pgrep -f "$dir" > /dev/null 2>&1 && continue
 
     echo "  removing $name"
     rm -rf "$dir"
   done
+}
+
+function prune_vscode_servers() {
+  prune_vscode_builds "$HOME/.vscode-server/cli/servers"
+  prune_vscode_builds "$HOME/.vscode/cli/serve-web"
 }
 
 # Neither tool prunes to just the current revision. Playwright's `uninstall
@@ -142,8 +153,11 @@ if have go && [[ -d $(go env GOCACHE) || -d $(go env GOMODCACHE) ]]; then
   step "Cleaning go caches..." go clean -cache -testcache -fuzzcache -modcache
 fi
 
-have docker && step "Pruning docker..." docker system prune --all --volumes --force
-have podman && step "Pruning podman..." podman system prune --all --volumes --force
+# Not `--volumes`: a dev stack's database often lives in an anonymous volume,
+# which becomes unused, and so prunable, the moment its container is stopped.
+# Unlike everything else here, nothing re-downloads it.
+have docker && step "Pruning docker..." docker system prune --all --force
+have podman && step "Pruning podman..." podman system prune --all --force
 
 step "Removing browser bundles..." prune_browser_bundles
 

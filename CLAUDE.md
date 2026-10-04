@@ -18,25 +18,30 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 
 Systemd user units are the exception to `config/`. `install.sh` writes
 `cloister-codex.{service,timer}`, `converge-atlas.{service,timer}`,
-`converge-mainplate.{service,timer}`, `zellij-session.service`,
-`zellij-web.service`, and `vscode-web.service` into `~/.config/systemd/user/`
-rather than symlinking them from here, because a unit has to name the absolute
-path of the clone it was installed from, and only `install.sh` knows where that
-is. The same directory is where `claude-scriptorium`, `exe-dev-atlas`, and
-`mainplate` write the units they manage themselves, so symlinking the tree in
-would point those tools' writes at this repo.
+`converge-mainplate.{service,timer}`, `sync-branches.{service,timer}`,
+`tidy.{service,timer}`, `zellij-session.service`, `zellij-web.service`, and
+`vscode-web.service` into `~/.config/systemd/user/` rather than symlinking them
+from here, because a unit has to name the absolute path of the clone it was
+installed from, and only `install.sh` knows where that is. The same directory is
+where `claude-scriptorium`, `exe-dev-atlas`, and `mainplate` write the units
+they manage themselves, so symlinking the tree in would point those tools'
+writes at this repo.
 
-`sync-branches` is scheduled through a marked block in the user's
-crontab instead, because it runs on every machine, a macOS laptop included, and
-cron is the one scheduler both have.
+`sync-branches` runs on every machine, so off exe.dev it is scheduled through a
+marked block in the user's crontab instead, cron being the one scheduler a
+macOS laptop shares with Linux. On exe.dev `install.sh` removes that block when
+it writes the timer, since two schedulers holding the job would run it twice.
 
-All of those units are for a person to look at, so all are gated on `is-dev-box`
-rather than `is-exe-dev`: a VM running a workload has nobody reading its session
-archive and no reason to spend its proxied ports on an index of itself. It reads
-the same `dev-box` tag `exe-dev create-devbox` sets at creation, which is what
-keeps a bot-box running `install.sh` on its timer from installing any of them.
-Reading it back through reflection rather than off the disk is what lets a box
-change its mind (`exe-dev lobby tag <vm> dev-box`) without being rebuilt.
+All of those units but `sync-branches` and `tidy` are for a person to look at,
+so they are gated on `is-dev-box` rather than `is-exe-dev`: a VM running a
+workload has nobody reading its session archive and no reason to spend its
+proxied ports on an index of itself. It reads the same `dev-box` tag
+`exe-dev create-devbox` sets at creation, which is what keeps a bot-box running
+`install.sh` on its timer from installing any of them. Reading it back through
+reflection rather than off the disk is what lets a box change its mind
+(`exe-dev lobby tag <vm> dev-box`) without being rebuilt. `sync-branches` and
+`tidy` are gated on `is-exe-dev` instead, since a bot-box has clones to keep
+current and a disk to fill just the same; `tidy` is scheduled nowhere else.
 
 They all depend on `Linger=yes` for the account, without which the user manager
 starts at first login instead of at boot and every one of them waits for a
@@ -283,7 +288,8 @@ can just use the name.
 pre-commit run
 
 # Reclaim disk by removing what installed tools can re-download or rebuild.
-# `update` runs this after install.sh; run it by hand to reclaim now.
+# install.sh schedules it weekly on exe.dev VMs, and `update` runs it after
+# install.sh; run it by hand to reclaim now.
 tidy
 
 # Count Claude tokens in files/dirs via the Anthropic count_tokens API
@@ -303,7 +309,7 @@ claude-exe-dev --model opus
 # Fast-forward every local branch to its upstream, in every clone under
 # ~/projects and ~/work, skipping any checked out in a worktree with changes to
 # tracked files and reporting any that have diverged. install.sh schedules it
-# hourly through cron, so running it by hand is only for wanting it now.
+# hourly, so running it by hand is only for wanting it now.
 sync-branches
 
 # Install Tailscale and join this machine to the tailnet. Run per-machine, not

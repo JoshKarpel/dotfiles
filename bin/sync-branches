@@ -2,9 +2,9 @@
 # Fast-forward every local branch to its upstream, in every clone under the
 # given roots (~/projects and ~/work when none are given), so a clone nobody has
 # touched in a week still has a current `main`, and a PR branch picks up what
-# pre-commit.ci or a collaborator pushed to it. install.sh runs it hourly from
-# cron, which is what lets the same schedule work on a laptop with no systemd;
-# running it by hand is safe.
+# pre-commit.ci or a collaborator pushed to it. install.sh runs it hourly, from
+# a systemd timer on exe.dev and from cron on a laptop with no systemd; running
+# it by hand is safe.
 #
 # A clone is any directory directly under a root with a `.git` directory, so
 # nothing has to be registered. Linked worktrees and submodules have a `.git`
@@ -214,8 +214,8 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   exit "$fails"
 fi
 
-# Run from cron there is no terminal, so a credential prompt has to fail rather
-# than wait for an answer that never comes.
+# Run from a timer or cron there is no terminal, so a credential prompt has to
+# fail rather than wait for an answer that never comes.
 export GIT_TERMINAL_PROMPT=0
 
 # Moves one branch to its upstream by a fast-forward and nothing else, printing

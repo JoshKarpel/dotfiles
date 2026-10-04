@@ -153,15 +153,77 @@ function do_mise() {
   "$HOME/.local/bin/mise" upgrade
 }
 
-# Schedules bin/sync-branches hourly. Cron rather than a systemd timer
-# because it is for every machine, a macOS laptop included, and crontab is the
-# one scheduler both have. This owns a marked block in the user's crontab, the
-# way `git maintenance start --scheduler=crontab` does, and replaces only that,
-# so entries anyone else put there are left alone.
+# Schedules bin/sync-branches hourly: a systemd timer on exe.dev, where the
+# journal keeps every run and a diverged branch shows as a failed unit, and cron
+# everywhere else, since a macOS laptop has no systemd and crontab is the one
+# scheduler it shares with Linux. Exactly one of the two may hold the job, or two
+# runs fetch and fast-forward the same clones at once, so the exe.dev side also
+# removes the cron block an earlier install wrote.
 function do_sync_branches() {
+  log "Scheduling branch sync..."
+
+  if "$BASEDIR/bin/is-exe-dev"; then
+    sync_branches_from_systemd
+  else
+    sync_branches_from_cron
+  fi
+}
+
+function sync_branches_from_systemd() {
+  local units=~/.config/systemd/user
+
+  use_user_bus
+
+  mkdir -p "$units"
+
+  # Nothing in sync-branches bounds a fetch, and a oneshot has no start timeout
+  # of its own, so a hung fetch would hold the unit activating and the timer
+  # would skip every hour after it. The bound stays under the hour for that
+  # reason.
+  cat > "$units/sync-branches.service" << EOF
+[Unit]
+Description=Fast-forward every local branch to its upstream
+
+[Service]
+Type=oneshot
+ExecStart=$BASEDIR/bin/sync-branches
+TimeoutStartSec=30min
+EOF
+
+  cat > "$units/sync-branches.timer" << EOF
+[Unit]
+Description=Keep local branches current hourly
+
+[Timer]
+OnCalendar=*-*-* *:17:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl --user daemon-reload
+  systemctl --user enable --now sync-branches.timer
+
   exists crontab || return 0
 
-  log "Scheduling branch sync..."
+  local current desired
+  current="$(crontab -l 2>/dev/null || true)"
+  desired="$(printf '%s\n' "$current" | without_cron_block sync-branches)"
+  [[ $desired == "$current" ]] && return 0
+
+  if [[ -n $desired ]]; then
+    printf '%s\n' "$desired" | crontab -
+  else
+    crontab -r
+  fi
+}
+
+# This owns a marked block in the user's crontab, the way `git maintenance start
+# --scheduler=crontab` does, and replaces only that, so entries anyone else put
+# there are left alone.
+function sync_branches_from_cron() {
+  exists crontab || return 0
 
   local begin="# BEGIN dotfiles sync-branches"
   local end="# END dotfiles sync-branches"
@@ -176,7 +238,7 @@ function do_sync_branches() {
   current="$(crontab -l 2>/dev/null || true)"
   desired="$(
     if [[ -n $current ]]; then
-      printf '%s\n' "$current" | awk -v b="$begin" -v e="$end" '$0 == b { skip = 1 } !skip { print } $0 == e { skip = 0 }'
+      printf '%s\n' "$current" | without_cron_block sync-branches
     fi
     printf '%s\n%s\n%s\n' "$begin" "$line" "$end"
   )"
@@ -189,6 +251,11 @@ function do_sync_branches() {
   printf '%s\n' "$desired" | crontab -
 }
 
+# Filters stdin, a crontab, down to everything but the named dotfiles block.
+function without_cron_block() {
+  awk -v b="# BEGIN dotfiles $1" -v e="# END dotfiles $1" '$0 == b { skip = 1 } !skip { print } $0 == e { skip = 0 }'
+}
+
 # `systemctl --user` finds its manager through XDG_RUNTIME_DIR, which a login
 # shell has and the first-boot bootstrap running install.sh over `ssh host
 # <command>` does not. Without it every call fails with "Failed to connect to
@@ -198,6 +265,57 @@ function use_user_bus() {
   if [[ -z ${XDG_RUNTIME_DIR:-} ]]; then
     export XDG_RUNTIME_DIR="$(loginctl show-user "$(id -un)" --value -p RuntimePath)"
   fi
+}
+
+# Schedules bin/tidy weekly. Gated on exe.dev rather than on a dev box, since a
+# bot box fills its disk just the same, and nowhere else: a laptop's owner runs
+# it through `update`.
+function do_tidy() {
+  local units=~/.config/systemd/user
+
+  "$BASEDIR/bin/is-exe-dev" || return 0
+
+  use_user_bus
+
+  log "Scheduling tidy..."
+
+  mkdir -p "$units"
+
+  # Every step in tidy is skipped when its tool isn't on PATH, and a unit gets
+  # only the system set, which would run the prunes that matter least and
+  # quietly drop the ones that matter most. The mise shims need `mise` itself
+  # beside them, and are safe only from a directory whose mise config is
+  # trusted, so the working directory is pinned to %h rather than left implicit.
+  cat > "$units/tidy.service" << EOF
+[Unit]
+Description=Reclaim disk from caches and stale builds the installed tools can get back
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h
+Environment=PATH=$BASEDIR/bin:%h/.local/share/mise/shims:%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=$BASEDIR/bin/tidy
+Nice=19
+IOSchedulingClass=idle
+EOF
+
+  # Persistent catches up a week the box was off for. No run now: install.sh is
+  # usually reached through `update`, which runs tidy itself right after.
+  cat > "$units/tidy.timer" << EOF
+[Unit]
+Description=Reclaim disk weekly
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl --user daemon-reload
+  systemctl --user enable --now tidy.timer
 }
 
 # Schedules bin/cloister-codex, which does the work of serving this machine's
@@ -523,6 +641,7 @@ do_locale
 do_brew
 do_mise
 do_sync_branches
+do_tidy
 do_cloister
 do_atlas
 do_mainplate
