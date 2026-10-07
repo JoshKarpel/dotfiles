@@ -21,13 +21,6 @@
   `SessionStart` hook that computes it, not a hand-maintained list that drifts. Repo
   state, available recipes, the current toolchain version: derive it at startup so it
   can't go stale.
-- Change file contents with the Edit tool, not `sed`/`python`/heredoc text surgery.
-  Hand-rolled replacement skips the uniqueness check, hides the change inside an
-  opaque command, and bypasses the harness's file-state tracking, which then
-  reports "modified on disk since you last read it" and tempts yet more scripting.
-  This covers creating and appending, not just editing: `cat > f <<EOF` and
-  `cat >> f <<EOF` are the same untracked write, and Write (or an Edit anchored on
-  the last few lines) is the tool for both, throwaway probe scripts included.
 - A command that was blocked or that failed did nothing. Don't assume any artifact
   it would have produced exists; re-run it before anything downstream reads that
   output, or you'll debug a stale file instead of the actual change.
