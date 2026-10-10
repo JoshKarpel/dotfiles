@@ -9,6 +9,7 @@ dos2unix
 ffmpeg
 findutils
 fzf
+gdb
 git
 gnupg
 graphviz
