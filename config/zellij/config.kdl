@@ -60,4 +60,20 @@ keybinds {
     pane {
         bind "Alt p" { SwitchToMode "Normal"; }
     }
+
+    // Fuzzy tab switcher. zellij fetches and caches the URL itself, so the
+    // release tag here is the pin; bump it to upgrade. quick_jump makes every
+    // digit a jump to that tab number, so a digit can't be used to filter.
+    // In place rather than floating: room closes only its own pane, so
+    // opening it floating reveals any hidden floating panes in the tab and
+    // leaves them showing after it exits.
+    shared_except "locked" {
+        bind "Ctrl y" {
+            LaunchOrFocusPlugin "https://github.com/rvcas/room/releases/download/v1.2.1/room.wasm" {
+                in_place true
+                ignore_case true
+                quick_jump true
+            }
+        }
+    }
 }
