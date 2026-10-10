@@ -370,6 +370,10 @@ converge-mainplate
 # absolute path.
 link-mainplate
 
+# Print a herdr web ui pairing code for another device, for when no browser that
+# already gets in is at hand to open Settings, Phone & devices.
+herdr-web-pair
+
 # Exit 0 only on an exe.dev VM tagged `dev-box`. The guard the services that
 # exist to be looked at by a person are gated on.
 is-dev-box

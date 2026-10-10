@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Print a herdr web ui pairing code for another device, from a terminal rather
+# than from Settings, Phone & devices in a browser that already gets in. The
+# code is six digits, good for ten minutes, and pairs one device.
+#
+# The plugin's own `pair` subcommand does the work. It finds the port and token
+# the running plugin uses by asking `herdr plugin config-dir`, so herdr has to
+# be on PATH alongside bun; both come from mise, whose shims are put first here
+# so this works from a non-interactive shell too.
+
+set -euo pipefail
+
+PATH=~/.local/share/mise/shims:$PATH
+
+# herdr names the checkout with a hash suffix, so it is found by glob. More
+# than one means a stale checkout sits beside the live one, and picking either
+# would be a guess.
+shopt -s nullglob
+checkouts=(~/.config/herdr/plugins/github/devswha.herdr-web-ui-*/)
+if ((${#checkouts[@]} != 1)); then
+  echo "expected one herdr web ui checkout, found ${#checkouts[@]}:" "${checkouts[@]}" >&2
+  exit 1
+fi
+
+exec bun "${checkouts[0]}scripts/plugin.ts" pair
