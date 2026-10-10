@@ -208,6 +208,10 @@
           {
             "type": "command",
             "command": "claude-git-status"
+          },
+          {
+            "type": "command",
+            "command": "claude-tab-status idle"
           }
         ]
       }
@@ -260,6 +264,10 @@
           {
             "type": "command",
             "command": "claude-notify-push question"
+          },
+          {
+            "type": "command",
+            "command": "claude-tab-status waiting"
           }
         ]
       }
@@ -289,6 +297,40 @@
           {
             "type": "command",
             "command": "claude-notify-push permission"
+          },
+          {
+            "type": "command",
+            "command": "claude-tab-status waiting"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-tab-status working"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-tab-status working"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-tab-status idle"
           }
         ]
       }
@@ -321,10 +363,5 @@
   "skipWorkflowUsageWarning": true,
   "theme": "dark",
   "autoCompactEnabled": true,
-  "skipAutoPermissionPrompt": true,
-  "modelSettings": {
-    "claude-opus-5-5": {
-      "effortLevel": "high"
-    }
-  }
+  "skipAutoPermissionPrompt": true
 }

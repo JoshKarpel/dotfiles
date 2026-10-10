@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# Show this Claude session's state as a glyph on the zellij tab it runs in, so the
+# tab bar says which agents are working (●), which are waiting on you (?), and
+# which have finished their turn (✓). Reads the hook payload on stdin.
+# Usage: claude-tab-status <idle|working|waiting|finished>
+#
+# The tab name is the only state: each call strips whatever glyph is there and
+# applies the new one, so nothing has to be kept in step with it. `idle` leaves
+# the bare name. Outside zellij this does nothing, so the same settings stay
+# correct on a laptop.
+#
+# Two Claude sessions in one tab share its name, so the last event from either wins.
+
+set -euo pipefail
+
+# Strip a status glyph from a tab name, then apply the one for a state. Pure, so
+# the self-tests reach it without a zellij.
+render() {
+  local state="$1" name="$2"
+  case "$name" in
+    "● "* | "? "* | "✓ "*) name="${name#* }" ;;
+  esac
+  case "$state" in
+    idle) printf '%s' "$name" ;;
+    working) printf '● %s' "$name" ;;
+    waiting) printf '? %s' "$name" ;;
+    finished) printf '✓ %s' "$name" ;;
+  esac
+}
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
+# line is how `claude-hook-selftests` discovers participating hooks. A stub zellij on
+# PATH serves canned tab and pane listings and records the renames it is asked for, so
+# the tests assert on which tab got which name and on whether the slow pane lookup ran.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  stubs=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$stubs"' EXIT
+
+  check_render() {
+    local state="$1" name="$2" want="$3" got
+    got=$(render "$state" "$name")
+    [[ "$got" == "$want" ]] ||
+    { printf 'FAIL render %s %q: want=%q got=%q\n' "$state" "$name" "$want" "$got"; fails=1; }
+  }
+  check_render working "feat" "● feat"
+  check_render waiting "● feat" "? feat"
+  check_render finished "? feat" "✓ feat"
+  check_render idle "✓ feat" "feat"
+  check_render idle "feat" "feat"
+  check_render working "dotfiles:fix it" "● dotfiles:fix it"
+  check_render working "● two words" "● two words"
+  check_render working "?x" "● ?x"
+
+  cat >"$stubs/zellij" <<'EOF'
+#!/bin/sh
+case "$2" in
+  list-tabs) printf '%s' "$STUB_TABS" ;;
+  list-panes) : > "$STUB_DIR/panes.called"; printf '%s' "$STUB_PANES" ;;
+  rename-tab) printf '%s %s' "$4" "$5" > "$STUB_DIR/rename" ;;
+  *) exit 9 ;;
+esac
+EOF
+  chmod +x "$stubs/zellij"
+
+  # Pane 4 is a terminal in tab 7; a plugin pane shares its id in tab 2, since
+  # zellij numbers the two kinds separately.
+  PANES='[{"id":4,"is_plugin":true,"tab_id":2},{"id":4,"is_plugin":false,"tab_id":7}]'
+
+  # t <desc> <state> <event> <tabs-json> <cached-tab-or-empty> <want-rename> <want-lookup> [VAR=value...]
+  t() {
+    local desc="$1" state="$2" event="$3" tabs="$4" cached="$5" want_rename="$6" want_lookup="$7"
+    shift 7
+    local cache_dir="$stubs/run/claude-tab-status"
+    rm -rf "$stubs/run" "$stubs/rename" "$stubs/panes.called"
+    mkdir -p "$cache_dir"
+    [[ -n "$cached" ]] && printf '%s' "$cached" >"$cache_dir/work-4"
+
+    local exit_code=0 out
+    out=$(env ZELLIJ=0 ZELLIJ_PANE_ID=4 ZELLIJ_SESSION_NAME=work XDG_RUNTIME_DIR="$stubs/run" \
+        STUB_DIR="$stubs" STUB_TABS="$tabs" STUB_PANES="$PANES" "$@" \
+        PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" "$state" \
+      <<<"{\"hook_event_name\":\"$event\"}" 2>&1) || exit_code=$?
+
+    local got_rename="" got_lookup=no
+    [[ -e "$stubs/rename" ]] && got_rename=$(cat "$stubs/rename")
+    [[ -e "$stubs/panes.called" ]] && got_lookup=yes
+    [[ "$exit_code" == 0 && -z "$out" ]] ||
+    { printf 'FAIL %s: exit=%s out=%q\n' "$desc" "$exit_code" "$out"; fails=1; }
+    [[ "$got_rename" == "$want_rename" ]] ||
+    { printf 'FAIL %s: want_rename=%q got_rename=%q\n' "$desc" "$want_rename" "$got_rename"; fails=1; }
+    [[ "$got_lookup" == "$want_lookup" ]] ||
+    { printf 'FAIL %s: want_lookup=%s got_lookup=%s\n' "$desc" "$want_lookup" "$got_lookup"; fails=1; }
+  }
+
+  TABS='[{"tab_id":2,"name":"other"},{"tab_id":7,"name":"✓ repo:feat"}]'
+  t "session start re-resolves despite a cache" idle SessionStart "$TABS" 2 "7 repo:feat" yes
+  t "cached tab is used without the pane lookup" working UserPromptSubmit "$TABS" 7 "7 ● repo:feat" no
+  t "no cache falls back to the pane lookup" waiting Notification "$TABS" "" "7 ? repo:feat" yes
+  t "a cached tab that is gone is re-resolved" working PostToolUse "$TABS" 99 "7 ● repo:feat" yes
+  t "an unchanged name is not rewritten" finished Stop "$TABS" 7 "" no
+  t "an empty tab name still counts as a tab" working PostToolUse '[{"tab_id":7,"name":""}]' 7 "7 ● " no
+  t "outside zellij nothing is called" working PostToolUse "$TABS" 7 "" no ZELLIJ=
+
+  invalid_exit=0
+  CLAUDE_HOOK_SELFTEST= "$SELF" bogus </dev/null >/dev/null 2>&1 || invalid_exit=$?
+  [[ "$invalid_exit" == 1 ]] ||
+  { printf 'FAIL unknown state: want_exit=1 got_exit=%s\n' "$invalid_exit"; fails=1; }
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+STATE="${1:-}"
+case "$STATE" in
+  idle | working | waiting | finished) ;;
+  *)
+    # Exit 1, never 2: on UserPromptSubmit a 2 would block the prompt itself.
+    echo "usage: claude-tab-status <idle|working|waiting|finished>" >&2
+    exit 1
+    ;;
+esac
+
+INPUT=$(cat)
+
+[[ -n "${ZELLIJ:-}" && "${ZELLIJ_PANE_ID:-}" =~ ^[0-9]+$ ]] || exit 0
+
+# A plain `rename-tab` renames the tab you are looking at, not the one this agent is
+# in, so everything goes through the tab's stable id. Finding that id means listing
+# every pane, which takes around a quarter of a second against a few milliseconds for
+# everything else here, so it is looked up once per Claude session and cached.
+# SessionStart always looks it up afresh: pane ids restart when the zellij server
+# does, so a cache from an earlier server can name a tab this pane is not in.
+CACHE="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/claude-tab-status/${ZELLIJ_SESSION_NAME:-zellij}-$ZELLIJ_PANE_ID"
+
+name_of() {
+  jq -er --argjson id "$1" 'map(select(.tab_id == $id)) | first | .name' <<<"$TABS"
+}
+
+TABS=$(zellij action list-tabs --json)
+EVENT=$(jq -r '.hook_event_name // ""' <<<"$INPUT")
+
+TAB_ID=""
+if [[ "$EVENT" != "SessionStart" && -r "$CACHE" ]]; then
+  TAB_ID=$(cat "$CACHE")
+fi
+
+if [[ -z "$TAB_ID" ]] || ! NAME=$(name_of "$TAB_ID"); then
+  TAB_ID=$(zellij action list-panes --json --tab | jq -r --argjson id "$ZELLIJ_PANE_ID" \
+    'map(select(.is_plugin == false and .id == $id)) | first | .tab_id // empty')
+  [[ -n "$TAB_ID" ]] || exit 0
+  mkdir -p "${CACHE%/*}"
+  printf '%s' "$TAB_ID" >"$CACHE"
+  NAME=$(name_of "$TAB_ID")
+fi
+
+NEW=$(render "$STATE" "$NAME")
+[[ "$NEW" == "$NAME" ]] || zellij action rename-tab --tab-id "$TAB_ID" "$NEW"

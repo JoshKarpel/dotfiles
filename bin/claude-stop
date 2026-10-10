@@ -30,6 +30,12 @@ cat >/dev/null
 : > "$STUB_DIR/notify.called"
 exit 0
 EOF
+  cat >"$stubs/claude-tab-status" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+: > "$STUB_DIR/tab-$1.called"
+exit 0
+EOF
   cat >"$stubs/claude-stop-precommit" <<'EOF'
 #!/bin/sh
 cat >/dev/null
@@ -44,7 +50,7 @@ cat >/dev/null
 printf '%s' "$STUB_FINISH_OUT"
 exit "$STUB_FINISH_EXIT"
 EOF
-  chmod +x "$stubs"/claude-sound "$stubs"/claude-notify-push "$stubs"/claude-stop-precommit "$stubs"/claude-stop-finish
+  chmod +x "$stubs"/claude-sound "$stubs"/claude-notify-push "$stubs"/claude-tab-status "$stubs"/claude-stop-precommit "$stubs"/claude-stop-finish
 
   t() {
     local desc="$1" precommit_exit="$2" precommit_out="$3" finish_exit="$4" finish_out="$5"
@@ -62,6 +68,7 @@ EOF
     [[ -e "$stubs/finish.called" ]] && got+="${got:+,}finish"
     [[ -e "$stubs/sound.called" ]] && got+="${got:+,}sound"
     [[ -e "$stubs/notify.called" ]] && got+="${got:+,}notify"
+    [[ -e "$stubs/tab-finished.called" ]] && got+="${got:+,}tab-finished"
 
     [[ "$exit_code" == "$want_exit" ]] ||
     { printf 'FAIL %s: want_exit=%s got_exit=%s :: %s\n' "$desc" "$want_exit" "$exit_code" "$out"; fails=1; }
@@ -75,13 +82,13 @@ EOF
   t "question hand-back" \
     0 "" 0 "" \
     '{"last_assistant_message":"Should I proceed?"}' \
-    0 "" "sound,notify"
+    0 "" "sound,notify,tab-finished"
 
   # --- neither check blocks: both run in order, then announce ---
   t "nothing blocks" \
     0 "" 0 "" \
     '{"last_assistant_message":"Done."}' \
-    0 "" "precommit,finish,sound,notify"
+    0 "" "precommit,finish,sound,notify,tab-finished"
 
   # --- the first check blocks: its JSON surfaces, the second check and announce never run ---
   t "first check blocks" \
@@ -109,10 +116,11 @@ fi
 
 INPUT=$(cat)
 
-# Both announcements, together, so the two stop paths below can't drift apart.
+# Every announcement, together, so the two stop paths below can't drift apart.
 announce() {
   claude-sound stop || true
   echo "$INPUT" | claude-notify-push stop || true
+  echo "$INPUT" | claude-tab-status finished || true
 }
 
 # If Claude's last message looks like a question, it's handing control back to the user.

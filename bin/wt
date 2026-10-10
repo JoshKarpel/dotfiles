@@ -1,0 +1,179 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["typer"]
+# ///
+"""One git worktree per zellij tab, each tab running its own agent."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Annotated, Any
+
+import typer
+
+app = typer.Typer(no_args_is_help=True, help=__doc__)
+
+
+def worktrees_root(clone: Path) -> Path:
+    """Where a clone's worktrees live: beside it, as <repo>.worktrees/.
+
+    Beside rather than inside, so tools run in the clone (rg, pre-commit) never
+    descend into them, and under the same root as the clone (~/projects,
+    ~/work). sync-branches looks only for a `.git` directory one level under
+    each root, which <repo>.worktrees/ has none of, so it is never mistaken for
+    a clone.
+    """
+    return clone.with_name(f"{clone.name}.worktrees")
+
+
+def tab_name(clone: Path, branch: str) -> str:
+    """The tab `new` opens for a branch, which is how `done` finds it again.
+
+    `:` cannot appear in a branch name, so the split is never ambiguous.
+    """
+    return f"{clone.name}:{branch}"
+
+
+def find_tab(tabs: list[dict[str, Any]], name: str) -> int | None:
+    """The id of the tab called NAME, with or without a status glyph in front.
+
+    claude-tab-status renames the tab to `<glyph> <name>` as the agent works,
+    so an exact match alone would miss every tab with an agent in it.
+    """
+    for tab in tabs:
+        if tab["name"] == name or tab["name"].endswith(f" {name}"):
+            return int(tab["tab_id"])
+    return None
+
+
+def run(*command: str | Path, check: bool = True) -> subprocess.CompletedProcess[str]:
+    """Run COMMAND and capture its stdout, exiting with its status if it fails.
+
+    stderr passes through, so a failure reads as the tool's own message rather
+    than a traceback from here.
+    """
+    result = subprocess.run([str(part) for part in command], stdout=subprocess.PIPE, text=True)
+    if check and result.returncode != 0:
+        raise typer.Exit(result.returncode)
+    return result
+
+
+def git(cwd: Path, *args: str | Path, check: bool = True) -> str:
+    """Run a git command against the repository at CWD and return its stdout."""
+    return run("git", "-C", cwd, *args, check=check).stdout.strip()
+
+
+def clone_of(path: Path) -> Path:
+    """The clone a path belongs to, even when the path is one of its worktrees."""
+    return Path(git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")).parent
+
+
+def fail(message: str) -> typer.Exit:
+    """Report MESSAGE on stderr and return the exit to raise."""
+    typer.echo(f"wt: {message}", err=True)
+    return typer.Exit(1)
+
+
+@app.command()
+def new(
+    repo: Annotated[Path, typer.Argument(help="Any path in the clone, or in one of its worktrees.")],
+    branch: Annotated[str, typer.Argument(help="Branch to work on.")],
+) -> None:
+    """Open BRANCH in a worktree beside the clone, in a new zellij tab.
+
+    The worktree lands at <repo>.worktrees/<branch>. A branch that already exists,
+    locally or on origin, is checked out as it is. Any other is created from
+    origin/HEAD with no upstream, so the first push tracks origin/<branch> rather
+    than the default branch. Running this again for a worktree that exists opens
+    another tab on it.
+
+    The tab is named <repo>:<branch>, and every pane opened in it, floating
+    ones included, starts in the worktree.
+    """
+    if not os.environ.get("ZELLIJ"):
+        raise fail("not inside a zellij session")
+
+    clone = clone_of(repo)
+    path = worktrees_root(clone) / branch
+
+    if not path.exists():
+        git(clone, "fetch", "--quiet", "origin")
+        exists = any(
+            run("git", "-C", clone, "rev-parse", "--verify", "--quiet", ref, check=False).returncode == 0
+            for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}")
+        )
+        if exists:
+            # A branch only on origin gets a local one tracking it, by git's own DWIM.
+            git(clone, "worktree", "add", path, branch)
+        else:
+            git(clone, "worktree", "add", "--no-track", "-b", branch, path, "origin/HEAD")
+
+    # new-tab prints the tab's id on stdout, which `run` captures and nothing needs.
+    run("zellij", "action", "new-tab", "--name", tab_name(clone, branch), "--cwd", path)
+
+
+@app.command()
+def done(
+    worktree: Annotated[Path, typer.Argument(help="The worktree to tear down.")] = Path("."),
+) -> None:
+    """Remove a worktree, delete its branch if merged, and close its tab.
+
+    Refuses while the worktree has any change, untracked files included, since
+    removing it would discard them. A branch git will not delete with `-d` is
+    kept, so its commits survive the worktree, and git says why. A squash-merged
+    branch is one of those, since git cannot see that its commits landed.
+
+    Closing the tab ends the agent running in it, and this command too when it
+    is run from one of that tab's panes.
+    """
+    toplevel = Path(git(worktree, "rev-parse", "--show-toplevel"))
+    common = Path(git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    if Path(git(worktree, "rev-parse", "--absolute-git-dir")) == common:
+        raise fail(f"{toplevel} is a clone, not a linked worktree")
+
+    if git(toplevel, "status", "--porcelain"):
+        run("git", "-C", toplevel, "status", "--short", check=False)
+        raise fail(f"{toplevel} has changes; commit or discard them first")
+
+    branch = git(toplevel, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
+    clone = common.parent
+
+    git(clone, "worktree", "remove", toplevel)
+    typer.echo(f"removed {toplevel}")
+
+    # A branch like feat/x nests a directory per slash, so prune the ones this
+    # left empty, up to and including <repo>.worktrees/ itself.
+    root = worktrees_root(clone)
+    for directory in toplevel.parents:
+        if not directory.is_relative_to(root):
+            break
+        try:
+            directory.rmdir()
+        except OSError:
+            break
+
+    if not branch:
+        return
+
+    if run("git", "-C", clone, "branch", "--quiet", "-d", branch, check=False).returncode == 0:
+        typer.echo(f"deleted branch {branch}")
+    else:
+        typer.echo(f"kept branch {branch}")
+
+    if not os.environ.get("ZELLIJ"):
+        return
+
+    # Closed last: from one of the tab's own panes, this ends the command.
+    tabs = json.loads(run("zellij", "action", "list-tabs", "--json").stdout)
+    tab_id = find_tab(tabs, tab_name(clone, branch))
+    if tab_id is not None:
+        run("zellij", "action", "close-tab-by-id", str(tab_id))
+
+
+if __name__ == "__main__":
+    sys.exit(app())

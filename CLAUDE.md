@@ -374,6 +374,13 @@ link-mainplate
 # already gets in is at hand to open Settings, Phone & devices.
 herdr-web-pair
 
+# One git worktree per zellij tab, each running its own agent: `wt new` opens a
+# branch in <repo>.worktrees/<branch> beside the clone, in a tab of its own, and
+# `wt done` removes the worktree and closes its tab. The claude-tab-status
+# hook marks each tab working (●), waiting on you (?), or finished (✓).
+# Run with --help for subcommands and flags.
+wt --help
+
 # Exit 0 only on an exe.dev VM tagged `dev-box`. The guard the services that
 # exist to be looked at by a person are gated on.
 is-dev-box
