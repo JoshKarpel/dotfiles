@@ -552,6 +552,74 @@ EOF
 
   systemctl --user daemon-reload
   systemctl --user enable --now zellij-session.service
+
+  restart_stale_zellij_session
+}
+
+# True when this script runs somewhere under process $1, as it does from a
+# terminal in a zellij or herdr pane. Restarting that server would kill the
+# install partway through along with the terminal it reports to.
+function is_descendant_of() {
+  local ancestor="$1"
+  local pid=$$
+
+  while ((pid > 1)); do
+    ((pid == ancestor)) && return 0
+    pid="$(awk '$1 == "PPid:" {print $2}' "/proc/$pid/status")"
+  done
+  return 1
+}
+
+# Moves the work session onto the zellij mise has installed when the server
+# holding it still runs an older one, which otherwise lasts until a reboot. This
+# ends every pane in the session, and zellij has no way to tell whether an agent
+# in one is mid-turn, so the only thing guarding it is that the trigger is a
+# person running install.sh.
+#
+# Stopped with `kill-session` rather than a signal: SIGTERM leaves the socket
+# file behind. It works across releases because the socket directory is keyed
+# by zellij's protocol contract rather than its version, so a protocol bump is
+# where this stops working, and it fails loudly there rather than starting a
+# second session beside the first.
+function restart_stale_zellij_session() {
+  local zellij=~/.local/share/mise/shims/zellij
+  local session pid running installed
+
+  session="$(hostname -s)"
+  pid="$(pgrep -u "$(id -u)" -f "^[^ ]*zellij --server $ZELLIJ_SOCKET_DIR/contract_version_[0-9]+/$session\$")"
+  [[ -n "$pid" ]] || return 0
+
+  # The old binary is usually gone by now, so compare paths rather than asking
+  # it for a version.
+  running="$(readlink "/proc/$pid/exe")"
+  running="${running% (deleted)}"
+  installed="$(realpath "$("$HOME/.local/bin/mise" which zellij)")"
+  [[ "$running" != "$installed" ]] || return 0
+
+  if is_descendant_of "$pid"; then
+    log "Not restarting the zellij session from inside it; detach, then: zellij kill-session $session && systemctl --user restart zellij-session"
+    return 0
+  fi
+
+  log "Restarting the zellij work session on the upgraded zellij..."
+
+  if ! "$zellij" kill-session "$session"; then
+    log "zellij could not stop session $session; see 'ps -p $pid'"
+    return 1
+  fi
+
+  # The unit's `attach --create-background` treats an existing session as
+  # success, so restarting it before the old server is gone recreates nothing.
+  local tries=0
+  while kill -0 "$pid" 2> /dev/null; do
+    if ((++tries > 50)); then
+      log "zellij session $session did not exit; see 'ps -p $pid'"
+      return 1
+    fi
+    sleep 0.1
+  done
+
+  systemctl --user restart zellij-session.service
 }
 
 # Serves the work session over HTTPS at `https://<vm>.exe.xyz:3000/<session>`.
@@ -655,6 +723,146 @@ EOF
   systemctl --user restart vscode-web.service
 }
 
+# Keeps a herdr server up from boot, the herdr counterpart of the zellij work
+# session: its panes and agents exist because the box is up, not because
+# somebody connected. `herdr` from a login attaches to it, since both find it at
+# ~/.config/herdr/herdr.sock, which herdr derives from the home directory rather
+# than XDG_RUNTIME_DIR, so there is no socket directory to pin the way zellij
+# needs one.
+#
+# Unlike the zellij session, the panes live inside this unit: `herdr server`
+# stays in the foreground and its children share the unit's cgroup, so `stop`
+# and `restart` end every pane and agent in it. Restarting is therefore left to
+# restart_stale_herdr_server, which does it only for an upgrade.
+#
+# PATH is what the server hands to every pane and plugin command, so it carries
+# the mise shims for the plugin's bun and node as well as for herdr itself.
+function do_herdr_server() {
+  local units=~/.config/systemd/user
+
+  "$BASEDIR/bin/is-dev-box" || return 0
+
+  use_user_bus
+
+  log "Converging the herdr server..."
+
+  mkdir -p "$units"
+
+  cat > "$units/herdr-server.service" << 'EOF'
+[Unit]
+Description=Keep this box's herdr server running
+
+[Service]
+ExecStart=%h/.local/share/mise/shims/herdr server
+Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+  systemctl --user daemon-reload
+  systemctl --user enable --now herdr-server.service
+
+  restart_stale_herdr_server
+}
+
+# Moves the herdr server onto the herdr mise has installed when it still runs an
+# older one. Panes come back as fresh shells in their saved directories and the
+# layout returns, but the processes in them end, so this waits for a run in
+# which no agent is mid-turn or waiting on an answer. herdr's own live handoff
+# would keep the processes, but it belongs to herdr's updater, which a mise
+# install cannot use.
+function restart_stale_herdr_server() {
+  local herdr=~/.local/share/mise/shims/herdr
+  local running installed pid
+
+  # Empty while a freshly enabled server is still starting, which needs nothing.
+  running="$("$herdr" status server | awk '$1 == "version:" {print $2}')"
+  installed="$("$herdr" --version | awk '{print $2}')"
+  [[ -n "$running" && "$running" != "$installed" ]] || return 0
+
+  pid="$(systemctl --user show -p MainPID --value herdr-server.service)"
+  if is_descendant_of "$pid"; then
+    log "Not restarting herdr $running from inside it; detach, then: systemctl --user restart herdr-server"
+    return 0
+  fi
+
+  if "$herdr" agent list | jq -e 'any(.. | objects | .agent_status?; . == "working" or . == "blocked")' > /dev/null; then
+    log "Not restarting herdr $running while an agent is working or waiting; rerun install.sh later"
+    return 0
+  fi
+
+  log "Restarting the herdr server on herdr $installed..."
+  systemctl --user restart herdr-server.service
+}
+
+# Serves herdr web ui (https://github.com/devswha/herdr-web-ui), a browser and
+# phone client for the herdr server above, at `https://<vm>.exe.xyz:3003/`.
+#
+# It is a herdr plugin rather than a unit of its own: its startup hook brings the
+# web server up each time the herdr server starts, inside that server's cgroup.
+# The plugin reads its settings from an env file in its herdr config directory,
+# not from any environment of ours, and only at start, so a changed file means
+# restarting the plugin, which leaves herdr and its agents alone.
+#
+# The server binds loopback by default and the exe.dev proxy reaches it there.
+# The proxy sends X-Forwarded-For, which is what makes the app count a visitor
+# as remote rather than as this computer: remote visitors are let in only until
+# the first device pairs (Settings, Phone & devices), and need a pairing code of
+# their own after that. Pair a browser right after first install so the private
+# exe.dev proxy is not the only gate. Like VS Code's port, this one hands out
+# terminals: never `share set-public` it.
+#
+# Installed once, at the latest release tag, then left to the app's own updater
+# (Settings, About), which replaces the checkout herdr manages. Reinstalling on
+# every converge would undo each of those updates.
+function do_herdr_web() {
+  local plugin=devswha.herdr-web-ui
+  local repo=devswha/herdr-web-ui
+  local herdr=~/.local/share/mise/shims/herdr
+
+  "$BASEDIR/bin/is-dev-box" || return 0
+
+  log "Converging herdr web ui..."
+
+  # `enable --now` returns before the server is listening, and every plugin
+  # command below talks to it. `herdr status server` exits 0 whether or not it
+  # is up, so the socket appearing is the signal to wait on.
+  local tries=0
+  until [[ -S ~/.config/herdr/herdr.sock ]]; do
+    if ((++tries > 50)); then
+      log "herdr server did not come up; see systemctl --user status herdr-server"
+      return 1
+    fi
+    sleep 0.1
+  done
+
+  local env_file
+  env_file="$("$herdr" plugin config-dir "$plugin")/env"
+  local wanted
+  wanted="$(printf 'PORT=3003\nHERDR_WEB_TELEMETRY=0\nHERDR_WEB_APP_NAME=%s\n' "$(hostname -s)")"
+  local is_env_changed=false
+  if [[ "$(cat "$env_file" 2> /dev/null)" != "$wanted" ]]; then
+    printf '%s\n' "$wanted" > "$env_file"
+    is_env_changed=true
+  fi
+
+  # Matching the id anywhere in the listing rather than at a field path, which
+  # herdr does not document.
+  if ! "$herdr" plugin list --json | jq -e --arg id "$plugin" 'any(.. | strings; . == $id)' > /dev/null; then
+    local tag
+    tag="$(git ls-remote --tags --refs --sort=-v:refname "https://github.com/$repo" 'v*' | head -1 | sed 's|.*refs/tags/||')"
+    # The build runs bun and node from this process's PATH, not the server's.
+    PATH=~/.local/share/mise/shims:$PATH "$herdr" plugin install "$repo" --ref "$tag" --yes
+    "$herdr" plugin action invoke "$plugin.start" > /dev/null
+  elif [[ "$is_env_changed" == true ]]; then
+    "$herdr" plugin action invoke "$plugin.stop" > /dev/null
+    "$herdr" plugin action invoke "$plugin.start" > /dev/null
+  fi
+}
+
 do_config
 
 . "$HOME/.commonrc-pre"
@@ -673,3 +881,5 @@ do_mainplate
 do_zellij_session
 do_zellij_web
 do_vscode_web
+do_herdr_server
+do_herdr_web

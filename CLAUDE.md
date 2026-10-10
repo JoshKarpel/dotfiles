@@ -19,8 +19,8 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 Systemd user units are the exception to `config/`. `install.sh` writes
 `cloister-codex.{service,timer}`, `converge-atlas.{service,timer}`,
 `converge-mainplate.{service,timer}`, `sync-branches.{service,timer}`,
-`tidy.{service,timer}`, `zellij-session.service`, `zellij-web.service`, and
-`vscode-web.service` into `~/.config/systemd/user/` rather than symlinking them
+`tidy.{service,timer}`, `zellij-session.service`, `zellij-web.service`,
+`vscode-web.service`, and `herdr-server.service` into `~/.config/systemd/user/` rather than symlinking them
 from here, because a unit has to name the absolute path of the clone it was
 installed from, and only `install.sh` knows where that is. The same directory is
 where `claude-scriptorium`, `exe-dev-atlas`, and `mainplate` write the units
@@ -53,8 +53,8 @@ forwards 3000-9999 to `https://<vm>.exe.xyz:<port>/`.
 [exe-dev-atlas](https://github.com/JoshKarpel/exe-dev-atlas) takes the bare
 hostname's port so the front door is an index of everything else. The atlas
 sorts by port, so the bottom of the forwarded range is the top of the index, and
-the three ways in to the box take it: the work session on 3000, VS Code on 3001,
-and mainplate on 3002. A dev server lands wherever it lands above those, and
+the ways in to the box take it: the work session on 3000, VS Code on 3001,
+mainplate on 3002, and herdr web ui on 3003. A dev server lands wherever it lands above those, and
 services that are only occasionally opened start at 4000, where the codex is.
 
 None of the atlas, the codex, or mainplate is implemented here. All three are
@@ -126,9 +126,12 @@ controlling terminal, and it exits 1 with "Session already exists" rather than
 succeeding as a no-op, hence `SuccessExitStatus=1`. A real failure panics and
 exits 101, so tolerating 1 does not hide one.
 
-The session outlives the unit: `stop` and `restart` both leave it running, and
-`install.sh` only ever `enable --now`s it. Deleting a session is
-`zellij delete-session`, never `systemctl`.
+The session outlives the unit: `stop` and `restart` both leave it running.
+Deleting a session is `zellij delete-session`, never `systemctl`. The one time
+`install.sh` ends it is when mise has upgraded zellij underneath it: it kills
+the session and restarts the unit to recreate it on the new release, losing
+every pane, unless `install.sh` is itself running inside that session, where it
+skips and prints the commands to finish by hand.
 
 The token that gets you into the web client is minted per box with
 `zellij web --create-token`, displayed once, and hashed into
@@ -141,6 +144,33 @@ does. Those name no clone (`%h` reaches the home directory, and systemd resolves
 a specifier wherever it appears, quoting included), and are written at first boot
 rather than on every converge, so a change to them reaches only boxes built
 afterwards.
+
+## herdr
+
+[herdr](https://herdr.dev/docs/) runs beside the zellij work session as an
+agent-focused alternative under trial, not a replacement for it.
+`herdr-server.service` keeps a headless `herdr server` up from boot, and `herdr`
+from a login attaches to it.
+
+The one difference from zellij worth knowing before touching the unit: the panes
+live _inside_ it. `herdr server` stays in the foreground and its panes share the
+unit's cgroup, so `stop` and `restart` end every agent running there. A restart
+does bring back the layout, with each pane a fresh shell in its saved directory.
+`install.sh` restarts it only when mise has upgraded herdr underneath it, and
+skips that while any agent is working or waiting on an answer, or while
+`install.sh` is itself running inside the server. herdr's live handoff would
+keep the processes, but only through herdr's own updater, which a mise install
+cannot use.
+
+[herdr web ui](https://github.com/devswha/herdr-web-ui) serves the server on
+3003. It is a herdr plugin, started by the server's startup hook rather than by
+a unit, and installed once at its latest release tag, after which its own
+updater (Settings, About) owns the checkout. Its settings live in the `env` file
+under `herdr plugin config-dir devswha.herdr-web-ui`, which `install.sh` owns.
+It trusts loopback but reads the exe.dev proxy's `X-Forwarded-For`, so proxied
+visitors are let in until the first device pairs and need a code after that;
+pairing one browser per box is the manual step that makes it a second gate
+behind the exe.dev login.
 
 ## Mainplate
 

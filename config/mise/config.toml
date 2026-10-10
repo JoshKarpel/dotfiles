@@ -24,6 +24,9 @@ corepack = true
 [tools]
 ast-grep = "latest"
 bottom = "latest"
+# Runs herdr web ui, the herdr plugin install.sh sets up on dev boxes; its build
+# and its server both reach for bun on the herdr server's PATH.
+bun = "latest"
 dust = "latest"
 fd = "latest"
 gh = "latest"
@@ -35,6 +38,7 @@ gh = "latest"
 "github:JoshKarpel/claude-scriptorium" = "latest"
 "github:mstange/samply" = "latest"
 helm = "latest"
+herdr = "latest"
 hyperfine = "latest"
 jq = "latest"
 just = "latest"
