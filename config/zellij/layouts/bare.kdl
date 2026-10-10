@@ -1,0 +1,6 @@
+// One pane and nothing around it: no tab bar, no status bar, no frame. Opt-in
+// per tab, with `zellij action new-tab --layout bare`, rather than the default,
+// so the other tabs' bars still show the claude-tab-status glyphs.
+layout {
+    pane borderless=true
+}

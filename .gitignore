@@ -7,8 +7,10 @@
 # Claude Code settings (user-specific)
 claude/settings.json
 
-# Machine-local zellij layouts, which reference paths that only exist here
-config/zellij/layouts/
+# Machine-local zellij layouts, which reference paths that only exist here.
+# A layout naming no path can be shared, and is excepted by name.
+config/zellij/layouts/*
+!config/zellij/layouts/bare.kdl
 
 /bin/mc
 /bin/amm
