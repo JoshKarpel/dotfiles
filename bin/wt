@@ -51,13 +51,15 @@ def find_tab(tabs: list[dict[str, Any]], name: str) -> int | None:
     return None
 
 
-def run(*command: str | Path, check: bool = True) -> subprocess.CompletedProcess[str]:
+def run(
+    *command: str | Path, check: bool = True, cwd: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     """Run COMMAND and capture its stdout, exiting with its status if it fails.
 
     stderr passes through, so a failure reads as the tool's own message rather
     than a traceback from here.
     """
-    result = subprocess.run([str(part) for part in command], stdout=subprocess.PIPE, text=True)
+    result = subprocess.run([str(part) for part in command], stdout=subprocess.PIPE, text=True, cwd=cwd)
     if check and result.returncode != 0:
         raise typer.Exit(result.returncode)
     return result
@@ -93,7 +95,8 @@ def new(
     another tab on it.
 
     The tab is named <repo>:<branch>, and every pane opened in it, floating
-    ones included, starts in the worktree.
+    ones included, starts in the worktree. When the clone has a pre-commit
+    config, its git hook is (re)installed before the tab opens.
     """
     if not os.environ.get("ZELLIJ"):
         raise fail("not inside a zellij session")
@@ -112,6 +115,13 @@ def new(
             git(clone, "worktree", "add", path, branch)
         else:
             git(clone, "worktree", "add", "--no-track", "-b", branch, path, "origin/HEAD")
+
+    # Hooks live in the clone's git dir, shared by every worktree, so one install
+    # covers them all. It runs from the clone rather than the worktree because the
+    # hook pins the interpreter that installed it, and a worktree's venv is gone
+    # after `wt done`.
+    if run("is-pre-commit-project", cwd=clone, check=False).returncode == 0:
+        run("pre-commit-run", "install", cwd=clone)
 
     # new-tab prints the tab's id on stdout, which `run` captures and nothing needs.
     run("zellij", "action", "new-tab", "--name", tab_name(clone, branch), "--cwd", path)
