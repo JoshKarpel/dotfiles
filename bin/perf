@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Run the newest perf that linux-tools-generic installed, skipping Ubuntu's wrapper
+
+set -euo pipefail
+
+# /usr/bin/perf from linux-tools-common refuses to run unless it finds a build for
+# exactly `uname -r`, and no Ubuntu package matches the kernel an exe.dev VM (or
+# WSL2) boots. The versioned binary runs fine against a newer kernel, so exec it
+# directly. It lives under a path that moves with every linux-tools upgrade, which
+# is why this is a script rather than a symlink.
+binaries=(/usr/lib/linux-tools-*/perf)
+if [[ ! -x "${binaries[0]}" ]]; then
+  echo "perf: no /usr/lib/linux-tools-*/perf; install linux-tools-generic" >&2
+  exit 127
+fi
+
+exec "$(printf '%s\n' "${binaries[@]}" | sort -V | tail -1)" "$@"

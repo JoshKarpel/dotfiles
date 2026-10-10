@@ -19,6 +19,7 @@ jq
 libncurses-dev
 libsqlite3-dev
 libssl-dev
+linux-tools-generic
 locales
 lsb-release
 lsof
