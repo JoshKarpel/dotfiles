@@ -108,6 +108,25 @@ function do_locale() {
   fi
 }
 
+# Raises how many frames the kernel walks per perf sample. The default of 127
+# truncates deeply recursive code (regex compilation goes well past it), and
+# frames above the cut are lost from the profile. perf_event_paranoid stays at
+# its default of 2: perf drops to user-only sampling on its own there, and
+# kernel frames are a `sudo perf` away when wanted.
+#
+# Applying it fails with EBUSY while any perf event is open. That leaves the
+# file in place for the next boot rather than aborting the install.
+function do_perf_sysctl() {
+  [[ -d /etc/sysctl.d ]] || return 0
+
+  log "Raising the perf stack depth..."
+
+  sudo tee /etc/sysctl.d/99-perf-event.conf > /dev/null << 'EOF'
+kernel.perf_event_max_stack = 1024
+EOF
+  sudo sysctl --load=/etc/sysctl.d/99-perf-event.conf
+}
+
 function do_brew() {
   if ! [[ $(uname) == "Darwin" ]]; then
     return 0
@@ -870,6 +889,7 @@ do_config
 do_ssh_key
 do_apt
 do_locale
+do_perf_sysctl
 do_brew
 do_mise
 do_sync_branches

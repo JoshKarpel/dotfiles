@@ -23,9 +23,13 @@ LLVM's; the report script prefers GNU and falls back to `llvm-addr2line` /
 
 Two sysctls gate profiling:
 
-- **`kernel.perf_event_paranoid`** decides whether an unprivileged user may sample
-  a process it owns at all. It commonly defaults to `2`, which blocks sampling
-  outright. `1` is enough.
+- **`kernel.perf_event_paranoid`** decides what an unprivileged user may sample.
+  The upstream default of `2` allows user space only, and `perf record` drops to
+  user-only events on its own (`cycles:Pu` in the report header), which is all a
+  Rust hot path needs. `1` adds kernel samples, showing time spent in syscalls
+  as a `[kernel]` bucket, at the cost of exposing kernel addresses. Debian and
+  Ubuntu kernels add `3`/`4`, which block unprivileged sampling outright; lower
+  it to `2` there.
 - **`kernel.perf_event_max_stack`** is how many frames the kernel walks per sample.
   The default of `127` truncates deeply recursive code (regex compilation reaches
   well past it). Raise it to `1024`.
@@ -33,11 +37,13 @@ Two sysctls gate profiling:
 `perf_event_max_stack` **cannot be changed while any perf event is open**, so set it
 before recording.
 
-Write both under `/etc/sysctl.d/` so they survive a reboot, and under WSL2 a
-shutdown of the VM:
+Check the current values before changing anything: the dotfiles `install.sh`
+already persists the stack depth on every Linux box it runs on. Otherwise, write
+them under `/etc/sysctl.d/` so they survive a reboot, and under WSL2 a shutdown
+of the VM. Add the `paranoid = 2` line only where the distro set it higher:
 
 ```bash
-printf '%s\n' 'kernel.perf_event_paranoid = 1' 'kernel.perf_event_max_stack = 1024' \
+printf '%s\n' 'kernel.perf_event_max_stack = 1024' \
   | sudo tee /etc/sysctl.d/99-perf-event.conf > /dev/null
 sudo sysctl --system
 sysctl kernel.perf_event_paranoid kernel.perf_event_max_stack
@@ -46,9 +52,9 @@ sysctl kernel.perf_event_paranoid kernel.perf_event_max_stack
 This needs an interactive `sudo`. Ask the user to run it rather than grinding on a
 non-interactive `sudo -n`, which fails for lack of a TTY regardless of permissions.
 
-`kernel.kptr_restrict` only affects *kernel* symbol names. User-space Rust profiling
-doesn't need it, so leave it at its restrictive default and accept that kernel time
-aggregates into one `[kernel]` bucket.
+`kernel.kptr_restrict` only affects *kernel* symbol names, which matter only at
+paranoid `1` or below. Leave it at its restrictive default and accept that kernel
+time, when sampled at all, aggregates into one `[kernel]` bucket.
 
 ## WSL2
 
