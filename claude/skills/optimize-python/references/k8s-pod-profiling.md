@@ -1,6 +1,6 @@
 # Profiling Python in a Kubernetes Pod
 
-Captures an austin/speedscope trace from a Python process running inside a
+Captures a Tachyon or austin trace from a Python process running inside a
 k8s pod, then retrieves the trace locally for analysis.
 
 ## Step 1: Find the Pod
@@ -27,7 +27,21 @@ it's PID 1.
 
 ## Step 3: Capture the Trace
 
-Write to a file in the pod (recommended over stdout streaming; see Step 4):
+Write to a file in the pod (recommended over stdout streaming; see Step 4).
+
+If the pod's Python is 3.15+, use Tachyon with the pod's own interpreter
+(the profiler must match the target's Python version), which needs nothing
+added to the image:
+
+```bash
+kubectl exec -n <namespace> <pod> -- \
+  python -m profiling.sampling attach --mode cpu -d 30 --binary -o /tmp/profile.bin <pid>
+```
+
+Retrieve `/tmp/profile.bin` as in Step 4,
+then render it locally with `replay` (see the Tachyon section of SKILL.md),
+using a local Python 3.15+. The rest of this step and Step 5
+apply to austin, for older Pythons:
 
 ```bash
 kubectl exec -n <namespace> <pod> -- \

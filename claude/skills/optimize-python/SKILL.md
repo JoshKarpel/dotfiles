@@ -3,8 +3,9 @@ name: optimize-python
 description: >
   Python performance profiling and optimization. MUST be invoked when investigating CPU
   hotspots, memory usage, I/O slowness, async event loop blocking, or when
-  optimizing slow Python code. Covers tools (cProfile, line_profiler,
-  austin/speedscope, scalene), flamegraph generation, common optimization
+  optimizing slow Python code. Covers tools (Tachyon, the Python 3.15+ built-in
+  sampling profiler; cProfile, line_profiler, austin/speedscope, scalene),
+  flamegraph generation, common optimization
   patterns (concurrent awaits, regex combining, recursive memoization,
   eliminating duplicate work, moving blocking I/O off the event loop), and
   profiling Python processes in Kubernetes pods.
@@ -15,7 +16,8 @@ description: >
 ## The Profiling Loop
 
 1. **Pick a profiler** based on what you're investigating:
-   cProfile or austin for CPU hotspots,
+   Tachyon for CPU hotspots when the target runs Python 3.15+,
+   otherwise cProfile or austin,
    scalene when you also need memory,
    line_profiler when you've found the hot function and want line-level detail,
    `PYTHONASYNCIODEBUG=1` for event loop blocking.
@@ -36,7 +38,87 @@ description: >
 
 ## Tools
 
-### cProfile (built-in, call-level CPU)
+### Tachyon (built-in sampling profiler, Python 3.15+)
+
+Tachyon is the statistical sampling profiler that ships in the standard library
+as `profiling.sampling` from Python 3.15 on
+(see the [`profiling.sampling` docs](https://docs.python.org/3.15/library/profiling.sampling.html)).
+Prefer it over austin and cProfile whenever the target runs 3.15+:
+nothing to install, it samples from a separate process
+so the target runs unmodified, it attaches to running processes,
+and it renders flamegraphs and line-level heatmaps itself,
+with no conversion pipeline.
+Run `python -m profiling.sampling <command> --help` for the full flag set.
+
+Check that it's available in the interpreter the code actually runs under:
+
+```bash
+uv run python -c "import profiling.sampling"
+```
+
+It attaches by reading the target interpreter's memory,
+so the profiler and the target must be the same Python version;
+it refuses to attach across versions.
+
+**Profile a script or module:**
+
+```bash
+python -m profiling.sampling run --mode cpu myscript.py arg1
+python -m profiling.sampling run --mode cpu -m mypackage.cli arg1
+```
+
+**Attach to a running process** (needs ptrace permission, like austin):
+
+```bash
+python -m profiling.sampling attach --mode cpu -d 30 <pid>
+```
+
+**Choose the mode deliberately.** The default is `--mode wall`,
+which samples whether or not the thread is on CPU,
+so sleeps, lock waits, and blocking I/O dominate the table.
+That's what you want when hunting latency (where does a request _wait_?),
+and the wrong answer when hunting CPU burn: use `--mode cpu` for that.
+`--mode gil` keeps only samples where the thread holds the GIL,
+which is the one to reach for when threads aren't scaling.
+
+**Reading the output.** Without an output flag it prints a pstats-style table
+sorted by direct (self) samples, plus a summary of hot spots.
+That text is ANSI-colored even when piped,
+so for programmatic reading write a pstats file instead
+and load it with the stdlib `pstats` module:
+
+```bash
+python -m profiling.sampling run --mode cpu -o profile.pstats myscript.py
+python -c "import pstats; pstats.Stats('profile.pstats').sort_stats('tottime').print_stats(30)"
+```
+
+**Capture once, render many ways.** `--binary` writes a compact capture
+that `replay` converts to any other format afterward,
+so a single (possibly expensive to reproduce) run serves every view:
+
+```bash
+python -m profiling.sampling run --mode cpu --binary -o before.bin myscript.py
+python -m profiling.sampling replay --flamegraph -o flame.html before.bin
+python -m profiling.sampling replay --heatmap -o heatmap before.bin    # line-level, per file
+python -m profiling.sampling replay --collapsed -o stacks.txt before.bin  # speedscope opens this directly
+```
+
+**Prove a fix with a differential flamegraph** against the baseline capture:
+
+```bash
+python -m profiling.sampling run --mode cpu --diff-flamegraph before.bin -o diff.html myscript.py
+```
+
+Other flags worth knowing:
+- `-a`: sample all threads (default is the main thread only)
+- `--subprocesses`: profile child processes too, one output file each
+- `--async-aware`: reconstruct stacks per asyncio task
+  (add `--async-mode all` to include waiting tasks, not just the running one)
+- `--native`: show `<native>` frames for time spent in C extensions
+- `--live`: a `top`-like TUI, for a human watching a running process
+- `-r`: sampling rate (default `1khz`)
+
+
 
 ```bash
 python -m cProfile -o profile.out myscript.py
@@ -67,7 +149,7 @@ python -m line_profiler myscript.py.lprof
 ### austin + speedscope (sampling CPU → flamegraph)
 
 austin is a statistical/sampling profiler that attaches to a running Python process
-or launches one. It produces output that can be converted to speedscope format
+or launches one. Use it for targets older than Python 3.15; on 3.15+ use Tachyon. It produces output that can be converted to speedscope format
 for interactive flamegraphs. See the [austin README](https://github.com/P403n1x87/austin)
 for full details; run `austin --help` to see all flags.
 
@@ -195,6 +277,9 @@ it's still worth fixing, but the priority is different.
   Makes asyncio significantly slower, so only use it for debugging,
   not production or benchmarks.
   Equivalent in code: `asyncio.get_event_loop().set_debug(True)`.
+- On Python 3.15+, Tachyon with `--async-aware --async-mode all` attributes
+  samples to asyncio tasks (as `<task>` frames), so the wall-clock time each
+  task spends, blocking calls included, reads per task
 - `aiomonitor` or `aiodebug` for runtime loop inspection
 - `py-spy` with `--threads` can show what threads are blocked on
 
