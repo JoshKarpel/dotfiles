@@ -11,7 +11,10 @@
 
 ## How to Work
 
-- Don't create git commits or push changes on my behalf.
+- Don't create git commits or push changes on my behalf. The one exception is completing
+  a merge that needs no judgment: a fast-forward, or a merge commit for a merge git applied
+  without conflicts, is fine. A merge whose conflicts you resolved stays uncommitted for
+  me to review, and pushing is never yours to do.
 - Auto-memory is off, so nothing persists automatically between sessions. When something
   is worth keeping past this one, put it in a committed artifact: a rule in
   `claude/rules/` for portable doctrine, `CLAUDE.md` for how-to-work-with-me guidance, a
