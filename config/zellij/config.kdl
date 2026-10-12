@@ -3,6 +3,11 @@
 
 show_startup_tips false
 
+// The default "titles" draws only a title row above each pane, with no border.
+// Toggling frames by hand lasts only as long as the server, so this is what
+// every restart comes back to.
+pane_frame_style "full"
+
 // Sessions are created outside the web server, by the zellij-session unit at
 // boot and by a login shell everywhere else. The default "off" only serves
 // sessions the web server created itself, which is none of them, so the browser
@@ -14,6 +19,11 @@ web_sharing "on"
 // `zellij web --status` from a shell looks at the port the service actually
 // bound, instead of reporting nothing on the 8082 default.
 web_server_port 3000
+
+// No `post_command_discovery_hook "true"`, though it would stop resurrection
+// offering to re-run each pane's command: zellij 0.45 serializes a floating
+// pane's cwd only as part of its command, so a floating pane resurrected as a
+// bare shell comes back in the session root instead of where it was.
 
 keybinds {
     // Quit tears the session down along with everything running in it, and
