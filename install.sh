@@ -523,8 +523,9 @@ EOF
 # `attach --create-background` is the only way in to a session without a
 # controlling terminal: every other form of `attach` wants raw mode and panics
 # without it. It leaves no client registered behind it, so converging this unit
-# never shrinks the session the way an unreaped terminal client would, and the
-# usual "never restart an active oneshot" caution does not apply.
+# never shrinks the session the way an unreaped terminal client would. The
+# server it starts stays in this unit's cgroup, though, so the usual "never
+# restart an active oneshot" caution holds in full: `restart` ends every pane.
 #
 # It exits 1 with "Session already exists" rather than succeeding as a no-op,
 # which for a unit whose job is to converge on "the session exists" is success.

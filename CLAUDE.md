@@ -126,12 +126,18 @@ controlling terminal, and it exits 1 with "Session already exists" rather than
 succeeding as a no-op, hence `SuccessExitStatus=1`. A real failure panics and
 exits 101, so tolerating 1 does not hide one.
 
-The session outlives the unit: `stop` and `restart` both leave it running.
-Deleting a session is `zellij delete-session`, never `systemctl`. The one time
-`install.sh` ends it is when mise has upgraded zellij underneath it: it kills
-the session and restarts the unit to recreate it on the new release, losing
-every pane, unless `install.sh` is itself running inside that session, where it
-skips and prints the commands to finish by hand.
+Whether the session survives the unit depends on who started its server. The
+server `attach --create-background` starts stays in the unit's cgroup, and
+`KillMode=control-group` means `stop` and `restart` SIGTERM it, ending every
+pane and leaving its socket file behind; `restart` is therefore also the way to
+put the server on a changed unit environment. A server `za` created from a login
+because the unit's was missing lives in that login's scope instead, and the unit
+cannot touch it. `zellij kill-session` ends either kind cleanly, so prefer it
+before a restart. The one time `install.sh` ends the session is when mise has
+upgraded zellij underneath it: it kills the session and restarts the unit to
+recreate it on the new release, losing every pane, unless `install.sh` is itself
+running inside that session, where it skips and prints the commands to finish
+by hand.
 
 The token that gets you into the web client is minted per box with
 `zellij web --create-token`, displayed once, and hashed into
