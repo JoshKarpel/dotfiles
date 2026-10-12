@@ -343,6 +343,13 @@ python -X importtime -m pytest     # find heavy imports
 - **"Passes alone, fails together" means shared state**, not a pytest bug. Under
   xdist it means a resource shared across processes (DB/file/port); namespace it
   by `worker_id`. Under randomly alone it means order/leak within one process.
+- **A failure that lands on a different test each run is a leak, not that test.**
+  With warnings as errors, an earlier test that leaks a subprocess, pipe, or
+  transport surfaces a `ResourceWarning` in whichever test is running when the GC
+  collects it, so the named test is innocent and a seed replay under xdist won't
+  reproduce it. Match the warning text to the leaked object, reproduce the leak
+  standalone, and fix it at its source (await `proc.wait()`, close the transport),
+  not in the test that reported it.
 - **Don't pin the randomly seed to make CI green.** That hides the coupling
   instead of fixing it. Pin only to *reproduce* while debugging.
 - **`each` is not a speed mode.** It multiplies work across workers; it's for

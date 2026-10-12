@@ -12,17 +12,22 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   SELF=$(realpath "$0")
   fails=0
   stubs=$(realpath "$(mktemp -d)")
-  trap 'rm -rf "$stubs"' EXIT
+  repo=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$stubs" "$repo"' EXIT
+  git init -q "$repo"
+  cd "$repo"
 
   stub_guard() {
     local exit_code="$1" output="$2"
-    printf '#!/bin/sh\nprintf %%s "%s"\nexit %s\n' "$output" "$exit_code" >"$stubs/claude-changeset-guard"
+    printf '#!/bin/sh\n: > "%s/guard.called"\nprintf %%s "%s"\nexit %s\n' "$stubs" "$output" "$exit_code" >"$stubs/claude-changeset-guard"
     chmod +x "$stubs/claude-changeset-guard"
   }
 
   call() {
+    local payload="$1"
+    rm -f "$stubs/guard.called"
     EXIT=0
-    OUT=$(PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" </dev/null 2>&1) || EXIT=$?
+    OUT=$(PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" <<<"$payload" 2>&1) || EXIT=$?
   }
 
   check() {
@@ -31,16 +36,44 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
     { printf 'FAIL %s: want_exit=%s got_exit=%s :: %s\n' "$desc" "$want_exit" "$EXIT" "$OUT"; fails=1; }
   }
 
+  nudged() {
+    local desc="$1" want="$2" got=no
+    [[ "$OUT" == *"finishing pass triggered"* ]] && got=yes
+    [[ "$got" == "$want" ]] ||
+    { printf 'FAIL %s: want_nudge=%s got_nudge=%s :: %s\n' "$desc" "$want" "$got" "$OUT"; fails=1; }
+  }
+
   # --- no fresh change-set: the guard suppresses, and this hook stays silent ---
   stub_guard 1 ""
-  call
+  call '{}'
   check "no change-set to nudge about is silent" 0
   [[ -z "$OUT" ]] ||
   { printf 'FAIL silent pass-through: expected no output :: %s\n' "$OUT"; fails=1; }
 
+  # --- one pass per prompt: a second fresh change-set in the same prompt is silent,
+  # but the guard still runs so it records the pass's own edits ---
+  stub_guard 0 "M first/prompt.txt"
+  call '{"prompt_id":"prompt-7f3a"}'
+  nudged "first change-set in a prompt nudges" yes
+  call '{"prompt_id":"prompt-7f3a"}'
+  check "same prompt again exits cleanly" 0
+  nudged "a second change-set in the same prompt is silent" no
+  [[ -e "$stubs/guard.called" ]] ||
+  { printf 'FAIL suppressed nudge must still run the guard\n'; fails=1; }
+  call '{"prompt_id":"prompt-91c4"}'
+  nudged "a new prompt nudges again" yes
+  call '{"prompt_id":"prompt-7f3a"}'
+  nudged "an earlier prompt stays remembered" no
+
+  # --- no prompt id (before the first user input): nudge on every fresh change-set ---
+  call '{}'
+  nudged "no prompt id nudges" yes
+  call '{}'
+  nudged "no prompt id nudges again" yes
+
   # --- a fresh change-set: the guard's porcelain surfaces inside the nudge ---
   stub_guard 0 "M some/file.txt"
-  call
+  call '{"prompt_id":"prompt-c208"}'
   check "a fresh change-set nudges" 0
   [[ "$OUT" == *"M some/file.txt"* ]] ||
   { printf 'FAIL nudge: output missing porcelain change-set :: %s\n' "$OUT"; fails=1; }
@@ -56,8 +89,27 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   exit "$fails"
 fi
 
-cat >/dev/null  # drain the hook payload off stdin; the guard works from git state alone
+INPUT=$(cat)
+PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")
+
+# The guard runs even when this prompt was already nudged: it records the fingerprint,
+# so the edits the finishing pass itself makes don't read as a fresh change-set on the
+# next prompt.
 PORCELAIN=$(claude-changeset-guard finish) || exit 0
+
+# At most one pass per user prompt. Without this, every edit the pass makes is a new
+# change-set, and each one bought another pass that mostly reported nothing to change.
+# A stop-hook continuation keeps the prompt's id; a new prompt (a task notification
+# included) gets a fresh one.
+if [[ -n "$PROMPT_ID" ]]; then
+  NUDGED="$(git rev-parse --git-dir)/claude-finish-nudged-prompts"
+  grep -qxsF "$PROMPT_ID" "$NUDGED" && exit 0
+  {
+    tail -n 19 "$NUDGED" 2>/dev/null || true
+    printf '%s\n' "$PROMPT_ID"
+  } >"$NUDGED.tmp"
+  mv "$NUDGED.tmp" "$NUDGED"
+fi
 
 MESSAGE="You made these changes this session:
 

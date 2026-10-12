@@ -28,6 +28,12 @@ you think the API does.
   depends on it. A remembered, precise-sounding threshold ("renders inline under
   ~1 MB") is exactly the kind that proves false only after a feature, its tests,
   and its docs are built on it.
+- **Search the tracker before calling it a bug.** Third-party behavior that looks
+  wrong from reading the source is a hypothesis, not a finding: widely used code has
+  usually been hit before. Before telling the user a dependency is buggy or proposing
+  an upstream change, search its issue tracker, changelog, and releases for that
+  behavior. The likeliest result is a known issue already fixed in a newer release,
+  which turns "file a bug" into "upgrade".
 - **Run the control before trusting the experiment.** A reproduction harness you
   just built is itself unproven, so a run that confirms your hypothesis may be
   measuring the harness instead: a nested container with no init system, a health

@@ -51,6 +51,16 @@
   duration and learns nothing a Read wouldn't. Past the 10-minute Bash cap the sleep is
   killed having produced nothing at all. Start the work in the background, go do something
   else, and read the output file if you want progress before the notification arrives.
+- Read a file with the Read tool (`offset`/`limit` for a range), never `sed -n`, `head`, or
+  `tail` on the file, whatever a harness hint suggests. Path-scoped rules and nested
+  `CLAUDE.md` files load only when a file tool touches a path, so a shell read skips them.
+  Trim a pipe with `head`/`tail`. In a uv project, Python is `uv run python`, heredocs and
+  one-liners included.
+- Spell the scratchpad path out literally in every command rather than through a variable.
+  Shell state doesn't persist between calls, `$TMPDIR` may be unset (it is on exe.dev), so
+  `$TMPDIR/x` lands at `/x`, and Claude Code refuses an `rm` whose target is a variable.
+  Don't silence a backup copy with `2>/dev/null || true`: a backup that never happened
+  turns the restore into a lie.
 - When you start a server just to check something, assume I may already be running the app on
   the default port; pick a non-default port and clean it up when done.
 - Reach past plain `grep` when a code search is structural rather than textual. `ast-grep`

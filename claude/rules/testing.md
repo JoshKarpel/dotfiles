@@ -53,6 +53,12 @@ just arguments, so tests pass in whatever they need without patching.
   feature is most of the session's work. Restoring from a backup taken earlier
   has the same failure in slower motion, since the backup predates whatever you
   fixed in between.
+- **Break exactly the mechanism under test.** A break that disables more than that
+  mechanism (inverting a parameter that feeds other paths too, or reverting to an
+  approximation of the old code) makes the test fail for some other reason, which
+  proves nothing about the claim it makes. Make the smallest break that removes
+  only that mechanism, check that the failure names it, and when reverting to old
+  behavior, reproduce the old code faithfully.
 - **A green run is not a fixed race.** For a failure that was already
   intermittent, one pass is the expected outcome even with no fix at all, so it
   is not evidence. Before crediting a fix, check that its mechanism could

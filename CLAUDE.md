@@ -410,7 +410,9 @@ does. What follows is only what neither source states.
   through to the normal prompt.
 - `claude-changeset-guard` is the shared helper for firing at most once per
   change-set. It fingerprints the working diff plus untracked files, keys the result
-  per branch, and stores state under the git directory.
+  per branch, and stores state under the git directory. Once per change-set is not
+  enough for a nudge that asks for edits, since those edits are themselves a new
+  change-set, so `claude-stop-finish` also fires at most once per `prompt_id`.
 - A hook whose only job is a side effect still has to keep all three channels clean:
   the event decides how stdout is read (on `PreToolUse` a JSON object there is a
   permission decision), stderr surfaces in the TUI, and a non-zero exit reads as a

@@ -68,7 +68,9 @@ def nudge(where: Path) -> str | None:
     """
     What the hook would tell the model about this checkout, or nothing where it stays silent.
 
-    The hook drains its stdin and decides from git state alone, so it is handed an empty object. Its
+    The hook decides from git state plus an optional `prompt_id`, which limits Claude Code to one
+    pass per prompt; mainplate has no such id to give, so it is handed an empty object and nudges
+    once per change-set, bounded per turn by `MOST` instead. Its
     stderr goes to the console's log rather than the model: a hook that breaks is the operator's to
     notice, and a non-zero exit is read as no nudge, which is what the hook itself does with a guard
     that fails.
