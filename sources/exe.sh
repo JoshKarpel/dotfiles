@@ -12,6 +12,7 @@ export GH_HOST=github.int.exe.xyz
 # falls back to /tmp/zellij-$UID when it isn't. sshd here leaves it unset while a
 # systemd user unit always has it, so the zellij-session unit and the logins it
 # exists to serve would otherwise build two separate sessions of the same name
-# and neither would see the other. Pinning it on both sides settles the location
-# by choice rather than by which context happened to start zellij first.
+# and neither would see the other. Pinning it settles the location by choice
+# rather than by which context happened to start zellij first. The zellij units
+# start zellij through a login shell, so this one export reaches them too.
 export ZELLIJ_SOCKET_DIR="/tmp/zellij-$(id -u)"

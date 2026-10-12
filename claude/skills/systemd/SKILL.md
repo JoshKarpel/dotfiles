@@ -1,3 +1,17 @@
+---
+name: systemd
+description: >
+  Write, install, and debug systemd units and timers, user units especially.
+  MUST be invoked when writing or editing a `.service` or `.timer` file,
+  generating one from an installer script, choosing a unit's `ExecStart` or
+  `Environment=`, running `systemctl --user` from a script, hook, or `ssh`
+  command, or debugging a unit that never starts at boot, skips silently, or
+  runs with a different environment than a login shell (a missing `PATH`,
+  `TERM`, or exported variable, a tool not found only under the unit). Covers
+  the user bus, lingering, login-shell `ExecStart`, template units,
+  specifiers, `OnCalendar` schedules, and converging generated units.
+---
+
 # systemd
 
 ## Running systemctl
@@ -23,17 +37,54 @@ with a 75 minute timeout holds the caller for 75 minutes.
 
 ## A Unit's Environment Is Not a Login's
 
-A user unit always has `XDG_RUNTIME_DIR`; an sshd login frequently does not. A
-tool that derives a path from it therefore resolves somewhere different depending
-on which side started it, and neither side can see the other's state. Zellij is
-the worked example: it keys session sockets off `$XDG_RUNTIME_DIR` and falls back
-to `/tmp/zellij-$UID`, so a unit and the login it exists to serve build two
-separate sessions of the same name and each reports the other missing.
+A unit starts with the user manager's environment, and no shell startup runs in
+it: `PATH` is the system default, nothing the rc files export is set, and there
+is no `TERM`. The difference also cuts the other way. A user unit always has
+`XDG_RUNTIME_DIR` and an sshd login frequently does not, so a tool that derives
+a path from it resolves somewhere different depending on which side started it,
+and neither side can see the other's state. Zellij is the worked example: it
+keys session sockets off `$XDG_RUNTIME_DIR` and falls back to `/tmp/zellij-$UID`,
+so a unit and the login it exists to serve build two separate sessions of the
+same name and each reports the other missing.
 
-Pin such a variable explicitly on both sides rather than letting each inherit
-whatever its context happens to supply. The same applies to `PATH`, which a unit
-does not inherit from a login shell at all, so spell it out when `ExecStart`
-resolves a tool through a version manager's shims.
+What closes the gap depends on what the unit hosts.
+
+A unit that hosts interactive work (a terminal multiplexer, a web terminal,
+anything whose children are shells or agents a person drives) starts through the
+login shell, so it has the environment a login would have given it:
+
+```ini
+ExecStart=/bin/bash -lc 'exec zellij attach --create-background %l'
+```
+
+Its children inherit its environment, and some never run a shell that could
+repair it: a zellij pane resurrected after a restart runs its serialized command
+as a direct child of the server. Pinning variables in the unit one at a time
+builds a second copy of shell startup that drifts from the first, and every
+variable it misses breaks only in those shell-less children, so the gap surfaces
+late and one variable at a time. `exec` keeps the command as the unit's main
+process, so exit codes, `SuccessExitStatus=`, and `KillMode=` see it rather than
+the shell. Specifiers still expand inside the quotes.
+
+The login shell is only as good as its startup files. `bash -l` reads
+`~/.profile`, which on Debian and Ubuntu sources `~/.bashrc` for bash, so the rc
+chain has to tolerate running with no terminal: anything interactive-only
+(prompts, completions, key bindings) guarded on `[[ $- == *i* ]]`. A rc file that
+returns early when non-interactive gives the unit nothing.
+
+A variable the divergence above makes ambiguous, like `ZELLIJ_SOCKET_DIR`, is then
+pinned once, in shell startup, and reaches the unit through the login shell.
+
+`TERM` is the exception, because it describes a terminal rather than the user's
+shell. The program acting as the terminal declares it: zellij takes an `env`
+block in its `config.kdl`, which also covers a server a login started, where the
+inherited `TERM` is whatever the first client's terminal was.
+
+A self-contained service (a web app, a daemon that runs no user commands) pins
+only what it needs with `Environment=` instead, spelling out `PATH` when
+`ExecStart` resolves a tool through a version manager's shims. Its environment
+is fully known, and coupling it to the rc files would let an edit to an
+interactive shell break a service.
 
 ## User Units at Boot Need Lingering
 

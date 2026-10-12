@@ -20,6 +20,16 @@ web_sharing "on"
 // bound, instead of reporting nothing on the 8082 default.
 web_server_port 3000
 
+// Zellij is the terminal its panes run in, so it says which one. Panes inherit
+// the server's environment rather than the attaching client's, so without this a
+// server started by a unit gives every pane no TERM at all (Claude Code then
+// falls back to TERM=dumb, and `less` complains the terminal is not fully
+// functional), and one started by `za` hands on whatever the first client's
+// terminal was, which may have no terminfo entry on this box.
+env {
+    TERM "xterm-256color"
+}
+
 // No `post_command_discovery_hook "true"`, though it would stop resurrection
 // offering to re-run each pane's command: zellij 0.45 serializes a floating
 // pane's cwd only as part of its command, so a floating pane resurrected as a

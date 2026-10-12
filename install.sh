@@ -539,14 +539,13 @@ EOF
 # %l is the short hostname, matching what sources/zellij.sh computes, so the
 # unit names no box and survives a rename.
 #
-# ZELLIJ_SOCKET_DIR is pinned to the same path sources/exe.sh pins, and for the
-# reason given there: a unit has XDG_RUNTIME_DIR and a login here does not, so
-# left alone the two build separate sessions of the same name.
-#
-# TERM is pinned because panes inherit the server's environment, not the
-# attaching client's, and a unit starts with no TERM at all. Unset, every pane
-# shell runs without one, and Claude Code falls back to TERM=dumb, which turns
-# `less` into a "terminal is not fully functional" prompt.
+# zellij starts through a login shell, so the server has the environment an ssh
+# login would have given it, ZELLIJ_SOCKET_DIR included. Every pane inherits the
+# server's environment rather than the attaching client's, and a pane zellij
+# resurrects runs its serialized command directly, with no shell of its own to
+# repair anything. Pinning variables here one at a time instead leaves a second
+# copy of shell startup that drifts from the first, and every variable it misses
+# breaks only in resurrected panes.
 function do_zellij_session() {
   local units=~/.config/systemd/user
 
@@ -568,9 +567,7 @@ Description=Keep this box's zellij work session running
 Type=oneshot
 RemainAfterExit=yes
 SuccessExitStatus=1
-Environment=ZELLIJ_SOCKET_DIR=/tmp/zellij-%U
-Environment=TERM=xterm-256color
-ExecStart=%h/.local/share/mise/shims/zellij attach --create-background %l
+ExecStart=/bin/bash -lc 'exec zellij attach --create-background %l'
 
 [Install]
 WantedBy=default.target
@@ -639,6 +636,9 @@ function restart_stale_zellij_session() {
 # `zellij web --create-token` and shown exactly once. Do not `share set-public`
 # this port: that would drop the first gate and leave an interactive shell behind
 # nothing but the token.
+#
+# zellij starts through a login shell for the reason do_zellij_session gives: a
+# session the web server creates inherits its environment, panes included.
 function do_zellij_web() {
   local units=~/.config/systemd/user
 
@@ -659,9 +659,7 @@ function do_zellij_web() {
 Description=Serve zellij sessions over the exe.dev HTTPS proxy
 
 [Service]
-ExecStart=%h/.local/share/mise/shims/zellij web
-Environment=PATH=%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-Environment=ZELLIJ_SOCKET_DIR=/tmp/zellij-%U
+ExecStart=/bin/bash -lc 'exec zellij web'
 Restart=always
 RestartSec=5
 

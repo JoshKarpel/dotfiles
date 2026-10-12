@@ -71,8 +71,8 @@ active development here.
 
 A dev box holds one long-lived zellij session named after its short hostname.
 `zellij-session.service` creates it at boot, which is what makes it outlive the
-last logout rather than only the last dropped connection. Creating it from the
-login shell instead would tie its existence to somebody having connected, so a
+last logout rather than only the last dropped connection. Creating it on login
+instead would tie its existence to somebody having connected, so a
 reboot would quietly discard it until the next login.
 
 Joining it is a deliberate act, never a side effect of a shell starting: `za`
@@ -102,12 +102,22 @@ and keeps user settings in the browser's IndexedDB rather than on disk, so a
 browser. The CLI comes from mise rather than the copy Remote-SSH pushes to
 `~/.vscode-server/code-<commit>`, whose path moves with every VS Code update.
 
-Four details are worth knowing before touching any of this.
+A few details are worth knowing before touching any of this.
+
+Both units start zellij through a login shell (`bash -lc`) rather than with an
+environment of their own. Every pane inherits the server's environment rather
+than the attaching client's, and a pane zellij resurrects runs its serialized
+command directly, with no shell of its own, so the server's environment is the
+only one it ever gets. Pinning variables in the unit one at a time is a second
+copy of shell startup, and every variable it misses breaks only in resurrected
+panes. `TERM` is the one exception, set by `env` in `config/zellij/config.kdl`,
+since zellij is the terminal its panes run in.
 
 Zellij keys its session sockets off `$XDG_RUNTIME_DIR` and falls back to
 `/tmp/zellij-$UID` when it is unset. A systemd user unit always has it and sshd
-here never does, so the unit and the logins it exists to serve build two separate
-sessions of the same name unless both pin `ZELLIJ_SOCKET_DIR`. Both do.
+here never does, so the unit and the logins it exists to serve would build two
+separate sessions of the same name. `sources/exe.sh` pins `ZELLIJ_SOCKET_DIR`,
+and the login shell carries that pin into the units.
 
 A server the shell cannot see through that socket directory may as well not
 exist: `attach --create` builds a second session of the same name beside it and

@@ -22,7 +22,8 @@
 # gap is only the servers that fall outside this shell's view. Two ways in, both
 # seen on this box: the socket file is unlinked while the server keeps running,
 # and the server was started against a different socket directory, which is what
-# happens whenever ZELLIJ_SOCKET_DIR is not pinned at both ends.
+# happens whenever zellij starts without the ZELLIJ_SOCKET_DIR sources/exe.sh
+# exports.
 #
 # Neither is recoverable. An unlinked socket cannot be relinked, and the panes
 # live in the server's memory rather than anywhere on disk, so reporting is what
