@@ -179,7 +179,7 @@
     "ask": [],
     "defaultMode": "auto"
   },
-  "model": "opus",
+  "model": "opus[1m]",
   "hooks": {
     "SessionStart": [
       {
@@ -346,11 +346,7 @@
   },
   "feedbackSurveyRate": 0,
   "effortLevel": "high",
-  "modelSettings": {
-    "claude-opus-5-5": {
-      "effortLevel": "high"
-    }
-  },
+  "promptSuggestionEnabled": false,
   "askUserQuestionTimeout": "never",
   "voice": {
     "enabled": true,
@@ -359,10 +355,14 @@
   },
   "autoMemoryEnabled": false,
   "showThinkingSummaries": true,
-  "promptSuggestionEnabled": false,
   "skipWorkflowUsageWarning": true,
   "theme": "dark",
   "autoCompactEnabled": true,
+  "remoteControlAtStartup": true,
   "skipAutoPermissionPrompt": true,
-  "remoteControlAtStartup": true
+  "modelSettings": {
+    "claude-opus-5-5": {
+      "effortLevel": "high"
+    }
+  }
 }

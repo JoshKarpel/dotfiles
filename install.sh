@@ -541,6 +541,11 @@ EOF
 # ZELLIJ_SOCKET_DIR is pinned to the same path sources/exe.sh pins, and for the
 # reason given there: a unit has XDG_RUNTIME_DIR and a login here does not, so
 # left alone the two build separate sessions of the same name.
+#
+# TERM is pinned because panes inherit the server's environment, not the
+# attaching client's, and a unit starts with no TERM at all. Unset, every pane
+# shell runs without one, and Claude Code falls back to TERM=dumb, which turns
+# `less` into a "terminal is not fully functional" prompt.
 function do_zellij_session() {
   local units=~/.config/systemd/user
 
@@ -563,6 +568,7 @@ Type=oneshot
 RemainAfterExit=yes
 SuccessExitStatus=1
 Environment=ZELLIJ_SOCKET_DIR=/tmp/zellij-%U
+Environment=TERM=xterm-256color
 ExecStart=%h/.local/share/mise/shims/zellij attach --create-background %l
 
 [Install]
