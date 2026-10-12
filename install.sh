@@ -601,14 +601,7 @@ function is_descendant_of() {
 # ends every pane in the session, and zellij has no way to tell whether an agent
 # in one is mid-turn, so the only thing guarding it is that the trigger is a
 # person running install.sh.
-#
-# Stopped with `kill-session` rather than a signal: SIGTERM leaves the socket
-# file behind. It works across releases because the socket directory is keyed
-# by zellij's protocol contract rather than its version, so a protocol bump is
-# where this stops working, and it fails loudly there rather than starting a
-# second session beside the first.
 function restart_stale_zellij_session() {
-  local zellij=~/.local/share/mise/shims/zellij
   local session pid running installed
 
   session="$(hostname -s)"
@@ -623,29 +616,12 @@ function restart_stale_zellij_session() {
   [[ "$running" != "$installed" ]] || return 0
 
   if is_descendant_of "$pid"; then
-    log "Not restarting the zellij session from inside it; detach, then: zellij kill-session $session && systemctl --user restart zellij-session"
+    log "Not restarting the zellij session from inside it; detach, then: zellij-restart-session"
     return 0
   fi
 
   log "Restarting the zellij work session on the upgraded zellij..."
-
-  if ! "$zellij" kill-session "$session"; then
-    log "zellij could not stop session $session; see 'ps -p $pid'"
-    return 1
-  fi
-
-  # The unit's `attach --create-background` treats an existing session as
-  # success, so restarting it before the old server is gone recreates nothing.
-  local tries=0
-  while kill -0 "$pid" 2> /dev/null; do
-    if ((++tries > 50)); then
-      log "zellij session $session did not exit; see 'ps -p $pid'"
-      return 1
-    fi
-    sleep 0.1
-  done
-
-  systemctl --user restart zellij-session.service
+  "$BASEDIR/bin/zellij-restart-session"
 }
 
 # Serves the work session over HTTPS at `https://<vm>.exe.xyz:3000/<session>`.

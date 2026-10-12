@@ -129,15 +129,14 @@ exits 101, so tolerating 1 does not hide one.
 Whether the session survives the unit depends on who started its server. The
 server `attach --create-background` starts stays in the unit's cgroup, and
 `KillMode=control-group` means `stop` and `restart` SIGTERM it, ending every
-pane and leaving its socket file behind; `restart` is therefore also the way to
-put the server on a changed unit environment. A server `za` created from a login
+pane and leaving its socket file behind. A server `za` created from a login
 because the unit's was missing lives in that login's scope instead, and the unit
-cannot touch it. `zellij kill-session` ends either kind cleanly, so prefer it
-before a restart. The one time `install.sh` ends the session is when mise has
-upgraded zellij underneath it: it kills the session and restarts the unit to
-recreate it on the new release, losing every pane, unless `install.sh` is itself
-running inside that session, where it skips and prints the commands to finish
-by hand.
+cannot touch it. `zellij-restart-session` covers both: it ends the session with
+`zellij kill-session`, which reaches either kind cleanly, then restarts the unit,
+and it is how a changed unit environment or config reaches the server. The one
+time `install.sh` runs it is when mise has upgraded zellij underneath the
+session, losing every pane, unless `install.sh` is itself running inside that
+session, where it skips and says to run it by hand after detaching.
 
 The token that gets you into the web client is minted per box with
 `zellij web --create-token`, displayed once, and hashed into
@@ -348,6 +347,11 @@ converge-mainplate
 # install.sh; by hand only after moving the clone, since the links name its
 # absolute path.
 link-mainplate
+
+# End this box's zellij work session and start it again on a fresh server, so a
+# changed unit environment, config, or zellij release reaches it. Every pane
+# ends, so it refuses to run from inside zellij.
+zellij-restart-session
 
 # One git worktree per zellij tab, each running its own agent: `wt new` opens a
 # branch in <repo>.worktrees/<branch> beside the clone, in a tab of its own, and

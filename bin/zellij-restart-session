@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Restart this box's zellij work session on a fresh server, which is how a changed
+# zellij-session unit environment, a changed config, or an upgraded zellij reaches
+# it. Every pane in the session ends.
+#
+# `kill-session` first rather than `systemctl restart` alone. The restart would
+# SIGTERM a server the unit started, but that leaves its socket file behind, and
+# a server `za` started from a login is outside the unit's cgroup altogether.
+# `kill-session` reaches a server running an older zellij because the socket
+# directory is keyed by zellij's protocol contract rather than its version, so a
+# protocol bump is where this stops working, and it fails loudly there rather
+# than starting a second session beside the first.
+
+set -euo pipefail
+
+# Spelled out because install.sh runs this before mise's shims are on PATH.
+zellij=~/.local/share/mise/shims/zellij
+session=$(hostname -s)
+
+if [[ -n ${ZELLIJ:-} ]]; then
+  echo "zellij-restart-session: run this from outside zellij; it ends every pane, this one included" >&2
+  exit 1
+fi
+
+: "${ZELLIJ_SOCKET_DIR:?zellij-restart-session: ZELLIJ_SOCKET_DIR is unset, so the session cannot be found}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+# Before anything is killed, so a box without the unit loses nothing.
+systemctl --user cat zellij-session.service > /dev/null
+
+pid=$(pgrep -u "$(id -u)" -f "^[^ ]*zellij --server $ZELLIJ_SOCKET_DIR/contract_version_[0-9]+/$session\$" || true)
+
+if [[ -n $pid ]]; then
+  "$zellij" kill-session "$session"
+
+  # The unit's `attach --create-background` treats an existing session as
+  # success, so restarting it before the old server is gone recreates nothing.
+  tries=0
+  while kill -0 "$pid" 2> /dev/null; do
+    if ((++tries > 50)); then
+      echo "zellij-restart-session: session $session did not exit; see 'ps -p $pid'" >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+fi
+
+systemctl --user restart zellij-session.service
