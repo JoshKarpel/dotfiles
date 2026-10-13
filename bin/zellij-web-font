@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Show or set the font zellij's web client draws with, for trying fonts out
+# without editing the config by hand.
+#
+#   zellij-web-font                                  print the current font list
+#   zellij-web-font "FiraCode Nerd Font" "Fira Code" set it, monospace appended
+#
+# Each argument is one family name, quoted into a CSS font list with `monospace`
+# as the last resort. The names are looked up by the browser, so they have to
+# be installed where it runs, not on this box.
+#
+# A connected web client follows the edit live. The web server reads its own
+# copy once, at start, and hands that
+# to a page as it loads, so `systemctl --user restart zellij-web` brings it in
+# line once a font has been settled on.
+#
+# The edit lands in this repo's config/zellij/config.kdl, through the
+# ~/.config/zellij link, and is left for review like any other change.
+
+set -euo pipefail
+
+config=~/.config/zellij/config.kdl
+
+current=$(awk '
+  /^web_client[[:space:]]*\{/ { in_block = 1; next }
+  in_block && /^\}/ { in_block = 0 }
+  in_block && /^[[:space:]]*font[[:space:]]/ { sub(/^[[:space:]]*font[[:space:]]+"/, ""); sub(/"[[:space:]]*$/, ""); print }
+' "$config")
+
+if [[ -z $current ]]; then
+  echo "zellij-web-font: no font line inside web_client { } in $config" >&2
+  exit 1
+fi
+
+if (($# == 0)); then
+  echo "$current"
+  exit 0
+fi
+
+families=()
+for name in "$@"; do
+  if [[ $name == *[\'\"\\]* ]]; then
+    echo "zellij-web-font: quotes and backslashes are not allowed in a family name: $name" >&2
+    exit 1
+  fi
+  families+=("'$name'")
+done
+font=$(printf '%s, ' "${families[@]}")monospace
+
+updated=$(awk -v font="$font" '
+  /^web_client[[:space:]]*\{/ { in_block = 1; print; next }
+  in_block && /^\}/ { in_block = 0 }
+  in_block && /^[[:space:]]*font[[:space:]]/ { match($0, /^[[:space:]]*/); print substr($0, 1, RLENGTH) "font \"" font "\""; next }
+  { print }
+' "$config")
+
+# Written in place rather than renamed over, so the file the watcher holds and
+# the link into this repo both stay the same file.
+printf '%s\n' "$updated" > "$config"
+echo "$font"

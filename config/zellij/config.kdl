@@ -20,6 +20,15 @@ web_sharing "on"
 // bound, instead of reporting nothing on the 8082 default.
 web_server_port 3000
 
+// The browser draws the web client's text, so these name fonts installed where
+// the browser runs, not on this box. Starship's default symbols are Nerd Font
+// glyphs, which plain Fira Code lacks, so the patched family comes first.
+// The value is a CSS font list: quote any name with a space in it.
+// `zellij-web-font` rewrites the font line in this block, so keep it on one line.
+web_client {
+    font "'CaskaydiaMono Nerd Font Mono', monospace"
+}
+
 // Zellij is the terminal its panes run in, so it says which one. Panes inherit
 // the server's environment rather than the attaching client's, so without this a
 // server started by a unit gives every pane no TERM at all (Claude Code then

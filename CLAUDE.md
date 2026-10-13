@@ -363,6 +363,11 @@ link-mainplate
 # ends, so it refuses to run from inside zellij.
 zellij-restart-session
 
+# Print or set the font list zellij's web client draws with, one family name per
+# argument. A connected browser tab follows the edit live; the fonts have to be
+# installed where the browser runs.
+zellij-web-font "FiraCode Nerd Font" "Fira Code"
+
 # One git worktree per zellij tab, each running its own agent: `wt new` opens a
 # branch in <repo>.worktrees/<branch> beside the clone, in a tab of its own, and
 # `wt done` removes the worktree and closes its tab. The claude-tab-status
