@@ -4,7 +4,8 @@ description: >
   Run and act on mutation testing for Python with mutmut 3.x: configure it, drive a
   package's surviving mutants to zero, tell a real test hole from an equivalent mutant,
   write tests that kill mutants, and decide when (and how) to suppress one. Covers
-  `[tool.mutmut]` config, pytest-xdist interaction, the result cache that replays stale
+  `[tool.mutmut]` config, pytest-xdist interaction, capping each mutant's memory so a
+  runaway allocation can't take the machine down, the result cache that replays stale
   verdicts, `# pragma: no mutate` forms and placement, `do_not_mutate_patterns`, what
   mutmut never mutates, and a script that groups survivors by function and dumps their
   diffs. MUST be invoked when running mutmut, setting up mutation testing in a Python
@@ -60,6 +61,31 @@ pytest_add_cli_args = ["-n0"]  # only needed when pytest addopts enable xdist
   `./mutants/`, so a later `pytest` collects both copies and fails on duplicate module
   names. Add it to pytest's `--ignore-glob`, the type checker's and linter's excludes,
   and `.gitignore`.
+- **Cap each mutant's memory.** A mutant can turn a loop that must advance into one that
+  appends forever, at hundreds of megabytes a second. mutmut's only per-mutant limit is
+  `RLIMIT_CPU`, so memory runs out long before the timeout fires: a few such mutants in
+  parallel exhaust a small VM, and one without swap hangs. Cap the address space in the
+  child, from a `conftest.py` hook. Each mutant's child sets `MUTANT_UNDER_TEST` and then
+  calls `pytest.main` (verified in 3.8.0), so the hook runs once per mutant and never
+  in the stats pass or the baseline. A capped runaway raises `MemoryError`, fails its
+  tests, and counts as killed:
+
+  ```python
+  def pytest_configure(config: pytest.Config) -> None:
+      if "__mutmut_" in os.environ.get("MUTANT_UNDER_TEST", "") and sys.platform == "linux":
+          cap_address_space(headroom=1 << 30)
+
+
+  def cap_address_space(headroom: int) -> None:
+      pages = int(Path("/proc/self/statm").read_text().split()[0])
+      _, hard = resource.getrlimit(resource.RLIMIT_AS)
+      resource.setrlimit(resource.RLIMIT_AS, (pages * resource.getpagesize() + headroom, hard))
+  ```
+
+  Make the cap relative to the child's current size, since the child forks from a parent
+  that has already imported everything, and leave generous headroom, since `RLIMIT_AS`
+  counts virtual size, not resident memory. A cap set too tight makes ordinary tests fail
+  and kills mutants that a test never caught. Linux enforces `RLIMIT_AS`; macOS doesn't.
 - **POSIX only.** mutmut forks a child per mutant.
 - In `setup.cfg`, list values split on newlines only. An indented continuation bakes the
   indent into the value, so a set of skip regexes is one alternation (`a|b`), not a list.
