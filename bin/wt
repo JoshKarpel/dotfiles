@@ -124,7 +124,12 @@ def new(
         run("pre-commit-run", "install", cwd=clone)
 
     # new-tab prints the tab's id on stdout, which `run` captures and nothing needs.
-    run("zellij", "action", "new-tab", "--name", tab_name(clone, branch), "--cwd", path)
+    # `--layout default` names the built-in layout rather than the session's
+    # new_tab_template, because a resurrected session's template pins its pane to
+    # the session's absolute cwd, which overrides `--cwd`.
+    run(
+        "zellij", "action", "new-tab", "--name", tab_name(clone, branch), "--layout", "default", "--cwd", path
+    )
 
 
 @app.command()
