@@ -271,10 +271,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "claude-notify-push question"
-          },
-          {
-            "type": "command",
             "command": "claude-tab-status waiting"
           }
         ]
@@ -302,10 +298,6 @@
       {
         "matcher": "permission_prompt|elicitation_dialog|agent_needs_input",
         "hooks": [
-          {
-            "type": "command",
-            "command": "claude-notify-push permission"
-          },
           {
             "type": "command",
             "command": "claude-tab-status waiting"

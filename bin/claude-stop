@@ -24,12 +24,6 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
 : > "$STUB_DIR/sound.called"
 exit 0
 EOF
-  cat >"$stubs/claude-notify-push" <<'EOF'
-#!/bin/sh
-cat >/dev/null
-: > "$STUB_DIR/notify.called"
-exit 0
-EOF
   cat >"$stubs/claude-tab-status" <<'EOF'
 #!/bin/sh
 cat >/dev/null
@@ -50,7 +44,7 @@ cat >/dev/null
 printf '%s' "$STUB_FINISH_OUT"
 exit "$STUB_FINISH_EXIT"
 EOF
-  chmod +x "$stubs"/claude-sound "$stubs"/claude-notify-push "$stubs"/claude-tab-status "$stubs"/claude-stop-precommit "$stubs"/claude-stop-finish
+  chmod +x "$stubs"/claude-sound "$stubs"/claude-tab-status "$stubs"/claude-stop-precommit "$stubs"/claude-stop-finish
 
   t() {
     local desc="$1" precommit_exit="$2" precommit_out="$3" finish_exit="$4" finish_out="$5"
@@ -67,7 +61,6 @@ EOF
     [[ -e "$stubs/precommit.called" ]] && got+="${got:+,}precommit"
     [[ -e "$stubs/finish.called" ]] && got+="${got:+,}finish"
     [[ -e "$stubs/sound.called" ]] && got+="${got:+,}sound"
-    [[ -e "$stubs/notify.called" ]] && got+="${got:+,}notify"
     [[ -e "$stubs/tab-finished.called" ]] && got+="${got:+,}tab-finished"
 
     [[ "$exit_code" == "$want_exit" ]] ||
@@ -82,13 +75,13 @@ EOF
   t "question hand-back" \
     0 "" 0 "" \
     '{"last_assistant_message":"Should I proceed?"}' \
-    0 "" "sound,notify,tab-finished"
+    0 "" "sound,tab-finished"
 
   # --- neither check blocks: both run in order, then announce ---
   t "nothing blocks" \
     0 "" 0 "" \
     '{"last_assistant_message":"Done."}' \
-    0 "" "precommit,finish,sound,notify,tab-finished"
+    0 "" "precommit,finish,sound,tab-finished"
 
   # --- the first check blocks: its JSON surfaces, the second check and announce never run ---
   t "first check blocks" \
@@ -119,7 +112,6 @@ INPUT=$(cat)
 # Every announcement, together, so the two stop paths below can't drift apart.
 announce() {
   claude-sound stop || true
-  echo "$INPUT" | claude-notify-push stop || true
   echo "$INPUT" | claude-tab-status finished || true
 }
 

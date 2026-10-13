@@ -410,14 +410,8 @@ does. What follows is only what neither source states.
 - A hook whose only job is a side effect still has to keep all three channels clean:
   the event decides how stdout is read (on `PreToolUse` a JSON object there is a
   permission decision), stderr surfaces in the TUI, and a non-zero exit reads as a
-  hook error. `claude-notify-push` therefore discards what `curl` and `jq` would
-  print, and `claude-sound` swallows the failure of a player that is installed but
-  has no audio server to reach, which is every headless VM.
-- `claude-notify-push` gates itself on `claude-user-away` and `is-exe-dev`, rather
-  than on where it's registered. Every caller can therefore fire unconditionally, and
-  the same config stays correct on a laptop, where it does nothing. An unattended
-  caller that provides its own completion notification sets
-  `CLAUDE_NOTIFY_PUSH_DISABLED=1` to suppress only the exe.dev push.
+  hook error. `claude-sound` therefore swallows the failure of a player that is
+  installed but has no audio server to reach, which is every headless VM.
 - The `deny` list in `settings.json` stays thin on purpose. `claude-rm-scope-check`
   decides whether an `rm` escapes the work area, so `deny` keeps only the
   never-in-scope catastrophic backstops it can't reason about.
@@ -448,10 +442,10 @@ caller. Anything executable in `bin/` that declares the marker is run.
   matching hook defines a `t <want-exit> <command>` helper that re-invokes the hook
   (`CLAUDE_HOOK_SELFTEST= "$0"`) with a crafted `{tool_input:{command:…}}` payload and
   asserts the exit code; `claude-http-server-bind-check` is the copy-paste template.
-  A hook that always exits 0 has no exit code to assert, so it asserts the side effect
-  instead: `claude-notify-push` stubs its downstream commands on PATH and compares the
-  set that recorded a call, which is what distinguishes an early exit from a hook that
-  did the work and returned 0 anyway. Where the exit code is the same across branches
+  Where branches share an exit code, assert the side effect instead: `claude-stop`
+  stubs the checks and announcers it calls on PATH and compares the set that recorded
+  a call, which is what distinguishes a check that blocked from one that passed when
+  both exit 0. Where the exit code is the same across branches
   but the advice differs, assert on the message: `claude-read-check` blocks a `sed -n`
   range either way, and only the stderr text distinguishes reading a file (use Read)
   from trimming a pipe (use `head`/`tail`), so a second helper captures stderr and
@@ -461,16 +455,14 @@ caller. Anything executable in `bin/` that declares the marker is run.
   or filesystem. See `claude-rm-scope-check`.
 - External state is a reason to stub, not a reason to skip. Where a hook consults the
   world through PATH, a stub directory prepended to PATH is enough, and any variable
-  whose ambient value would decide a case has to be unset in the test environment
-  (`claude-notify-push` unsets `CLAUDE_NOTIFY_PUSH_DISABLED` and `ZELLIJ`, both of
-  which are set in a real session). Where a hook needs a specific git repo,
+  whose ambient value would decide a case has to be unset in the test environment.
+  Where a hook needs a specific git repo,
   building one with `git init` in a `mktemp -d` sandbox and `cd`-ing into it before
   re-invoking the hook is enough: `claude-git-dash-c-check` does this to test
   blocking on the repo root, on `.`, and from a subdirectory, while allowing a
   different repo. `claude-uv-check` uses the same sandbox, `touch`-ing a `uv.lock`
   in one repo and not the other so the fixture covers both the "not a uv project"
-  and "python invoked directly" branches. What stays un-self-tested is state no
-  stub stands in for: `claude-user-away` needs a terminal someone has typed into.
+  and "python invoked directly" branches.
 - The installed environment is ambient state too, and CI has none of it: no `dotfiles/bin`
   on PATH and no gitconfig, so a hook that calls a sibling script by name reaches nothing
   and its guard clause passes every case. A hook that shells out to `bin/` prepends its own
