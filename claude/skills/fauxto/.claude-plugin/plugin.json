@@ -1,0 +1,14 @@
+{
+  "name": "fauxto",
+  "displayName": "fauxto",
+  "description": "Run every Bash command from a generated script file so one allow rule covers commands the permission matcher can't analyze.",
+  "version": "0.1.0",
+  "defaultEnabled": false,
+  "author": {
+    "name": "Josh Karpel",
+    "email": "josh.karpel@gmail.com"
+  },
+  "repository": "https://github.com/JoshKarpel/dotfiles",
+  "license": "MIT",
+  "keywords": ["permissions", "hooks", "bash"]
+}

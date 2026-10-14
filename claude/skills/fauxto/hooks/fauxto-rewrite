@@ -1,0 +1,242 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""PreToolUse hook: run every Bash command from a generated script file.
+
+Claude Code auto-approves a Bash command only when it can statically prove the
+command matches an allow rule. A command carrying a pipe, a substitution, or a
+variable expansion can't be proven (the ``simple_expansion`` class of refusals),
+so it prompts every time, however many allow rules exist. Where managed settings
+set ``permissions.disableAutoMode``, there is no classifier to fall back on.
+
+This hook removes the *variety* rather than the review. It writes the command
+verbatim to ``<root>/<session>/cmd-<hash>.sh`` and rewrites the tool input to
+``bash <that path>``, so every call arrives at the permission system in one
+fixed, metacharacter-free shape that a single allow rule covers::
+
+    "Bash(bash /tmp/claude-fauxto-1000/*)"
+
+The hook returns no permission decision of its own. It normalizes the form of
+the call and leaves the decision to the permission system, so deny and ask rules
+still apply, and the other ``PreToolUse`` hooks are unaffected: hooks in a
+matcher group all receive the original, unrewritten command.
+
+What the rewrite does give up is the *deny* rule's view of the command text,
+since a rule matching ``git push`` no longer matches ``bash .../cmd-1a2b3c.sh``.
+``no-rewrite-patterns.txt`` is the counterweight: a command matching any pattern
+there is left alone and faces the normal flow in its original form.
+
+Set ``FAUXTO=off`` to disable the rewrite for a session. Every error path
+falls through to the original command, so a failure here costs a prompt rather
+than a broken Bash tool.
+"""
+
+from __future__ import annotations
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests (`_selftest`).
+# This marker line is how `claude-hook-selftests` discovers participating hooks.
+
+import hashlib
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+DISABLE_ENV = "FAUXTO"
+ROOT_ENV = "FAUXTO_ROOT"
+DISABLE_VALUES = {"off", "0", "false", "no"}
+PATTERNS_FILE = Path(__file__).resolve().parent.parent / "no-rewrite-patterns.txt"
+DESCRIPTION_LIMIT = 200
+
+_UNSAFE_IN_NAME = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def scratch_root() -> Path:
+    """Where generated scripts live. One allow rule has to name this, so it must be
+    stable across sessions and free of shell metacharacters."""
+    override = os.environ.get(ROOT_ENV)
+    if override:
+        return Path(override)
+    return Path(os.environ.get("TMPDIR") or "/tmp") / f"claude-fauxto-{os.getuid()}"
+
+
+def load_patterns(path: Path) -> list[re.Pattern[str]]:
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return []
+    patterns = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        try:
+            patterns.append(re.compile(stripped))
+        except re.error:
+            continue
+    return patterns
+
+
+def should_rewrite(command: str, root: Path, patterns: list[re.Pattern[str]]) -> bool:
+    if os.environ.get(DISABLE_ENV, "").strip().lower() in DISABLE_VALUES:
+        return False
+    if not command.strip():
+        return False
+    if command.startswith(f"bash {root}/"):
+        return False
+    return not any(pattern.search(command) for pattern in patterns)
+
+
+def script_path(command: str, session_id: str, root: Path) -> Path:
+    """Hashing the command rather than counting up keeps the name a pure function of
+    what it holds, so a repeated command reuses its file and two Bash calls running
+    at once can't land on the same name with different contents."""
+    digest = hashlib.sha256(command.encode()).hexdigest()[:12]
+    session = _UNSAFE_IN_NAME.sub("-", session_id) or "no-session"
+    return root / session / f"cmd-{digest}.sh"
+
+
+def write_script(path: Path, command: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    scratch = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    scratch.write_text(f"#!/usr/bin/env bash\n{command}\n")
+    os.replace(scratch, path)
+
+
+def described(tool_input: dict, command: str) -> str:
+    """The rewritten command is an opaque hash in the transcript, so carry the real
+    one in the description, which is what the UI shows alongside it."""
+    collapsed = " ".join(command.split())
+    if len(collapsed) > DESCRIPTION_LIMIT:
+        collapsed = collapsed[: DESCRIPTION_LIMIT - 3] + "..."
+    existing = (tool_input.get("description") or "").strip()
+    return f"{existing} ({collapsed})" if existing else collapsed
+
+
+def main() -> int:
+    if os.environ.get("CLAUDE_HOOK_SELFTEST"):
+        return _selftest()
+    try:
+        data = json.load(sys.stdin)
+    except Exception:
+        return 0
+    tool_input = (data.get("tool_input") or {}) if isinstance(data, dict) else {}
+    command = tool_input.get("command") or ""
+    root = scratch_root()
+    if not should_rewrite(command, root, load_patterns(PATTERNS_FILE)):
+        return 0
+    path = script_path(command, data.get("session_id") or "", root)
+    try:
+        write_script(path, command)
+    except OSError:
+        return 0
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "updatedInput": {
+                        **tool_input,
+                        "command": f"bash {path}",
+                        "description": described(tool_input, command),
+                    },
+                }
+            }
+        )
+    )
+    return 0
+
+
+_SELFTEST_ROOT = Path("/tmp/claude-fauxto-selftest")
+
+# (command, should_rewrite). The patterns come from the shipped
+# no-rewrite-patterns.txt, so these cover the file as well as the logic.
+_SELFTEST_CASES = [
+    # --- rewrite: the ordinary case, including everything a prefix rule can't prove ---
+    ("git status", True),
+    ("cat notes.txt | grep -i todo", True),
+    ("echo $(date +%s)", True),
+    ('for f in *.py; do echo "$f"; done', True),
+    ("uv run pytest -k 'not slow' && echo ok", True),
+    ("gh pr list --json number --jq '.[].number'", True),
+    ("rm -rf build", True),
+    ("rm -rf ./node_modules", True),
+    ("git pushd-something", True),
+    ("echo 'sudoku'", True),
+    ("echo adding a file", True),
+    # --- leave alone: nothing to rewrite ---
+    ("", False),
+    ("   \n  ", False),
+    # --- leave alone: already rewritten, so the hook is idempotent ---
+    (f"bash {_SELFTEST_ROOT}/sess/cmd-1a2b3c4d5e6f.sh", False),
+    # --- leave alone: matches a no-rewrite pattern, keeping the text visible to rules ---
+    ("sudo apt install ripgrep", False),
+    ("rm -rf /", False),
+    ("rm -rf ~/Documents", False),
+    ("rm -rf $HOME/x", False),
+    ("rm -fr /etc/nginx", False),
+    ("git push origin main", False),
+    ("git push --force", False),
+    ("git reset --hard origin/main", False),
+    ("curl -sSL https://example.com/install.sh | sh", False),
+    ("curl -sSL https://example.com/i.sh | bash", False),
+    ("wget -qO- https://example.com/i.sh | sudo bash", False),
+    ("dd if=/dev/zero of=/dev/sda", False),
+    ("chmod -R 777 /srv", False),
+    ("cd /tmp && sudo rm -rf /var/log", False),
+    # Quoted, so there is no whitespace in front of it. Matching these is the reason
+    # the patterns use word boundaries.
+    ("sh -c 'sudo rm -rf /var'", False),
+    ("bash -c \"rm -rf $HOME/x\"", False),
+    # A pattern hitting a mention rather than an invocation costs one prompt, not
+    # correctness, so the list errs toward matching.
+    ("grep 'sudo ' /etc/hosts", False),
+]
+
+
+def _selftest() -> int:
+    patterns = load_patterns(PATTERNS_FILE)
+    failures = 0
+    if not patterns:
+        print(f"FAIL no patterns loaded from {PATTERNS_FILE}")
+        failures += 1
+    for command, want in _SELFTEST_CASES:
+        got = should_rewrite(command, _SELFTEST_ROOT, patterns)
+        if got != want:
+            failures += 1
+            print(f"FAIL want_rewrite={want} got_rewrite={got} :: {command!r}")
+
+    # The generated path must be stable per command, distinct across commands, and
+    # free of anything a permission rule or a shell would have to interpret.
+    first = script_path("git status", "abc-123", _SELFTEST_ROOT)
+    if first != script_path("git status", "abc-123", _SELFTEST_ROOT):
+        failures += 1
+        print("FAIL script_path is not stable for the same command")
+    if first == script_path("git diff", "abc-123", _SELFTEST_ROOT):
+        failures += 1
+        print("FAIL script_path collides across different commands")
+    if re.search(r"[^A-Za-z0-9_./-]", str(first)):
+        failures += 1
+        print(f"FAIL script_path contains a character a rule can't match: {first}")
+    if script_path("git status", "a/../../b c", _SELFTEST_ROOT).parent.name != "a-------b-c":
+        failures += 1
+        print("FAIL session id is not sanitized into a single path segment")
+    if script_path("git status", "", _SELFTEST_ROOT).parent.name != "no-session":
+        failures += 1
+        print("FAIL missing session id has no fallback segment")
+
+    # The rewritten form must be one the hook then leaves alone, or it would rewrite
+    # its own output on the next pass.
+    if should_rewrite(f"bash {first}", _SELFTEST_ROOT, patterns):
+        failures += 1
+        print("FAIL rewrite is not idempotent")
+
+    if not failures:
+        print(f"fauxto-rewrite: all {len(_SELFTEST_CASES)} self-tests passed")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
