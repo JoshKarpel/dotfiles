@@ -184,10 +184,27 @@ def done(
         return
 
     # Closed last: from one of the tab's own panes, this ends the command.
-    tabs = json.loads(run("zellij", "action", "list-tabs", "--json").stdout)
-    tab_id = find_tab(tabs, tab_name(clone, branch))
+    name = tab_name(clone, branch)
+    tabs = list_tabs()
+    if tabs is None:
+        raise fail(f"zellij listed no tabs; close {name} yourself")
+    tab_id = find_tab(tabs, name)
     if tab_id is not None:
         run("zellij", "action", "close-tab-by-id", str(tab_id))
+
+
+def list_tabs(attempts: int = 3) -> list[dict[str, Any]] | None:
+    """The session's tabs, or None if zellij never answered with them.
+
+    `list-tabs` can exit 0 having printed nothing: the CLI client stops waiting
+    at whichever of the server's unblock and its output arrives first, so the
+    output can lose. That race is transient, so asking again is the remedy.
+    """
+    for _ in range(attempts):
+        stdout = run("zellij", "action", "list-tabs", "--json").stdout
+        if stdout.strip():
+            return json.loads(stdout)
+    return None
 
 
 if __name__ == "__main__":
