@@ -112,12 +112,25 @@ so the constraint is enforced structurally without cluttering identifiers.
   expression is too long, factor out a helper function; don't switch to a loop.
 - **Generators** (`yield`) when the caller doesn't need all values at once
   or when materializing the sequence would waste memory.
-- **Reach for `collections` and [`more-itertools`](https://more-itertools.readthedocs.io/)
-  before hand-rolling loops.** A named building block usually expresses the intent more
-  clearly than an accumulator and a `for` loop: `Counter`, `defaultdict`, and `deque`
-  from `collections`; `chunked`, `partition`, `flatten`, `unique_everseen`, `first`,
-  and `windowed` from `more-itertools`. If you're tallying, grouping, batching, or
-  sliding a window, there's likely a tool for it.
+- **Reach for `collections` before hand-rolling an accumulator:** `Counter` to tally,
+  `defaultdict` to group, `deque` for a bounded or two-ended queue.
+- **[`more-itertools`](https://more-itertools.readthedocs.io/) is pre-approved: add it
+  (`uv add more-itertools`) rather than hand-rolling an iteration pattern.** It has no
+  dependencies of its own and a long release history, so it already clears the
+  supply-chain bar for taking on a dependency. Recognize the loop you're about to write:
+  - exactly one result expected → `one` (raises on 0 or 2+); zero or one → `only`
+  - first match, or a default → `first_true`
+  - split into two lists by a predicate → `partition`
+  - group into lists by key → `bucket`, `map_reduce`
+  - dedupe preserving order → `unique_everseen`
+  - cut a sequence at boundaries → `split_when`, `split_at`, `split_before`
+  - sliding window → `windowed` (`itertools.pairwise` for size 2)
+  - look ahead without consuming → `peekable`
+
+  `one` is parse-don't-validate for a collection: it returns the element it proved
+  unique, where `assert len(xs) == 1` checks and then indexes separately. Where the
+  stdlib has grown the tool, use it instead: `itertools.batched` over `chunked`,
+  `itertools.chain.from_iterable` over `flatten`.
 
 ## Resources
 
@@ -351,7 +364,8 @@ pair genuinely can't express the invariant.
   validated data models at system boundaries (not for internal data structures)
 - **[`fastapi`](https://fastapi.tiangolo.com/)** as the web framework
 - **[`typer`](https://typer.tiangolo.com/)** for CLIs
-- **[`more-itertools`](https://more-itertools.readthedocs.io/)** for extended iteration utilities
+- **[`more-itertools`](https://more-itertools.readthedocs.io/)** for iteration patterns
+  (pre-approved; see Collections and Iteration)
 - **[`cachetools`](https://cachetools.readthedocs.io/)** and
   **[`cachetools-async`](https://github.com/bharel/cachetools-async)** for caching
 
