@@ -67,7 +67,11 @@
 - When you start a server just to check something, assume I may already be running the app on
   the default port; pick a non-default port and clean it up when done.
 - Whenever you write or edit a markdown plan file (plan mode's, or a plan doc in a repo),
-  publish the `.md` file itself as an Artifact in the same turn, so I can read it rendered.
+  publish an HTML Artifact of it in the same turn. Design the page rather than transcribing
+  the markdown: present the plan the way you would if I'd asked for it as an artifact, with
+  whatever layout, navigation, diagrams, or interactive pieces serve this plan. The `.md`
+  stays the source of truth, so rebuild the page from it on every change, carrying the
+  plan's substance without adding or dropping any.
   Sessions don't remember artifacts, so the file carries the link: an `Artifact: <url>` line
   directly under the `# Title`. If the line is there, update that artifact (`url`) rather
   than publishing a new one; if not, publish, then add the line. The artifact is private,
