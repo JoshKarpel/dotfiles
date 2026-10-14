@@ -53,7 +53,7 @@ rust = "stable"
 sd = "latest"
 starship = "latest"
 tokei = "latest"
-uv = "latest"
+uv = { version = "latest", minimum_release_age = "1d" }
 vscode-cli = "latest"
 yq = "latest"
 zellij = "latest"
