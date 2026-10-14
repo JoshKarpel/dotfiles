@@ -66,6 +66,12 @@
   turns the restore into a lie.
 - When you start a server just to check something, assume I may already be running the app on
   the default port; pick a non-default port and clean it up when done.
+- Whenever you write or edit a markdown plan file (plan mode's, or a plan doc in a repo),
+  publish the `.md` file itself as an Artifact in the same turn, so I can read it rendered.
+  Sessions don't remember artifacts, so the file carries the link: an `Artifact: <url>` line
+  directly under the `# Title`. If the line is there, update that artifact (`url`) rather
+  than publishing a new one; if not, publish, then add the line. The artifact is private,
+  so the link is fine to commit even in a public repo.
 - Reach past plain `grep` when a code search is structural rather than textual. `ast-grep`
   matches and rewrites by AST pattern (a bare `except`, a call with a literal argument) where
   regex can't. Run `--help` for the interface.
