@@ -137,6 +137,45 @@ Mutant names are `<module>.x_<function>__mutmut_<n>`, or
 For a large residue, fan out one subagent per source module, each owning a distinct test
 file so their edits don't collide, and verify centrally with one serial mutmut run.
 
+Subagents can't each run mutmut (see "One mutmut run at a time" under Traps), so each
+checks its kills by hand against a private copy of the source:
+
+```bash
+cp -r src <scratch>/copy  # no trailing slash, and <scratch>/copy must not exist yet
+find <scratch>/copy -name __pycache__ -type d -prune -exec rm -r {} +
+# hand-apply one mutant to the copy, then:
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=<scratch>/copy \
+  uv run pytest <test> -p no:cacheprovider -o pythonpath=<scratch>/copy
+```
+
+- **Bytecode off, or the verdict can be wrong.** Python reuses a cached `.pyc` when the
+  source's size and mtime match its header, and the mtime is whole seconds. Applying the
+  next mutant to the same file within a second, at the same size (`<` for `>`), loads the
+  previous mutant's bytecode, so the verdict is the previous mutant's: a survivor can
+  report killed, or a kill survived.
+- **Prove the copy is what gets imported.** A wrong path fails silently: the editable
+  install imports the real source, every mutant survives, and the unmutated copy still
+  passes. `PYTHONPATH` precedes the editable install's entry, but pytest's own
+  `pythonpath` setting inserts ahead of both, hence the `-o` override; a `python -c`
+  check of `<pkg>.__file__` misses that, since it never loads pytest. So run two
+  controls before trusting a verdict: the unmutated copy passes, and a mutant mutmut
+  reports killed fails.
+- **Edit the copy by hand.** `patch` has to place a `mutmut show` hunk by its context,
+  since the line numbers count from the function rather than the file. A method's diff
+  never applies, because `show` prints the method dedented to column 0, and a function's
+  can apply with fuzz, which ignores context lines and can land the hunk in the wrong
+  place.
+- **A function the module calls at import keeps its unmutated result** under mutmut,
+  whose child for each mutant forks from a parent that has already imported everything
+  (see "Empty process-global memos" below). To match it, append the mutated function as
+  a redefinition at the end of the module rather than editing it in place, and for a
+  method assign it onto the class. A reference captured at import (a dispatch dict, a
+  decorator registry) still holds the original after that, where under mutmut it holds
+  the trampoline and reaches the mutant, so a function both called and captured at
+  import can't be matched by hand: leave its verdict to the central run.
+- `-p no:cacheprovider` keeps concurrent subagents from writing the project's shared
+  `.pytest_cache`. Restore each file from `src` after its mutant.
+
 ## Writing tests that kill mutants
 
 - **Assert the exact output.** One assertion on a whole parsed value, response, or
