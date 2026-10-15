@@ -65,13 +65,22 @@ just arguments, so tests pass in whatever they need without patching.
   actually produce the effect (does the hook run before or after the teardown it
   is supposed to observe?), then get a second independent signal by re-running.
   A fix you can't explain mechanically is a coincidence you haven't caught yet.
-- **Simulate the platform before suppressing the check.** When a coverage or
-  lint gate fails on a branch unreachable on this platform, a `# pragma: no
-  cover` also stops measuring the branch where it *is* exercised, so the gate
-  goes quiet if that path later dies. Ask first whether the other platform's
-  shape can be built locally (delete the attribute the code probes for,
-  construct the other event loop directly) and tested for real on every
-  platform. Reach for the pragma only when it can't.
+- **Exclude a platform-only branch per platform, not everywhere.** When a
+  coverage gate fails on a branch that only runs on another platform, a
+  blanket `# pragma: no cover` stops measuring it everywhere, so the gate goes
+  quiet if that path dies. Exclude it only where it can't run instead:
+  coverage.py expands environment variables in its config, so an
+  `exclude_also` entry of `pragma: skip-on-${PLATFORM}`, with the variable set
+  per CI job, does it without a plugin. Don't name the pragma `no cover-…`:
+  the default exclusion matches that prefix on every platform. The branch is
+  only measured if the gate also runs where it executes; with single-platform
+  CI, a per-platform pragma is a blanket one under another name. Where CI
+  already runs a platform matrix, gating on the combined data
+  (`coverage combine`, with `[paths]` mapping the source roots) needs no
+  pragma at all. Building the other platform's shape locally (deleting the
+  attribute the code probes for, constructing the other event loop directly)
+  to test it for real on every platform is an option where it's cheap, not a
+  prerequisite.
 - **Coverage is a floor, not a ceiling.** 100% line and branch coverage means
   every line ran, not that anything pins its behavior: a mutation that flips an
   `and` to an `or` can survive a fully-covering test that never varies the
