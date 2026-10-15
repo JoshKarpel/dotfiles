@@ -68,11 +68,13 @@ just arguments, so tests pass in whatever they need without patching.
 - **Exclude a platform-only branch per platform, not everywhere.** When a
   coverage gate fails on a branch that only runs on another platform, a
   blanket `# pragma: no cover` stops measuring it everywhere, so the gate goes
-  quiet if that path dies. Exclude it only where it can't run instead:
-  coverage.py expands environment variables in its config, so an
-  `exclude_also` entry of `pragma: skip-on-${PLATFORM}`, with the variable set
-  per CI job, does it without a plugin. Don't name the pragma `no cover-…`:
-  the default exclusion matches that prefix on every platform. The branch is
+  quiet if that path dies. Exclude it only where it can't run instead, with
+  `coverage-conditional-plugin`: each rule maps a pragma name to an
+  environment marker (`not-win32 = "sys_platform != 'win32'"`), and a line
+  carrying that pragma is excluded only where the marker is true. One plugin
+  with shared rule names beats each project hand-rolling its own scheme. Don't
+  name a rule `no cover-…`: coverage's default exclusion matches that prefix
+  on every platform. The branch is
   only measured if the gate also runs where it executes; with single-platform
   CI, a per-platform pragma is a blanket one under another name. Where CI
   already runs a platform matrix, gating on the combined data
