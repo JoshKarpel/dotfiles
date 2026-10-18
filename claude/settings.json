@@ -10,6 +10,7 @@
     "pr": ""
   },
   "includeGitInstructions": false,
+  "cleanupPeriodDays": 36500,
   "permissions": {
     "allow": [
       "WebSearch",
