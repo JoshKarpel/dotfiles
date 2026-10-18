@@ -8,8 +8,9 @@ set -uo pipefail
 
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
 # line is how `claude-hook-selftests` discovers participating hooks. This hook decides
-# what happens at stop time (announce immediately, run a check that blocks, propagate a
-# check's error, or announce after both checks pass) from branches real Claude output
+# what happens at stop time (announce immediately, defer while an agent runs, run a check
+# that blocks, propagate a check's error, or announce after both checks pass) from
+# branches real Claude output
 # never exercises directly; run these with `CLAUDE_HOOK_SELFTEST=1 claude-stop`.
 if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   SELF=$(realpath "$0")
@@ -77,6 +78,24 @@ EOF
     '{"last_assistant_message":"Should I proceed?"}' \
     0 "" "sound,tab-finished"
 
+  # --- a question with an agent still running hands back all the same ---
+  t "question while an agent runs" \
+    0 "" 0 "" \
+    '{"last_assistant_message":"Should I proceed?","background_tasks":[{"type":"subagent","status":"running"}]}' \
+    0 "" "sound,tab-finished"
+
+  # --- a running background agent: the session is paused, so nothing runs or announces ---
+  t "running agent defers" \
+    0 '{"a":1}' 0 '{"b":2}' \
+    '{"last_assistant_message":"Launched.","background_tasks":[{"type":"subagent","status":"running"}]}' \
+    0 "" ""
+
+  # --- a background shell (a dev server) doesn't defer, or it would defer forever ---
+  t "running shell does not defer" \
+    0 "" 0 "" \
+    '{"last_assistant_message":"Done.","background_tasks":[{"type":"shell","status":"running"}]}' \
+    0 "" "precommit,finish,sound,tab-finished"
+
   # --- neither check blocks: both run in order, then announce ---
   t "nothing blocks" \
     0 "" 0 "" \
@@ -121,6 +140,16 @@ announce() {
 LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // ""')
 if [[ "$LAST_MESSAGE" == *"?"* ]]; then
   announce
+  exit 0
+fi
+
+# A running background agent means the session is paused, not done: the change-set is
+# half-built, and a check that blocks here sends Claude to stage or fix files the agent
+# still owns. Stop fires again on the turn that delivers each agent's result, so the
+# checks run, and the stop is announced, on the one after the last agent reports.
+# Background shells don't count: a server running in one would defer the checks forever.
+RUNNING_AGENTS=$(echo "$INPUT" | jq '[.background_tasks[]? | select(.status == "running" and (.type == "subagent" or .type == "workflow"))] | length')
+if [[ "$RUNNING_AGENTS" -gt 0 ]]; then
   exit 0
 fi
 
