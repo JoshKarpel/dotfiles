@@ -22,6 +22,24 @@ the choice costs, you haven't made it. Record the ranking with the decision so
 a later revisit can tell whether the environment moved or the priorities did,
 instead of re-litigating from nothing.
 
+## Find the Requirements You Don't Have
+
+Before weighing two ends, ask which requirements this system doesn't have:
+freshness, strict consistency, guaranteed delivery, concurrent writers. A cost
+that lands on an absent requirement is free, and many elegant designs are just
+this move: S3 drops atomic multi-key updates, StatsD drops guaranteed delivery,
+SQLite drops concurrent writers, an edge cache drops freshness. Absence is
+partly a business call (an engineer knows how stale the data can get, not
+whether users will accept it), so ask when nobody has made it.
+
+Don't add requirements nobody asked for, either. A mutex syncing loosely
+related data, a mid-request re-check that a permission still holds, a guard on
+a value that may harmlessly go stale: each silently picks the strict end of an
+axis and pays for it in coordination and diff size. That a state can occur
+doesn't mean the system must prevent it. Where staleness or brief inconsistency
+is acceptable, leave it uncoordinated and say so; in review, look for added
+locks first.
+
 ## Don't Chase "Best of Both Worlds"
 
 Don't assume you can take the pros of both ends and the cons of neither. Often
@@ -76,3 +94,5 @@ the case for it names the mechanism that makes the original tradeoff not apply.
 ## References
 
 - [Design Is Compromise](https://stephango.com/design-is-compromise) by Steph Ango
+- [What requirements don't you have?](https://www.seangoedecke.com/what-requirements-dont-you-have/)
+  by Sean Goedecke
