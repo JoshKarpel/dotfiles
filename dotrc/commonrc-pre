@@ -38,6 +38,10 @@ export HOMEBREW_NO_ANALYTICS=1 # Homebrew analytics (macOS)
 # skip Homebrew's confirmation prompt on install/upgrade/reinstall
 export HOMEBREW_NO_ASK=1
 
+# leave casks that update themselves (iTerm2, browsers) to their own updaters;
+# brew otherwise upgrades one whenever its bundle lags the tap
+export HOMEBREW_NO_UPGRADE_AUTO_UPDATES_CASKS=1
+
 d="$HOME/.dircolors"
 [[ $(uname) != "Darwin" && -r "$d" ]] && eval "$(dircolors "$d")"
 

@@ -147,7 +147,22 @@ function do_brew() {
 
   xargs -r -a "$BASEDIR/targets/brew.txt" -- brew install --display-times
 
-  brew upgrade
+  # A cask upgrade moves the old app out of /Applications before installing the
+  # new one, and rolls back only on StandardError, which Ruby's Interrupt is not.
+  # A Ctrl-C mid-swap therefore leaves no app at all, so brew ignores SIGINT here
+  # (an inherited ignore survives exec into Ruby) and the keypress is honoured
+  # once it returns.
+  local interrupted=0
+  trap 'interrupted=1' INT
+  (
+    trap '' INT
+    brew upgrade
+  )
+  trap - INT
+  if ((interrupted)); then
+    log "Interrupted during brew upgrade; stopping now that it has finished."
+    exit 130
+  fi
 
   # --prune=all drops the whole download cache rather than only aged entries.
   brew cleanup --prune=all
