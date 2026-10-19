@@ -40,13 +40,6 @@ author. "X is missing" / "this path isn't covered" / "the contract here is
 ambiguous" over "you forgot X" / "you didn't test this." The artifact-centered
 form is both blameless and more actionable: it names the thing to change.
 
-## Complements the History Ban
-
-The durable-docs rule says reference docs describe the present and don't
-narrate how they got there. This rule governs the documents whose whole
-job is history, post-mortems, ADRs, retrospectives, migration notes. Write
-those, and narrate the history they exist to record, blamelessly.
-
 ## Reference
 
 - [Postmortem Culture](https://sre.google/sre-book/postmortem-culture/) in the

@@ -1,16 +1,9 @@
 # Testing
 
-One of the payoffs of functional-core/imperative-shell, parse-don't-validate,
-and dependency injection is that testing becomes easy: pure functions take data
-in and return data out, so tests are plain assertions; and dependencies are
-just arguments, so tests pass in whatever they need without patching.
-
-- **Test the functional core directly, without mocks.** If you find yourself
-  mocking to test a piece of logic, the logic is probably entangled with I/O.
-  Extract it.
-- **Prefer real objects via dependency injection over patching.** Pass a
-  different argument in tests rather than monkeypatching globals or module
-  internals.
+- **Test the functional core directly, and pass real objects in rather than
+  patching.** Needing a mock to test a piece of logic means it is entangled with
+  I/O: extract it. Where a dependency remains, pass a different argument instead
+  of monkeypatching globals or module internals.
 - **When patching is unavoidable, patch where the name is looked up, not
   where it's defined.** A shim module that re-imports a third-party function
   binds its own name to it at import time; patching the shim leaves call
@@ -65,32 +58,21 @@ just arguments, so tests pass in whatever they need without patching.
   actually produce the effect (does the hook run before or after the teardown it
   is supposed to observe?), then get a second independent signal by re-running.
   A fix you can't explain mechanically is a coincidence you haven't caught yet.
-- **Exclude a platform-only branch per platform, not everywhere.** When a
-  coverage gate fails on a branch that only runs on another platform, a
-  blanket `# pragma: no cover` stops measuring it everywhere, so the gate goes
-  quiet if that path dies. Exclude it only where it can't run instead, with
-  `coverage-conditional-plugin`: each rule maps a pragma name to an
-  environment marker (`not-win32 = "sys_platform != 'win32'"`), and a line
-  carrying that pragma is excluded only where the marker is true. One plugin
-  with shared rule names beats each project hand-rolling its own scheme. Don't
-  name a rule `no cover-…`: coverage's default exclusion matches that prefix
-  on every platform. The branch is
-  only measured if the gate also runs where it executes; with single-platform
-  CI, a per-platform pragma is a blanket one under another name. Where CI
-  already runs a platform matrix, gating on the combined data
-  (`coverage combine`, with `[paths]` mapping the source roots) needs no
-  pragma at all. Building the other platform's shape locally (deleting the
-  attribute the code probes for, constructing the other event loop directly)
-  to test it for real on every platform is an option where it's cheap, not a
+- **Exclude a platform-only branch per platform, not everywhere.** A blanket
+  coverage exclusion on a branch that only runs on another platform stops
+  measuring it everywhere, so the gate goes quiet if that path dies. Exclude it
+  only where it can't run, and only if the gate also runs where it does: with
+  single-platform CI, a per-platform exclusion is a blanket one under another
+  name. Where CI already runs a platform matrix, gate on the combined coverage
+  data and exclude nothing. Building the other platform's shape locally
+  (deleting the attribute the code probes for, constructing the other event loop
+  directly) to test it for real everywhere is an option where it's cheap, not a
   prerequisite.
 - **Coverage is a floor, not a ceiling.** 100% line and branch coverage means
   every line ran, not that anything pins its behavior: a mutation that flips an
   `and` to an `or` can survive a fully-covering test that never varies the
   second operand. Where the logic is subtle and the project has a mutation
-  testing setup, run it over new code and kill the survivors. To judge whether a
-  refactor weakened the suite, diff the survivor *sets* against a worktree at
-  the pre-change commit, not the survivor counts, which hide a new survivor
-  behind a newly-killed one.
+  testing setup, run it over new code and kill the survivors.
 - **Substring assertions match the whole artifact.** Generated output that embeds
   a script's own source will contain every selector that script mentions, and a
   negative assertion (`!output.contains("x")`) is satisfied by your own comment

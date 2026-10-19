@@ -45,9 +45,8 @@ rotated without a rebuild.
 
 ## Handling Secrets Once Loaded
 
-- **Wrap them in a redacting type.** Don't carry raw secret strings around.
-  In Python, use Pydantic's `SecretStr` so the value stays out of `repr()`,
-  logs, and tracebacks; see the Python style guide.
+- **Wrap them in a redacting type** (Pydantic's `SecretStr` in Python; see the
+  Python style guide) rather than carrying raw secret strings around.
 - **Never log secrets**, and be wary of logging whole objects, request bodies,
   or config dumps that might contain them.
 - **Don't pin the value at startup.** A secret loaded once and held for the
@@ -62,11 +61,6 @@ rotated without a rebuild.
 - **Least privilege.** Scope each credential to exactly what one workload
   needs. Per-workload identities and per-workload secrets keep a leak from
   becoming a cluster-wide compromise.
-- **Plan for rotation.** All three sources above propagate a rotated value into
-  a running pod without a restart (that's why env vars are out): IAM credentials
-  refresh in the client SDK, and projected/mounted files are updated in place.
-  The app must make sure it actually picks up the new value (see not pinning the
-  value above) rather than pinning whatever it saw at startup.
 - **Keep secrets out of config interfaces.** Helm values, XRD specs, and
   similar should reference a `Secret` by name, never carry the value itself.
   See the Helm and Crossplane style guide.

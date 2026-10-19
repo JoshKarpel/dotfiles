@@ -5,10 +5,6 @@ design and philosophy docs, reports, issue and PR text, and docstrings. It
 applies wherever that prose lives, including docstrings embedded in source
 files, since a docstring documents an interface for the people who use it.
 
-What ties the sections below together is how a durable doc addresses time. It
-describes the present state of the thing as if it always was, and the history
-of how it got there lives somewhere else.
-
 ## Tense and Voice
 
 Reference docs (READMEs, API references, guides) describe the present state of
@@ -40,46 +36,18 @@ just become "authenticates with `bar`". The test is whether a reader who never
 saw the old version would notice anything missing. If a sentence only makes
 sense as a diff against text the reader can't see, delete the obsolete half.
 
+The same holds for a report written in passes (draft, go get more data, revise):
+it presents the current state of your knowledge, not the archaeology of how you
+assembled it. "Initially the data suggested X, but after more samples we found
+Y" should just be "the data shows Y". A note that the analysis uses Q2 because
+the Q3 numbers weren't in yet should go, with the analysis redone on Q3. "After
+further investigation" and "upon revisiting" narrate the journey; the report is
+the destination. Where the process itself is the point (a methodology section, a
+research log, a retrospective), narrating it is correct.
+
 When the change itself is worth communicating, it belongs in a changelog, a
 release announcement, or a prominent callout, not scattered through the prose
 as parentheticals and corrections.
-
-## Reports Assembled Incrementally
-
-A report is often written in passes: draft a section, discover you need more
-data or research or thinking, go do it, revise. The finished report must read
-as if you had all the data from the start. It presents the current state of
-your knowledge, not the archaeology of how you assembled it.
-
-The failure mode is the drafting process leaking into the artifact:
-
-- "Initially the data suggested X, but after more samples we found Y" should
-  just be "the data shows Y".
-- "We didn't have the Q3 numbers at first, so this uses Q2" should be deleted
-  and the analysis presented on the Q3 numbers.
-- "After further investigation" and "upon revisiting" narrate the journey; the
-  report is the destination.
-
-Apply the same test as Updating Existing Text: a sentence that only makes sense
-as a record of how the report came together is scaffolding, so cut it. And the
-same exception as Tense and Voice: when the process itself is the point (a
-methodology section, a research log, a retrospective), narrating it is correct.
-
-## Changelogs
-
-A changelog records what changed *between releases*, so a `Fixed` entry is a
-claim that someone on the previous release could have hit the bug. Before
-writing one, check whether the code it fixes has actually shipped: compare
-against the last tag (`git show <last-tag>:CHANGELOG.md`, or whether the file
-even existed there). A fix to code introduced in the same unreleased version
-changed nothing for any reader. If it altered a reader-facing property, fold
-that property into the feature's own `Added`/`Changed` entry; if it didn't,
-it belongs nowhere.
-
-The failure mode is an unreleased block that accretes one entry per commit and
-reads as a development diary: notes on how the feature got written, rather than
-a list of what changed. This is the accretive-editing problem above, arriving
-one release at a time.
 
 ## Volatile Metrics
 
@@ -91,13 +59,11 @@ property ("tests pass", "fully typed"), not the number.
 
 Don't restate what a reader could recover from the source: the recipes
 `just --list` prints, the scripts in `package.json`, the entries in a config file,
-the contents of a `bin/` directory. Link the command or the file instead ("run
-`just --list` to see available recipes"). The copy drifts the moment someone adds
-an entry and forgets the doc, and nothing fails when it does.
-
-Worse than a list of names is a **paragraph of behavior per item**: what each hook
-matches, what each flag does, what each script classifies. That's an untestable
-prose reimplementation, rotting silently while the code stays correct.
+the contents of a `bin/` directory. Link the command or the file instead. A
+hand-maintained copy drifts the moment someone adds an entry, and nothing fails
+when it does. Worse is a **paragraph of behavior per item** (what each hook
+matches, what each flag does): an untestable prose reimplementation, rotting
+silently while the code stays correct.
 
 The test is whether one command or one named file would tell the reader the same
 thing. What survives it is what no single source states:
@@ -110,7 +76,6 @@ thing. What survives it is what no single source states:
   stays thin _because_ another component does the reasoning).
 - A pointer to an exemplar worth copying, rather than a description of it.
 
-The objection is to a copy maintained by hand, not to the list appearing at all.
-Where the toolchain can generate it at build time (a docs-site plugin or hook, an
-autodoc extension, a preprocessor), derive the list from the source and render it
-in full.
+Where the toolchain can generate the list at build time (a docs-site plugin or
+hook, an autodoc extension, a preprocessor), derive it from the source and render
+it in full.

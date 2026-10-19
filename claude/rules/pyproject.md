@@ -73,6 +73,19 @@ with unrecognized classifiers. The uv build backend adds none automatically
 - For a package that must never reach PyPI, add
   `Private :: Do Not Upload` so an accidental upload is rejected.
 
+## Coverage
+
+Exclude a platform-only branch with
+[`coverage-conditional-plugin`](https://github.com/wemake-services/coverage-conditional-plugin)
+rather than a blanket `# pragma: no cover`. Each rule maps a pragma name to an
+environment marker (`not-win32 = "sys_platform != 'win32'"`), and a line carrying
+that pragma is excluded only where the marker is true. One plugin with shared rule
+names beats each project hand-rolling its own scheme. Don't name a rule
+`no cover-…`: coverage's default exclusion matches that prefix on every platform.
+
+Where CI runs a platform matrix, gate on `coverage combine` instead, with `[paths]`
+mapping each runner's source root to one, and no pragma is needed.
+
 ## Ruff
 
 Use `line-length = 120`. Select broadly; each selected group links its

@@ -62,6 +62,35 @@ Match on both axes:
 - Propose the name, scope, `paths` globs, and outline to the user before
   writing files.
 
+### Writing `paths:` globs
+
+- Brace expansion works: `**/*.{py,rs}` normalizes to a list of globs.
+- Negation works: `**/*` with `!**/*.md` stays out on markdown files.
+- A project-level `.claude/rules/` loads alongside the user-level set.
+- Prefer a broad glob with exclusions over an enumerated extension list. An
+  include list fails by silently not firing when a new language arrives; an
+  exclude list fails by firing where it doesn't belong, which is visible and
+  cheap to fix.
+
+### A rule or `CLAUDE.md`?
+
+Both load unconditionally and cost the same, so the choice is editorial:
+
+- `CLAUDE.md` holds personal and harness operating instructions: how to work with
+  this user and this tool (don't commit unprompted, don't grind on a blocker,
+  prefer `ast-grep`). Coupled to the person and the harness, not portable, never
+  cited by name.
+- A rule holds portable doctrine: a named, linkable (`[[slug]]`) unit that other
+  rules cite ("see the verify-empirically rule") and that carries its own
+  rationale and references. That machinery needs a discrete file, not a bullet in
+  a monolith.
+
+The test: could another rule cite it as a principle? Then it's a rule. Is it "how
+to work with me" or a harness quirk? Then it's `CLAUDE.md`. Where both apply, keep
+the personal framing in `CLAUDE.md` and the citable doctrine in the rule: "don't
+cite volatile metrics in replies" against "don't bake volatile metrics into
+durable docs".
+
 ### 5. Prune as you go
 
 Keep only what's non-obvious, durable, and actionable. A rule that restates

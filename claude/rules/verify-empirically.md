@@ -1,6 +1,7 @@
 # Verify Empirically
 
-Confirm how a library, API, or runtime actually behaves before you build on it.
+Confirm how a library, API, or runtime actually behaves before you build on it,
+including the invariants it claims ("read-only", "thread-safe", "idempotent").
 Memory of an interface drifts: names, signatures, defaults, and edge behaviors
 change between versions, and a confident recollection is often wrong. When a
 change hinges on external behavior, write a throwaway probe (a few lines run
@@ -44,10 +45,6 @@ you think the API does.
 - **Never state a performance claim you haven't measured**, least of all in a
   comment or doc. Plausible reasoning about what amortizes or what dominates is
   frequently backwards, and a measurement is usually one command away.
-- **Treat invariants as claims to test.** "Read-only", "immutable",
-  "thread-safe", "idempotent" are properties to confirm, not assume. An object
-  can look like a value while holding mutable state (see the values-over-places
-  rule).
 
 This is parse-don't-validate applied to your own knowledge: don't trust a
 remembered fact at a boundary; establish it from ground truth.

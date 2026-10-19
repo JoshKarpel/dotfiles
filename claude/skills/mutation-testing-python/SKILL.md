@@ -134,6 +134,10 @@ Mutant names are `<module>.x_<function>__mutmut_<n>`, or
    the source of truth, not the new test passing (see the cache trap below for why a
    warm re-run proves nothing).
 
+To judge whether a refactor weakened the suite, diff the survivor _sets_ against a
+worktree at the pre-change commit, not the survivor counts, which hide a new survivor
+behind a newly-killed one.
+
 For a large residue, fan out one subagent per source module, each owning a distinct test
 file so their edits don't collide, and verify centrally with one serial mutmut run.
 

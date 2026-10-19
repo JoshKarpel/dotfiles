@@ -68,35 +68,15 @@ First match wins.
 - **Does it only make sense while looking at a file of a given kind?** A rule with
   `paths:`.
 
-`CLAUDE.md` and a path-less rule cost the same, so that choice is editorial:
-
-- `CLAUDE.md` holds personal and harness operating instructions: how to work with
-  this user and this tool (don't commit unprompted, don't grind on a blocker,
-  prefer `ast-grep`). Coupled to the person and the harness, not portable, never
-  cited by name.
-- A rule holds portable doctrine: a named, linkable (`[[slug]]`) unit that other
-  rules cite ("see the verify-empirically rule") and that carries its own rationale
-  and references. That machinery needs a discrete file, not a bullet in a monolith.
-
-The test: could another rule cite it as a principle? Then it's a rule. Is it "how to
-work with me" or a harness quirk? Then it's `CLAUDE.md`. Where both apply, keep the
-personal framing in `CLAUDE.md` and the citable doctrine in the rule: "don't cite
-volatile metrics in replies" against "don't bake volatile metrics into durable
-docs".
+`CLAUDE.md` and a path-less rule cost the same, so that choice is editorial: how to
+work with this user and this harness goes in `CLAUDE.md`, and portable doctrine
+that another rule could cite as a principle goes in a rule.
 
 ## Scoped Rules Load Lazily
 
-- A session with no file operations loads no scoped rules at all, `paths: ["*"]`
-  included. `*` means "on the first matching file operation", not "always".
-- Brace expansion works: `**/*.{py,rs}` normalizes to a list of globs.
-- Negation works: `**/*` with `!**/*.md` stays out on markdown files.
-- A project-level `.claude/rules/` loads alongside the user-level set.
-
-So guidance informing a decision made before code exists cannot be scoped by path.
+A session with no file operations loads no scoped rules at all, `paths: ["*"]`
+included: `*` means "on the first matching file operation", not "always". So
+guidance informing a decision made before code exists cannot be scoped by path.
 Design doctrine applies to a discussion that touches nothing; dependency hygiene
 applies at `cargo add`, not when a lockfile is later read. The matching file is
 touched after the decision, or never.
-
-Prefer a broad glob with exclusions over an enumerated extension list. An include
-list fails by silently not firing when a new language arrives; an exclude list
-fails by firing where it doesn't belong, which is visible and cheap to fix.

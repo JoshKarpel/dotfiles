@@ -10,14 +10,11 @@ READMEs, PR and issue bodies, review comments, and commit messages.
   strongest form before answering it: `Although X, Y`, or a flat statement
   followed by `However`. A reader who sees their own position stated fairly
   will follow you through the turn; one who sees it strawmanned stops reading
-  and starts arguing. Where correctness is at stake, skip this: lead with
-  what's correct and say why the alternative is wrong, rather than granting
-  it ground it hasn't earned.
-- **Voice the objection you expect.** Where a reader will push back on a
-  tradeoff, say the pushback out loud, then answer it. This is the same move
-  applied to an argument you can predict but nobody has made yet. Reserve it
-  for tradeoffs: a wrong technical claim isn't an objection to voice and weigh,
-  it's an error to name as one.
+  and starts arguing. Make the same move for pushback you can predict but
+  nobody has made yet: say it out loud, then answer it. Where correctness is
+  at stake, skip this: a wrong technical claim isn't an objection to weigh but
+  an error to name as one, so lead with what's correct and say why the
+  alternative is wrong.
 - **Pose the real question, then answer it.** State the question in plain
   words, as a sentence, before working toward the answer. Questions work as
   section headings, as pivots, and as the frame for a whole document. A

@@ -65,16 +65,12 @@ Stop and re-pick an end when you notice:
 
 Silver bullets exist, but they change the axis instead of sitting on it:
 
-- **`async`/`await`**, over thread-per-request (sequential, readable code, but
-  a stack per request) and callback chains (cheap concurrency, but control flow
-  turned inside out). The compiler rewrites sequential-looking source into
-  resumable state, so the code reads like threads and schedules like callbacks.
-
-- **Persistent data structures**, over copying (safe to share, but cost
-  proportional to size on every update) and mutating in place (cheap updates,
-  but unsafe to share). An update returns a new version that shares the
-  untouched subtrees with the old one, so both stay valid values and the
-  copying is proportional to what changed.
+- **`async`/`await`**, over thread-per-request and callback chains: the
+  compiler rewrites sequential source into resumable state, so the code reads
+  like threads and schedules like callbacks.
+- **Persistent data structures**, over copying and mutating in place: an update
+  shares the untouched subtrees with the old version, so both stay valid values
+  and the copying is proportional to what changed.
 
 Making the choice swappable is one of these too, when you can pull it off. Find
 the narrow interface both ends fit behind: the axis then stops being a property

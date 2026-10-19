@@ -50,9 +50,3 @@ Decide deliberately, per setting, how a change takes effect:
 
 The failure mode to avoid is the silent middle: loading once at startup while
 assuming rotation "just works" because the mount updates underneath you.
-
-## Keep Refresh Off the Hot Path
-
-When the app does poll or reload config, run it as background work on a timer,
-not inline in request handling. See the control-plane / data-plane separation
-rule.
