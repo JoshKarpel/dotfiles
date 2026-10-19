@@ -323,6 +323,10 @@
           {
             "type": "command",
             "command": "claude-tab-status working"
+          },
+          {
+            "type": "command",
+            "command": "claude-redact-secrets"
           }
         ]
       }
