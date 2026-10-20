@@ -90,6 +90,16 @@ keybinds {
         bind "Alt p" { SwitchToMode "Normal"; }
     }
 
+    // The web client delivers a bare Esc to the pane as an empty write, so
+    // nothing arrives in a pane not using the kitty keyboard protocol
+    // (zellij-org/zellij#5190, from 0.44.2). A binding matches the parsed key
+    // rather than the raw bytes, so writing the byte here gets it through.
+    // Normal and locked are the only modes where Esc has no default binding;
+    // drop this once the upstream fix ships.
+    shared_among "normal" "locked" {
+        bind "Esc" { Write 27; }
+    }
+
     // Fuzzy tab switcher. zellij fetches and caches the URL itself, so the
     // release tag here is the pin; bump it to upgrade. quick_jump makes every
     // digit a jump to that tab number, so a digit can't be used to filter.
