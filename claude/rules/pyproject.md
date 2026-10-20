@@ -82,9 +82,8 @@ environment marker (`not-win32 = "sys_platform != 'win32'"`), and a line carryin
 that pragma is excluded only where the marker is true. One plugin with shared rule
 names beats each project hand-rolling its own scheme. Don't name a rule
 `no cover-…`: coverage's default exclusion matches that prefix on every platform.
-
-Where CI runs a platform matrix, gate on `coverage combine` instead, with `[paths]`
-mapping each runner's source root to one, and no pragma is needed.
+Use it where CI runs a platform matrix too, gating each job on its own data rather
+than on `coverage combine`.
 
 ## Ruff
 
