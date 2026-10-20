@@ -32,6 +32,7 @@ gh = "latest"
 # rebuild on every release, spending minutes of a dev box's CPU on what a
 # download settles in seconds. `github:` also verifies GitHub artifact
 # attestations and SLSA provenance, which `cargo:` has no equivalent of.
+"github:asciinema/agg" = "latest"
 "github:asciinema/asciinema" = "latest"
 "github:JoshKarpel/claude-scriptorium" = "latest"
 "github:mstange/samply" = "latest"
