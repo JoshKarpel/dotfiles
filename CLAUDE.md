@@ -111,7 +111,10 @@ command directly, with no shell of its own, so the server's environment is the
 only one it ever gets. Pinning variables in the unit one at a time is a second
 copy of shell startup, and every variable it misses breaks only in resurrected
 panes. `TERM` is the one exception, set by `env` in `config/zellij/config.kdl`,
-since zellij is the terminal its panes run in.
+since zellij is the terminal its panes run in. Only a CLI client applies that
+block to the server it spawns, so `zellij-web.service` pins the same value for
+the sessions `zellij web` creates, and starts after the work session so that a
+browser tab reconnecting at boot cannot create the work session first.
 
 Zellij keys its session sockets off `$XDG_RUNTIME_DIR` and falls back to
 `/tmp/zellij-$UID` when it is unset. A systemd user unit always has it and sshd
@@ -472,6 +475,37 @@ caller. Anything executable in `bin/` that declares the marker is run.
   where PATH and gitconfig are installed, so a green local run says nothing about either.
 - A passing self-test that cannot fail is worth nothing, so confirm a new case catches
   a deliberately broken copy of the hook before trusting it.
+
+## Claude Code Shell Prefix
+
+`CLAUDE_CODE_SHELL_PREFIX` in `claude/settings.json` names `bin/claude-shell`,
+and Claude Code runs every Bash tool command, every hook, and every stdio MCP
+server through it, handing over the whole command as one argument. Settings
+hot-reload, so a change to the prefix reaches running sessions too, and a broken
+`claude-shell` breaks every Bash call and every hook at once. Read and Edit do
+not go through it, so a session can still repair it.
+
+Its job today is memory. Without swap, a runaway command does not get
+OOM-killed: the kernel evicts page cache, every process on the box refaults its
+own code, and the VM thrashes until it is unreachable. On a systemd machine
+`claude-shell` puts each command in a scope inside `claude-work.slice`, which
+`do_claude_work_slice` in `install.sh` caps as a percentage of RAM. The cap
+leaves room for what is _not_ in the slice, the Claude Code processes
+themselves, zellij, and your own shells, so the session that started a runaway
+stays responsive enough to explain the exit 137 and fix the cause. It is on the
+slice rather than on each scope because a cap only has to protect the headroom,
+and a slice-wide one also stops several agents' commands crowding it out together.
+
+`systemd-run --scope` execs in place, so the command keeps the caller's working
+directory, environment, standard streams, exit status, and PID, and Claude Code
+stopping it reaches it directly. Commands typed into a pane by hand, mainplate's
+sessions, and the Claude Code processes themselves are all outside the cap.
+
+The prefix is the one place every command Claude runs passes through, so it is
+where anything else about running them belongs. Filtering output through it, such
+as the masking `claude-redact-secrets` does as a hook, has to account for the
+stdio MCP servers that pass through it too, whose stdout is a JSON-RPC stream
+rather than output to rewrite.
 
 ## Claude Code Skills
 

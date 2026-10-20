@@ -34,7 +34,9 @@ web_client {
 // server started by a unit gives every pane no TERM at all (Claude Code then
 // falls back to TERM=dumb, and `less` complains the terminal is not fully
 // functional), and one started by `za` hands on whatever the first client's
-// terminal was, which may have no terminfo entry on this box.
+// terminal was, which may have no terminfo entry on this box. Only a CLI client
+// applies this to the server it spawns; `zellij web` does not, so
+// zellij-web.service in install.sh pins the same value itself.
 env {
     TERM "xterm-256color"
 }

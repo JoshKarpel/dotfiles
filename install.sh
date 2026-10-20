@@ -337,6 +337,38 @@ EOF
   systemctl --user enable --now tidy.timer
 }
 
+# Caps the slice bin/claude-shell runs every Claude Code command in, so a runaway
+# is killed there instead of thrashing the box until it is unreachable. Gated by
+# the same test claude-shell uses to choose systemd-run, so the slice exists
+# wherever commands are put in it.
+#
+# The cap only has to leave room for what lives outside the slice: the Claude
+# Code processes, zellij, your own shells, and the system. A percentage rather
+# than RAM minus a fixed reserve, because systemd resolves it against the RAM
+# present each time it loads the unit, so a resized VM needs nothing rerun.
+function do_claude_work_slice() {
+  local units=~/.config/systemd/user
+  local memory_max=75%
+
+  [[ -d /run/systemd/system ]] || return 0
+
+  use_user_bus
+
+  log "Capping the memory of Claude Code's commands..."
+
+  mkdir -p "$units"
+
+  cat > "$units/claude-work.slice" << EOF
+[Unit]
+Description=Commands Claude Code runs, capped below the RAM installed
+
+[Slice]
+MemoryMax=$memory_max
+EOF
+
+  systemctl --user daemon-reload
+}
+
 # Ages out Claude Code's per-user scratch under /tmp. The exe.dev image keeps
 # /tmp across reboots and cleans it only of entries 30 days old by every
 # timestamp, so anything that lists a directory (a `du`, a file watcher) resets
@@ -639,6 +671,14 @@ function restart_stale_zellij_session() {
 #
 # zellij starts through a login shell for the reason do_zellij_session gives: a
 # session the web server creates inherits its environment, panes included.
+#
+# The web server is ordered after the work session because a browser tab left
+# open across a reboot reconnects the moment the server is up, and a request for
+# a session that does not exist yet creates it. The web server's copy then takes
+# the socket path, stranding the one the unit started, and it is missing what
+# only a CLI client gives a server: the `env` block in config/zellij/config.kdl,
+# which `zellij web` does not apply. Hence TERM again below, for the sessions the
+# web server creates on purpose.
 function do_zellij_web() {
   local units=~/.config/systemd/user
 
@@ -657,8 +697,10 @@ function do_zellij_web() {
   cat > "$units/zellij-web.service" << 'EOF'
 [Unit]
 Description=Serve zellij sessions over the exe.dev HTTPS proxy
+After=zellij-session.service
 
 [Service]
+Environment=TERM=xterm-256color
 ExecStart=/bin/bash -lc 'exec zellij web'
 Restart=always
 RestartSec=5
@@ -735,6 +777,7 @@ do_brew
 do_mise
 do_sync_branches
 do_tidy
+do_claude_work_slice
 do_scratchpad_cleanup
 do_cloister
 do_atlas

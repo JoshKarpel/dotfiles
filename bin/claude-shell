@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+# Claude Code's CLAUDE_CODE_SHELL_PREFIX (set in claude/settings.json): every
+# Bash tool command, hook, and stdio MCP server runs through here, arriving as a
+# single argument to hand to a shell.
+#
+# Where systemd runs the machine, each command gets a scope in claude-work.slice,
+# which install.sh caps below the RAM installed. A command that runs away is then
+# killed inside the slice, leaving the memory the Claude Code processes, zellij,
+# and your own shells need to stay responsive, rather than every process on the
+# box being thrashed until it is unreachable. The cap is on the slice rather than
+# on each scope so that several agents' commands together cannot crowd out the
+# rest either.
+#
+# install.sh writes the slice wherever this takes the systemd branch, by the same
+# test. A failing systemd-run fails the command rather than running it uncapped.
+
+set -euo pipefail
+
+if [[ -d /run/systemd/system ]]; then
+  exec systemd-run --user --scope --quiet --collect --slice=claude-work.slice -- bash -c "$1"
+fi
+
+exec bash -c "$1"
