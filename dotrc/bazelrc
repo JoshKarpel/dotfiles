@@ -1,0 +1,15 @@
+# Read after a workspace's own .bazelrc, so these override it. Expressed against
+# the host rather than as numbers so the same file suits every machine.
+#
+# These shape scheduling rather than enforce anything: Bazel charges each action
+# a guessed footprint, and a large C++ compile can use several times its guess,
+# so --jobs is what actually bounds peak memory.
+
+build --jobs=HOST_CPUS*.5
+build --local_resources=cpu=HOST_CPUS*.5
+build --local_resources=memory=HOST_RAM*.5
+
+# The server outlives the build, holding its heap and its place in whatever
+# cgroup it started in (see bin/claude-shell). Idling out after 15 minutes
+# instead of 3 hours lets the next build start one wherever it is run from.
+startup --max_idle_secs=900
