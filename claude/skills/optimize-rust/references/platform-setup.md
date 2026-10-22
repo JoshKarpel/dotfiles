@@ -27,7 +27,8 @@ Two sysctls gate profiling:
   The upstream default of `2` allows user space only, and `perf record` drops to
   user-only events on its own (`cycles:Pu` in the report header), which is all a
   Rust hot path needs. `1` adds kernel samples, showing time spent in syscalls
-  as a `[kernel]` bucket, at the cost of exposing kernel addresses. Debian and
+  as a `[kernel]` bucket, at the cost of letting any local user sample kernel
+  code paths for their own processes. Debian and
   Ubuntu kernels add `3`/`4`, which block unprivileged sampling outright; lower
   it to `2` there.
 - **`kernel.perf_event_max_stack`** is how many frames the kernel walks per sample.
@@ -38,7 +39,8 @@ Two sysctls gate profiling:
 before recording.
 
 Check the current values before changing anything: the dotfiles `install.sh`
-already persists the stack depth on every Linux box it runs on. Otherwise, write
+already persists both on every Linux box it runs on, with paranoid at `1`.
+Otherwise, write
 them under `/etc/sysctl.d/` so they survive a reboot, and under WSL2 a shutdown
 of the VM. Add the `paranoid = 2` line only where the distro set it higher:
 

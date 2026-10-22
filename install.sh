@@ -110,19 +110,25 @@ function do_locale() {
 
 # Raises how many frames the kernel walks per perf sample. The default of 127
 # truncates deeply recursive code (regex compilation goes well past it), and
-# frames above the cut are lost from the profile. perf_event_paranoid stays at
-# its default of 2: perf drops to user-only sampling on its own there, and
-# kernel frames are a `sudo perf` away when wanted.
+# frames above the cut are lost from the profile.
 #
-# Applying it fails with EBUSY while any perf event is open. That leaves the
-# file in place for the next boot rather than aborting the install.
+# Lowers perf_event_paranoid from its default of 2 to 1, so an unprivileged perf
+# can profile its own processes in kernel space as well as user space. Not every
+# tool drops to user-only sampling when kernel access is refused, and those fail
+# outright at 2. System-wide profiling still needs root. The cost is that any
+# local user can sample kernel code paths for their own processes. kptr_restrict
+# is left alone, so kernel addresses stay hidden and kernel frames show unnamed.
+#
+# Raising the stack depth fails with EBUSY while any perf event is open. That
+# leaves the file in place for the next boot rather than aborting the install.
 function do_perf_sysctl() {
   [[ -d /etc/sysctl.d ]] || return 0
 
-  log "Raising the perf stack depth..."
+  log "Configuring perf sysctls..."
 
   sudo tee /etc/sysctl.d/99-perf-event.conf > /dev/null << 'EOF'
 kernel.perf_event_max_stack = 1024
+kernel.perf_event_paranoid = 1
 EOF
   sudo sysctl --load=/etc/sysctl.d/99-perf-event.conf
 }
