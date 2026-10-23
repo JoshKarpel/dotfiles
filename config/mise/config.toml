@@ -8,11 +8,12 @@ minimum_release_age = "7d"
 # The cooldown buys time for a compromised publish to be noticed by someone
 # else. That is worth a week of lag for a dependency, and nothing for a release
 # cut from an account whose compromise would already be my own problem to
-# notice. Exempted so a release is servable the day it ships: the services the
-# exe.dev boxes run (`cloister`, the atlas) take whatever version this resolves
-# to.
+# notice. My own tools are exempted so a release is usable the day it ships,
+# which matters most for the services the exe.dev boxes run (`cloister`, the
+# atlas): they take whatever version this resolves to.
 minimum_release_age_excludes = [
   "github:JoshKarpel/claude-scriptorium",
+  "pipx:assess-diff",
   "pipx:exe-dev-atlas",
 ]
 
@@ -43,6 +44,7 @@ just = "latest"
 k9s = "latest"
 kubectl = "latest"
 node = "lts"
+"pipx:assess-diff" = "latest"
 # The atlas, whose `install` subcommand points a systemd unit at the interpreter
 # it was reached through, so the version mise resolves here is the one the box
 # serves its front door from. `pipx:` rather than `github:` because it publishes
