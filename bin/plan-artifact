@@ -127,6 +127,7 @@ body {
 }
 .outline a:hover, .outline a:focus-visible { color: var(--accent); border-left-color: var(--accent); }
 .outline .sub a { padding-left: 1.4rem; font-size: 0.85rem; }
+.outline code { font: 0.9em var(--mono); overflow-wrap: anywhere; }
 .plan { min-width: 0; }
 .plan > :first-child { margin-top: 0; }
 .plan h2, .plan h3 { font-family: var(--display); text-wrap: balance; scroll-margin-top: 1.5rem; }
@@ -135,7 +136,7 @@ body {
 .plan h4 { font-size: 1rem; margin: 1.4rem 0 0.4rem; }
 .plan p, .plan li { max-width: 68ch; }
 .plan a { color: var(--accent); text-underline-offset: 0.15em; }
-.plan code { font: 0.88em var(--mono); background: var(--accent-wash); border-radius: 4px; padding: 0.1em 0.3em; }
+.plan code { font: 0.88em var(--mono); background: var(--accent-wash); border-radius: 4px; padding: 0.1em 0.3em; overflow-wrap: anywhere; }
 .plan pre { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 0.9rem 1rem; }
 .plan pre code { background: none; padding: 0; font-size: 0.85rem; line-height: 1.5; }
 .plan pre.mermaid { background: var(--surface); text-align: center; }
@@ -170,7 +171,7 @@ class Heading:
 
     level: int
     anchor: str
-    text: str
+    label: Markup
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +179,7 @@ class Plan:
     """What the page is built from: the title, the outline, the rendered body, and its task counts."""
 
     title: str
+    title_html: Markup
     headings: tuple[Heading, ...]
     body: Markup
     tasks_done: int
@@ -205,6 +207,21 @@ def markdown() -> MarkdownIt:
     return md
 
 
+def inline_html(md: MarkdownIt, inline: Token) -> Markup:
+    """
+    A heading's markdown rendered as HTML, so `code` in it reads as code rather than as backticks.
+
+    Its links are unwrapped, since the outline puts each heading inside a link of its own.
+    """
+    children = [child for child in inline.children or [] if child.type not in ("link_open", "link_close")]
+    return Markup(md.renderer.renderInline(children, md.options, {}))
+
+
+def inline_text(inline: Token) -> str:
+    """A heading's markdown as plain text, for `<title>`, which shows no markup."""
+    return "".join(child.content for child in inline.children or [] if child.type in ("text", "code_inline"))
+
+
 def parse_plan(source: str) -> Plan:
     """
     A plan from its markdown.
@@ -215,14 +232,14 @@ def parse_plan(source: str) -> Plan:
     lines = [line for line in source.splitlines() if not ARTIFACT_LINE.match(line)]
     md = markdown()
     tokens = md.parse("\n".join(lines))
-    plan_title = "Plan"
+    plan_title, plan_title_html = "Plan", Markup("Plan")
     first_h1 = next((i for i, token in enumerate(tokens) if token.type == "heading_open" and token.tag == "h1"), None)
     if first_h1 is not None:
-        plan_title = tokens[first_h1 + 1].content
+        plan_title, plan_title_html = inline_text(tokens[first_h1 + 1]), inline_html(md, tokens[first_h1 + 1])
         # heading_open, inline, heading_close: the masthead shows the title instead.
         tokens = tokens[:first_h1] + tokens[first_h1 + 3 :]
     headings = [
-        Heading(level=int(token.tag[1]), anchor=anchor, text=tokens[index + 1].content)
+        Heading(level=int(token.tag[1]), anchor=anchor, label=inline_html(md, tokens[index + 1]))
         for index, token in enumerate(tokens)
         if token.type == "heading_open" and isinstance(anchor := token.attrs.get("id"), str)
     ]
@@ -236,7 +253,14 @@ def parse_plan(source: str) -> Plan:
         if token.type == "inline" and token.children and "task-list-item-checkbox" in token.children[0].content
     ]
     done, total = sum('checked="checked"' in box for box in boxes), len(boxes)
-    return Plan(title=plan_title, headings=tuple(headings), body=Markup(body), tasks_done=done, tasks_total=total)
+    return Plan(
+        title=plan_title,
+        title_html=plan_title_html,
+        headings=tuple(headings),
+        body=Markup(body),
+        tasks_done=done,
+        tasks_total=total,
+    )
 
 
 def page(plan: Plan, source_label: str) -> str:
@@ -260,7 +284,7 @@ def page(plan: Plan, source_label: str) -> str:
                 attrs={"aria-label": "Contents"},
                 children=ol(
                     children=[
-                        li(cls="sub" if heading.level == 3 else None, children=a(attrs={"href": f"#{heading.anchor}"}, children=heading.text))
+                        li(cls="sub" if heading.level == 3 else None, children=a(attrs={"href": f"#{heading.anchor}"}, children=heading.label))
                         for heading in plan.headings
                     ]
                 ),
@@ -278,7 +302,7 @@ def page(plan: Plan, source_label: str) -> str:
                 children=[
                     header(
                         cls="masthead",
-                        children=[p(cls="eyebrow", children=f"Plan · {source_label}"), Markup(f"<h1>{escape(plan.title)}</h1>"), progress],
+                        children=[p(cls="eyebrow", children=f"Plan · {source_label}"), Markup(f"<h1>{plan.title_html}</h1>"), progress],
                     ),
                     outline if plan.headings else div(),
                     article(cls="plan", children=plan.body),
@@ -290,7 +314,7 @@ def page(plan: Plan, source_label: str) -> str:
 
 def selftest() -> int:
     """The parse, against a small plan, without touching the filesystem."""
-    source = """# Ship the thing
+    source = """# Ship the `thing`
 
 Artifact: https://claude.ai/code/artifact/abc
 
@@ -300,7 +324,7 @@ Artifact: https://claude.ai/code/artifact/abc
 - [ ] test it
 - [X] doc it
 
-### Detail
+### Detail on `Query` and [links](https://example.com)
 
 ```mermaid
 graph TD; A-->B
@@ -317,11 +341,18 @@ x = "<b>"
     plan = parse_plan(source)
     html = page(plan, "plans/ship.md")
     checks: list[tuple[str, object, object]] = [
-        ("title from the first # heading", plan.title, "Ship the thing"),
-        ("outline from ## and ###", [(h.level, h.anchor) for h in plan.headings], [(2, "steps"), (3, "detail")]),
+        ("title from the first # heading, as plain text", plan.title, "Ship the thing"),
+        (
+            "outline from ## and ###",
+            [(h.level, h.anchor) for h in plan.headings],
+            [(2, "steps"), (3, "detail-on-query-and-links")],
+        ),
+        ("code in a heading is code in the outline", '<code>Query</code> and links</a>' in html, True),
+        ("a heading's backticks never reach the page", "`" in html.partition("<article")[0], False),
+        ("code in the title is code in the masthead", "<h1>Ship the <code>thing</code></h1>" in html, True),
         ("tasks counted, either x case", (plan.tasks_done, plan.tasks_total), (2, 3)),
         ("the Artifact line is dropped", "claude.ai/code/artifact" in html, False),
-        ("the title is not repeated in the body", plan.body.count("Ship the thing"), 0),
+        ("the title is not repeated in the body", plan.body.count("Ship the"), 0),
         ("mermaid becomes a pre the viewer draws", '<pre class="mermaid">graph TD; A--&gt;B\n</pre>' in plan.body, True),
         ("other code stays code, escaped", "&lt;b&gt;" in plan.body, True),
         ("raw svg passes through", '<rect width="10" height="10" fill="var(--accent)"/>' in plan.body, True),

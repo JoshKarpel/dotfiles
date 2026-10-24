@@ -380,6 +380,15 @@ zellij-web-font "FiraCode Nerd Font" "Fira Code"
 # Run with --help for subcommands and flags.
 wt --help
 
+# Pick local branches across every clone to delete (Alt+Shift+d in zellij),
+# with the ones merged or squash-merged into origin/HEAD already marked. A
+# branch checked out in a worktree goes through `wt done`, tab and all.
+git-manage
+
+# See what is listening on which TCP port, copy a port's URL (exe.dev's on a VM),
+# and stop the process behind one: the interactive port-user and port-kill.
+port-manage
+
 # Exit 0 only on an exe.dev VM tagged `dev-box`. The guard the services that
 # exist to be looked at by a person are gated on.
 is-dev-box

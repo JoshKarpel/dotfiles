@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable
@@ -45,7 +46,7 @@ from counterweight.styles.utilities import *
 
 app = typer.Typer(help=__doc__)
 
-# Where clones are looked for, each listed under its own heading. sync-branches keeps the same pair.
+# Where clones are looked for, each listed under its own heading. sync-branches and git-manage keep the same pair.
 CLONE_ROOTS = (Path.home() / "projects", Path.home() / "work")
 
 
@@ -126,7 +127,8 @@ def new(
 
     The tab is named <repo>:<branch>, and every pane opened in it, floating
     ones included, starts in the worktree. When the clone has a pre-commit
-    config, its git hook is (re)installed before the tab opens.
+    config and its git hook is missing, or pinned to an interpreter that is
+    gone, a floating pane in the new tab installs it.
     """
     if not os.environ.get("ZELLIJ"):
         raise fail("not inside a zellij session")
@@ -146,47 +148,99 @@ def new(
         else:
             git(clone, "worktree", "add", "--no-track", "-b", branch, path, "origin/HEAD")
 
+    # `--layout default` names the built-in layout rather than the session's
+    # new_tab_template, because a resurrected session's template pins its pane to
+    # the session's absolute cwd, which overrides `--cwd`. new-tab prints the tab's id.
+    tab_id = run(
+        "zellij", "action", "new-tab", "--name", tab_name(clone, branch), "--layout", "default", "--cwd", path
+    ).stdout.strip()
+
     # Hooks live in the clone's git dir, shared by every worktree, so one install
     # covers them all. It runs from the clone rather than the worktree because the
     # hook pins the interpreter that installed it, and a worktree's venv is gone
-    # after `wt done`.
-    if run("is-pre-commit-project", cwd=clone, check=False).returncode == 0:
-        run("pre-commit-run", "install", cwd=clone)
+    # after `wt done`. That pin is also why a hook can stop working: a uv cache
+    # interpreter is gone after `tidy`. A working hook is left alone, since in a
+    # uv project the install goes through `uv run`, which syncs the clone's venv.
+    # When one is needed it runs in a floating pane of the new tab rather than
+    # here, so opening the tab never waits on it and its output lands in the tab
+    # it is for; a fresh tab has no hidden floating panes for it to reveal.
+    if run("is-pre-commit-project", cwd=clone, check=False).returncode == 0 and not has_working_hook(clone):
+        # `zellij run` prints the pane's id, which `run` captures and nothing needs.
+        run(
+            "zellij", "run", "--tab-id", tab_id, "--floating", "--cwd", clone, "--name", "pre-commit install",
+            "--close-on-exit", "--",
+            "bash", "-c", "pre-commit-run install || read -rsn1 -p 'pre-commit install failed; press any key to close'",
+        )
 
-    # new-tab prints the tab's id on stdout, which `run` captures and nothing needs.
-    # `--layout default` names the built-in layout rather than the session's
-    # new_tab_template, because a resurrected session's template pins its pane to
-    # the session's absolute cwd, which overrides `--cwd`.
-    run(
-        "zellij", "action", "new-tab", "--name", tab_name(clone, branch), "--layout", "default", "--cwd", path
-    )
+
+def pinned_python(hook: str) -> Path | None:
+    """The interpreter a git hook that pre-commit installed runs, from its templated INSTALL_PYTHON line."""
+    for line in hook.splitlines():
+        if line.startswith("INSTALL_PYTHON="):
+            return Path(shlex.split(line.removeprefix("INSTALL_PYTHON="))[0])
+    return None
+
+
+def has_working_hook(clone: Path) -> bool:
+    """Whether CLONE has pre-commit's git hook, pinned to an interpreter that still exists."""
+    hook = Path(git(clone, "rev-parse", "--path-format=absolute", "--git-path", "hooks/pre-commit"))
+    if not hook.is_file():
+        return False
+    python = pinned_python(hook.read_text())
+    return python is not None and os.access(python, os.X_OK)
 
 
 @app.command()
 def done(
-    worktree: Annotated[Path, typer.Argument(help="The worktree to tear down.")] = Path("."),
+    worktrees: Annotated[
+        list[Path] | None, typer.Argument(help="The worktrees to tear down; the current directory's when none.")
+    ] = None,
+    delete_unmerged: Annotated[
+        bool, typer.Option(help="Delete each branch even when git does not count it merged.")
+    ] = False,
 ) -> None:
-    """Remove a worktree, delete its branch if merged, and close its tab.
+    """Remove worktrees, delete their branches if merged, and close their tabs.
 
-    Refuses while the worktree has any change, untracked files included, since
-    removing it would discard them. A branch git will not delete with `-d` is
-    kept, so its commits survive the worktree, and git says why. A squash-merged
-    branch is one of those, since git cannot see that its commits landed.
+    Refuses a worktree with any change, untracked files included, since removing
+    it would discard them, and goes on to the rest. A branch git will not delete
+    with `-d` is kept, so its commits survive the worktree, and git says why. A
+    squash-merged branch is one of those, since git cannot see that its commits
+    landed; git-manage passes --delete-unmerged for the branches it has found
+    landed, or that were picked by hand.
 
-    Closing the tab ends the agent running in it, and this command too when it
-    is run from one of that tab's panes.
+    Closing a tab ends the agent running in it, and this command too when it is
+    run from one of that tab's panes, so the focused tab is closed last.
     """
-    toplevel = Path(git(worktree, "rev-parse", "--show-toplevel"))
-    common = Path(git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-    if Path(git(worktree, "rev-parse", "--absolute-git-dir")) == common:
-        raise fail(f"{toplevel} is a clone, not a linked worktree")
+    closing: list[str] = []
+    failed = False
+    for worktree in worktrees or [Path(".")]:
+        try:
+            toplevel = Path(git(worktree, "rev-parse", "--show-toplevel"))
+            common = Path(git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+            if Path(git(worktree, "rev-parse", "--absolute-git-dir")) == common:
+                raise fail(f"{toplevel} is a clone, not a linked worktree")
+            clone = common.parent
+            if branch := tear_down(clone, toplevel, delete_unmerged=delete_unmerged):
+                closing.append(tab_name(clone, branch))
+        except typer.Exit:
+            failed = True
+    if closing and os.environ.get("ZELLIJ"):
+        close_tabs(closing)
+    if failed:
+        raise typer.Exit(1)
 
+
+def tear_down(clone: Path, toplevel: Path, *, delete_unmerged: bool = False) -> str | None:
+    """Remove the worktree at TOPLEVEL and delete its branch, returning the branch it had checked out.
+
+    The branch is deleted only if git counts it merged, unless DELETE_UNMERGED says the caller already decided.
+    Leaves its tab open, so a caller tearing down several can close them all last, together.
+    """
     if git(toplevel, "status", "--porcelain"):
         run("git", "-C", toplevel, "status", "--short", check=False)
         raise fail(f"{toplevel} has changes; commit or discard them first")
 
     branch = git(toplevel, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
-    clone = common.parent
 
     git(clone, "worktree", "remove", toplevel)
     typer.echo(f"removed {toplevel}")
@@ -203,24 +257,34 @@ def done(
             break
 
     if not branch:
-        return
+        return None
 
-    if run("git", "-C", clone, "branch", "--quiet", "-d", branch, check=False).returncode == 0:
+    delete = "-D" if delete_unmerged else "-d"
+    if run("git", "-C", clone, "branch", "--quiet", delete, branch, check=False).returncode == 0:
         typer.echo(f"deleted branch {branch}")
     else:
         typer.echo(f"kept branch {branch}")
+    return branch
 
-    if not os.environ.get("ZELLIJ"):
-        return
 
-    # Closed last: from one of the tab's own panes, this ends the command.
-    name = tab_name(clone, branch)
+def close_tabs(names: list[str]) -> None:
+    """Close the tabs called NAMES, the focused one last.
+
+    From one of the focused tab's own panes, closing it ends this command, so
+    every other tab has to be gone by then.
+    """
     tabs = list_tabs()
     if tabs is None:
-        raise fail(f"zellij listed no tabs; close {name} yourself")
-    tab_id = find_tab(tabs, name)
-    if tab_id is not None:
+        raise fail(f"zellij listed no tabs; close {', '.join(names)} yourself")
+    for tab_id in closing_order(tabs, names):
         run("zellij", "action", "close-tab-by-id", str(tab_id))
+
+
+def closing_order(tabs: list[dict[str, Any]], names: list[str]) -> list[int]:
+    """The ids of the tabs called NAMES that exist, the active one last."""
+    found = {tab_id for name in names if (tab_id := find_tab(tabs, name)) is not None}
+    active = {int(tab["tab_id"]) for tab in tabs if tab["active"]}
+    return sorted(found - active) + sorted(found & active)
 
 
 def list_tabs(attempts: int = 3) -> list[dict[str, Any]] | None:
@@ -645,6 +709,24 @@ def _selftest() -> int:
         ("Ctrl+U clears the query", stepped(*typed("zz"), KeyPressed(key=Key.ControlU), enter, enter) == opened(projects / "dotfiles", "fix-tabs")),
         ("a paste adds its printable text", stepped(Pasted(text="ray\n"), enter, Pasted(text="a-b"), enter) == opened(projects / "ray", "a-b")),
         ("Enter with nothing matched stays put", stepped(*typed("zz"), enter) == ChoosingClone(search=Search("zz", 0))),
+    ]
+
+    tabs = [
+        {"tab_id": 4, "name": "● dotfiles:a", "active": True},
+        {"tab_id": 9, "name": "dotfiles:b", "active": False},
+        {"tab_id": 2, "name": "dotfiles:c", "active": False},
+    ]
+
+    hook = "#!/usr/bin/env bash\n# start templated\nINSTALL_PYTHON=/home/x/.venv/bin/python\nARGS=(hook-impl)\n"
+    cases += [
+        ("a hook's pinned interpreter is read from its INSTALL_PYTHON line", pinned_python(hook) == Path("/home/x/.venv/bin/python")),
+        ("a quoted pin is unquoted", pinned_python("INSTALL_PYTHON='/a b/python'\n") == Path("/a b/python")),
+        ("a hook pre-commit did not write pins nothing", pinned_python("#!/bin/sh\nmake lint\n") is None),
+    ]
+
+    cases += [
+        ("tabs close with the active one last", closing_order(tabs, ["dotfiles:a", "dotfiles:b", "dotfiles:c"]) == [2, 9, 4]),
+        ("a tab already closed is skipped", closing_order(tabs, ["dotfiles:b", "dotfiles:gone"]) == [9]),
     ]
 
     def picked(*steps: object) -> Opening | None:

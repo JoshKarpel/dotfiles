@@ -39,15 +39,19 @@ if exists kubectl; then
   esac
 fi
 
+# With no argument, ktx, kfg and kns pick one with kube-pick and then carry on as
+# if it had been given; leaving the picker leaves everything as it was.
 function ktx() {
   local ctx=$1
 
-  if [[ -f $ctx ]]; then
+  # A picked name is always a context, even when a file in this directory shares it.
+  if [[ -z $ctx ]]; then
+    ctx=$(kube-pick context) || return
+    kubectl config use-context "${ctx}"
+  elif [[ -f $ctx ]]; then
     ctx=$(realpath $ctx)
     echo "Setting KUBECONFIG=${ctx}"
     export KUBECONFIG="${ctx}"
-  elif [[ -z $ctx ]]; then
-    kubectl config get-contexts
   else
     kubectl config use-context "${ctx}"
   fi
@@ -57,21 +61,19 @@ function kfg() {
   local cfg=$1
 
   if [[ -z $cfg ]]; then
-    for f in ~/.kube/*; do
-      [[ -f $f ]] && echo "${f##*/}"
-    done
-  else
-    echo "Setting KUBECONFIG=${HOME}/.kube/${cfg}"
-    export KUBECONFIG="${HOME}/.kube/${cfg}"
+    cfg=$(kube-pick config) || return
   fi
+
+  echo "Setting KUBECONFIG=${HOME}/.kube/${cfg}"
+  export KUBECONFIG="${HOME}/.kube/${cfg}"
 }
 
 function kns() {
   local target=$1
 
   if [[ -z $target ]]; then
-    kubectl get namespaces
-  else
-    kubectl config set-context --current --namespace="${target}"
+    target=$(kube-pick namespace) || return
   fi
+
+  kubectl config set-context --current --namespace="${target}"
 }

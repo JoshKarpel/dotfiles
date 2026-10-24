@@ -1,0 +1,586 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.15"
+# dependencies = ["counterweight>=0.1.1"]
+# ///
+"""
+Pick local branches across every clone to delete, tearing down any worktree one has checked out.
+
+Lists every local branch in every clone under ~/projects and ~/work, except the default branch and the one the
+clone itself has checked out, with where each stands against origin/HEAD. Space marks or unmarks the highlighted
+branch and Enter deletes every marked one, including any the query is hiding, whether or not git counts it merged:
+marking it is the decision `git branch -d` would otherwise make. So only branches whose work is on origin/HEAD start
+out marked: those merged into it, and those squash-merged into it, found by the patch of the branch's whole diff. A
+branch with no upstream is never marked for you, because a branch `wt new` just made looks merged until its first
+commit, and one whose worktree has changes cannot be marked at all.
+
+A branch checked out in a worktree is handed to `wt done --delete-unmerged`, which removes the worktree and closes
+its tab, the focused tab last, so the tab this runs in can go too. Typing narrows the list as in the other pickers;
+Space never does, since no branch name has one. Escape or Ctrl+C leaves without deleting anything.
+
+Where each branch stands is as of the clone's last fetch, which sync-branches makes hourly.
+"""
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests (`_selftest`).
+# This marker line is how `claude-hook-selftests` discovers participating scripts.
+
+from __future__ import annotations
+
+import asyncio
+import os
+import subprocess
+import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from dataclasses import replace
+from datetime import timedelta
+from enum import StrEnum
+from pathlib import Path
+from typing import assert_never
+
+from counterweight import app
+from counterweight.components import component
+from counterweight.controls import Quit
+from counterweight.elements import Div
+from counterweight.elements import Text
+from counterweight.events import InputEvent
+from counterweight.events import InputResponse
+from counterweight.events import KeyPressed
+from counterweight.events import Pasted
+from counterweight.events import Receiver
+from counterweight.hooks import use_controls
+from counterweight.hooks import use_effect
+from counterweight.hooks import use_state
+from counterweight.keys import Key
+from counterweight.styles.utilities import *
+
+# Where clones are looked for, each listed under its own heading. sync-branches and wt keep the same pair.
+CLONE_ROOTS = (Path.home() / "projects", Path.home() / "work")
+
+DOWN_KEYS = frozenset({Key.Down, Key.Tab, Key.ControlN})
+UP_KEYS = frozenset({Key.Up, Key.BackTab, Key.ControlP, Key.ControlK})
+LEAVE_KEYS = frozenset({Key.Escape, Key.ControlC})
+
+
+class Status(StrEnum):
+    """Where a branch stands, which decides whether it starts out marked."""
+
+    CHANGED = "worktree has changes"
+    GONE = "upstream gone, not on origin/HEAD"
+    MERGED = "merged"
+    SQUASHED = "squash-merged"
+    UNMERGED = "not merged"
+    UNPUSHED = "never pushed"
+
+
+# Only branches whose work is provably on origin/HEAD, since deleting a marked branch deletes whatever it holds.
+PREMARKED = frozenset({Status.MERGED, Status.SQUASHED})
+
+
+@dataclass(frozen=True, slots=True)
+class Branch:
+    """A local branch, where it stands, and the worktree it is checked out in, if any."""
+
+    clone: Path
+    name: str
+    status: Status
+    worktree: Path | None
+
+    @property
+    def is_markable(self) -> bool:
+        """Whether deleting it could succeed; `wt done` refuses a worktree with changes."""
+        return self.status is not Status.CHANGED
+
+
+@dataclass(frozen=True, slots=True)
+class Group:
+    """The branches of one clone, listed under its heading."""
+
+    title: str
+    branches: tuple[Branch, ...]
+
+
+def run(*command: str | Path, cwd: Path | None = None) -> str:
+    """COMMAND's stdout; a failure exits with its status, its stderr having passed through."""
+    result = subprocess.run([str(part) for part in command], stdout=subprocess.PIPE, text=True, cwd=cwd)
+    if result.returncode != 0:
+        raise SystemExit(result.returncode)
+    return result.stdout
+
+
+def git(cwd: Path, *args: str | Path) -> str:
+    """A git command's stdout, run against the repository at CWD, stripped."""
+    return run("git", "-C", cwd, *args).strip()
+
+
+def discover_clones(root: Path) -> tuple[Path, ...]:
+    """The clones directly under ROOT, by the rule sync-branches and wt use: a `.git` that is a directory."""
+    if not root.is_dir():
+        return ()
+    return tuple(sorted(path for path in root.iterdir() if (path / ".git").is_dir()))
+
+
+def parse_upstreams(refs: str) -> dict[str, tuple[str, str]]:
+    """
+    Each local branch's upstream and its track, from `for-each-ref` with NUL-separated fields.
+
+    NUL rather than a tab, because `git` strips its output, and a tab is whitespace: the last line of a branch with
+    no upstream would lose both its empty fields. The track is `[gone]` when the upstream was deleted and pruned,
+    and empty when the branch has no upstream.
+    """
+    upstreams = {}
+    for line in refs.splitlines():
+        branch, upstream, track = line.split("\0")
+        upstreams[branch] = (upstream, track)
+    return upstreams
+
+
+@dataclass(frozen=True, slots=True)
+class Checkouts:
+    """Which branches are checked out where, from `git worktree list --porcelain`."""
+
+    in_clone: str | None
+    in_worktrees: dict[str, Path]
+
+
+def parse_checkouts(porcelain: str) -> Checkouts:
+    """
+    The branch the clone itself has checked out, and each linked worktree's branch.
+
+    The first record is always the clone's own. A detached worktree has no branch line, so it holds no branch.
+    """
+    records = [dict(line.partition(" ")[::2] for line in record.splitlines()) for record in porcelain.strip().split("\n\n")]
+    branches = [(fields.get("branch", "").removeprefix("refs/heads/") or None, Path(fields["worktree"])) for fields in records]
+    (in_clone, _), *linked = branches
+    return Checkouts(in_clone=in_clone, in_worktrees={branch: path for branch, path in linked if branch})
+
+
+def classify(*, has_changes: bool, upstream: str, track: str, is_merged: bool, is_squashed: bool) -> Status:
+    """
+    Where a branch stands, changes first, since they block deleting it whatever else is true.
+
+    Merged comes before gone: a host that deletes a branch once its pull request merges leaves every merged
+    branch's upstream gone.
+    """
+    if has_changes:
+        return Status.CHANGED
+    if not upstream:
+        return Status.UNPUSHED
+    if is_merged:
+        return Status.MERGED
+    if track == "[gone]":
+        return Status.SQUASHED if is_squashed else Status.GONE
+    return Status.UNMERGED
+
+
+def labelled(diffs: dict[str, str]) -> str:
+    """
+    DIFFS as one input to `git patch-id`, each behind a `commit` header numbering it, so one call identifies them all.
+
+    patch-id starts a new patch at each `commit <id>` line and echoes the id beside its patch-id.
+    """
+    return "".join(f"commit {index:040x}\n{diff}" for index, diff in enumerate(diffs.values()))
+
+
+def parse_patch_ids(output: str) -> dict[str, str]:
+    """`git patch-id` output as each commit id's patch-id."""
+    return {commit: patch for patch, commit in (line.split() for line in output.splitlines())}
+
+
+def landed_among(diffs: dict[str, str], labelled_ids: str, landed_ids: str) -> frozenset[str]:
+    """
+    The branches whose whole diff has the patch-id of a commit that landed, given the patch-ids of both.
+
+    A squash merge lands a branch's whole diff as one commit, so this finds it whatever else has landed around it,
+    unless the merge had to change the diff (a conflict, an edit while merging). An empty diff has no patch-id, and
+    proves nothing, so a branch with one is never among them.
+    """
+    by_label = parse_patch_ids(labelled_ids)
+    landed = set(parse_patch_ids(landed_ids).values())
+    labels = {branch: f"{index:040x}" for index, branch in enumerate(diffs)}
+    return frozenset(branch for branch, label in labels.items() if by_label.get(label) in landed)
+
+
+def patch_ids(patches: str) -> str:
+    """`git patch-id --stable` over PATCHES."""
+    result = subprocess.run(["git", "patch-id", "--stable"], input=patches, stdout=subprocess.PIPE, text=True)
+    if result.returncode != 0:
+        raise SystemExit(result.returncode)
+    return result.stdout
+
+
+def squashed(clone: Path, branches: list[str]) -> frozenset[str]:
+    """
+    Which of BRANCHES had their whole diff land on origin/HEAD as one commit since they forked.
+
+    Everything that landed since the oldest of their forks is read once, rather than once per branch, which would be most
+    of the cost in a clone with dozens of squash-merged branches. The log is limited to the paths the branches touch:
+    a commit landing a branch's diff touches only that branch's paths, so the limit leaves its patch whole, and keeps
+    an old branch in a busy clone from reading every patch since it forked. Renames are off throughout, so a renamed
+    file is a deletion and an addition on both sides, and both its paths are in the limit.
+    """
+    diffs: dict[str, str] = {}
+    paths: set[str] = set()
+    bases: set[str] = set()
+    for branch in branches:
+        # By its full name, and before a `--`, since a branch can share its name with a path (a `docs` branch).
+        ref = f"refs/heads/{branch}"
+        base = git(clone, "merge-base", "origin/HEAD", ref)
+        names = run("git", "-C", clone, "diff", "--no-renames", "--name-only", "-z", base, ref, "--")
+        if touched := [path for path in names.split("\0") if path]:
+            diffs[branch] = run("git", "-C", clone, "diff", "--no-renames", base, ref, "--")
+            paths.update(touched)
+            bases.add(base)
+    if not diffs:
+        return frozenset()
+    oldest = git(clone, "merge-base", "--octopus", *sorted(bases))
+    landed = run(
+        "git", "-C", clone, "log", "--patch", "--no-renames", "--no-merges", f"{oldest}..origin/HEAD", "--", *sorted(paths)
+    )
+    return landed_among(diffs, patch_ids(labelled(diffs)), patch_ids(landed))
+
+
+def standing(clone: Path) -> tuple[Branch, ...]:
+    """CLONE's deletable branches, each with where it stands: all but its default branch and its own checkout."""
+    upstreams = parse_upstreams(
+        git(clone, "for-each-ref", "refs/heads", "--format=%(refname:short)%00%(upstream)%00%(upstream:track)")
+    )
+    merged = set(git(clone, "branch", "--merged", "origin/HEAD", "--format=%(refname:short)").splitlines())
+    default = git(clone, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").removeprefix("origin/")
+    checkouts = parse_checkouts(git(clone, "worktree", "list", "--porcelain"))
+    names = sorted(name for name in upstreams if name not in (default, checkouts.in_clone))
+    changed = {
+        name
+        for name in names
+        if (worktree := checkouts.in_worktrees.get(name)) is not None and git(worktree, "status", "--porcelain")
+    }
+    # Only worth reading what landed when the upstream is gone and nothing else has told.
+    could_be_squashed = [
+        name
+        for name in names
+        if upstreams[name][0] and upstreams[name][1] == "[gone]" and name not in merged and name not in changed
+    ]
+    landed = squashed(clone, could_be_squashed)
+    return tuple(
+        Branch(
+            clone=clone,
+            name=name,
+            status=classify(
+                has_changes=name in changed,
+                upstream=upstreams[name][0],
+                track=upstreams[name][1],
+                is_merged=name in merged,
+                is_squashed=name in landed,
+            ),
+            worktree=checkouts.in_worktrees.get(name),
+        )
+        for name in names
+    )
+
+
+def contains(query: str, name: str) -> bool:
+    """Whether NAME contains QUERY, ignoring case."""
+    return query.casefold() in name.casefold()
+
+
+@dataclass(frozen=True, slots=True)
+class Heading:
+    """A row naming the clone below it, which the highlight skips."""
+
+    title: str
+
+
+type Row = Heading | Branch
+
+
+def rows_for(groups: tuple[Group, ...], query: str) -> tuple[Row, ...]:
+    """The branches whose name contains QUERY, under the heading of each clone that has any."""
+    rows: list[Row] = []
+    for group in groups:
+        if matched := [branch for branch in group.branches if contains(query, branch.name)]:
+            rows += [Heading(group.title), *matched]
+    return tuple(rows)
+
+
+def choices(rows: tuple[Row, ...]) -> tuple[Branch, ...]:
+    """The rows the highlight can land on."""
+    return tuple(row for row in rows if isinstance(row, Branch))
+
+
+@dataclass(frozen=True, slots=True)
+class Marking:
+    """The query, the highlighted branch counting branches only, and the branches marked for deleting."""
+
+    query: str
+    highlighted: int
+    marked: frozenset[Branch]
+
+    def edited(self, query: str) -> Marking:
+        """A changed query highlights its first match, since the old index points into a different list."""
+        return self if query == self.query else replace(self, query=query, highlighted=0)
+
+    def moved(self, by: int, choice_count: int) -> Marking:
+        """The highlight moved BY branches, wrapping at either end."""
+        return replace(self, highlighted=(self.highlighted + by) % choice_count) if choice_count else self
+
+
+@dataclass(frozen=True, slots=True)
+class Finished:
+    """The picker is done, having chosen CHOSEN, which is empty if it was left."""
+
+    chosen: tuple[Branch, ...]
+
+
+type Picking = Marking | Finished
+
+
+def opening(groups: tuple[Group, ...]) -> Marking:
+    """An empty query, with every merged and every squash-merged branch marked."""
+    marked = frozenset(branch for group in groups for branch in group.branches if branch.status in PREMARKED)
+    return Marking(query="", highlighted=0, marked=marked)
+
+
+def step(picking: Picking, event: InputEvent, groups: tuple[Group, ...]) -> Picking:
+    """
+    The picker after one more key press or paste.
+
+    Every input goes through here, applied to the latest state, so keys typed faster than the screen redraws
+    (type-ahead while the clones are read, say) land as if each had been seen.
+    """
+    if isinstance(picking, Finished):
+        return picking
+    shown = choices(rows_for(groups, picking.query))
+    match event:
+        case KeyPressed(key=key) if key in LEAVE_KEYS:
+            return Finished(chosen=())
+        case KeyPressed(key=Key.Space) if shown:
+            branch = shown[picking.highlighted]
+            return replace(picking, marked=picking.marked ^ {branch}) if branch.is_markable else picking
+        # Enter typed ahead, before the terminal goes raw, has had its \r turned into \n (Ctrl+J) by the tty.
+        case KeyPressed(key=Key.Enter | Key.ControlJ):
+            if not picking.marked:
+                return picking
+            listed = (branch for group in groups for branch in group.branches)
+            return Finished(chosen=tuple(branch for branch in listed if branch in picking.marked))
+        case KeyPressed(key=key) if key in DOWN_KEYS:
+            return picking.moved(1, len(shown))
+        case KeyPressed(key=key) if key in UP_KEYS:
+            return picking.moved(-1, len(shown))
+        case KeyPressed(key=Key.Backspace):
+            return picking.edited(picking.query[:-1])
+        case KeyPressed(key=Key.ControlU):
+            return picking.edited("")
+        # Text is one character; every named key is longer ("enter", "alt+b"), so length tells them apart.
+        case KeyPressed(key=key) if len(key) == 1 and key.isprintable():
+            return picking.edited(picking.query + key)
+        case Pasted(text=text):
+            return picking.edited(picking.query + "".join(c for c in text if c.isprintable()))
+        case _:
+            return picking
+
+
+@component
+def branch_picker(groups: tuple[Group, ...], choose: Callable[[tuple[Branch, ...]], None]) -> Div:
+    picking, set_picking = use_state(lambda: opening(groups))
+    send_control = use_controls()
+
+    async def finish() -> None:
+        if not isinstance(picking, Finished):
+            return
+        choose(picking.chosen)
+        send_control(Quit())
+
+    use_effect(finish, deps=(picking,))
+
+    def on_input(event: InputEvent, _: Receiver) -> InputResponse:
+        if not isinstance(event, KeyPressed | Pasted):
+            return None
+        set_picking(lambda latest: step(latest, event, groups))
+        return ()
+
+    match picking:
+        case Finished():
+            return Div(style=full)
+        case Marking(query=query, highlighted=index, marked=marked):
+            rows = rows_for(groups, query)
+        case _ as unreachable:
+            assert_never(unreachable)
+    shown = choices(rows)
+    highlighted = shown[index] if shown else None
+
+    def row_text(row: Row) -> Text:
+        match row:
+            case Heading(title=heading):
+                return Text(content=heading, style=text_wrap_none | text_bold | text_color("slate", 400))
+            case Branch() as branch:
+                if not branch.is_markable:
+                    box, color = " - ", text_color("slate", 500)
+                else:
+                    box, color = "[x]" if branch in marked else "[ ]", text_color("slate", 300)
+                if branch is highlighted:
+                    color = text_bold | text_color("amber", 300)
+                where = ", worktree" if branch.worktree is not None and branch.status is not Status.CHANGED else ""
+                return Text(content=f"  {box} {branch.name}  ({branch.status}{where})", style=text_wrap_none | color)
+            case _ as unreachable:
+                assert_never(unreachable)
+
+    return Div(
+        style=full | col | border | border_lightrounded | border_color("slate", 500) | pad_x(1),
+        on_input=on_input,
+        children=(
+            Text(
+                content=f"branches to delete: {len(marked)} marked; Space marks, Enter deletes",
+                style=text_wrap_none | text_color("slate", 400),
+            ),
+            Div(
+                style=row | overflow_x_scroll | stick_to_end_x,
+                children=(
+                    Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
+                    Text(content=query, style=text_wrap_none),
+                    Text(content=" ", style=text_wrap_none | text_bg("sky", 300)),
+                ),
+            ),
+            Div(
+                style=col | fill(1) | overflow_y_scroll,
+                children=tuple(row_text(row) for row in rows)
+                or (Text(content="nothing matches", style=text_color("slate", 400)),),
+            ),
+        ),
+    )
+
+
+async def pick(groups: tuple[Group, ...], **app_options: object) -> tuple[Branch, ...]:
+    """Run the picker until it quits, and return the branches it chose, in listed order."""
+    chosen: list[tuple[Branch, ...]] = []
+    await app(branch_picker(groups, chosen.append), **app_options)
+    return chosen[-1] if chosen else ()
+
+
+def delete(chosen: tuple[Branch, ...]) -> int:
+    """
+    Delete the branches with no worktree, then hand the rest to `wt done`, returning the worst exit status.
+
+    `wt done` goes last because closing the tab this runs in ends it, and it keeps its own tabs in order.
+    """
+    status = 0
+    for branch in chosen:
+        if branch.worktree is not None:
+            continue
+        result = subprocess.run(["git", "-C", str(branch.clone), "branch", "--quiet", "-D", branch.name])
+        if result.returncode == 0:
+            print(f"deleted branch {branch.name}")
+        status = max(status, result.returncode)
+    if worktrees := [str(branch.worktree) for branch in chosen if branch.worktree is not None]:
+        status = max(status, subprocess.run(["wt", "done", "--delete-unmerged", *worktrees]).returncode)
+    return status
+
+
+def _selftest() -> int:
+    from functools import reduce
+
+    from counterweight.autopilot import typed
+
+    dotfiles, service = Path("/p/dotfiles"), Path("/w/service")
+    squashed = Branch(clone=dotfiles, name="landed", status=Status.SQUASHED, worktree=Path("/p/dotfiles.worktrees/landed"))
+    unpushed = Branch(clone=dotfiles, name="fresh", status=Status.UNPUSHED, worktree=None)
+    changed = Branch(clone=dotfiles, name="busy", status=Status.CHANGED, worktree=Path("/p/dotfiles.worktrees/busy"))
+    merged = Branch(clone=service, name="old", status=Status.MERGED, worktree=None)
+    closed = Branch(clone=service, name="closed", status=Status.GONE, worktree=None)
+    groups = (
+        Group(title="~/projects/dotfiles", branches=(squashed, unpushed, changed)),
+        Group(title="~/work/service", branches=(merged, closed)),
+    )
+    enter, escape, space = KeyPressed(key=Key.Enter), KeyPressed(key=Key.Escape), KeyPressed(key=Key.Space)
+    down = KeyPressed(key=Key.Down)
+    diffs = {"one": "diff 1\n", "two": "diff 2\n", "three": ""}
+    porcelain = (
+        "worktree /p/dotfiles\nHEAD 1\nbranch refs/heads/main\n\n"
+        "worktree /p/dotfiles.worktrees/feat/x\nHEAD 2\nbranch refs/heads/feat/x\n\n"
+        "worktree /p/dotfiles.worktrees/detached\nHEAD 3\ndetached\n"
+    )
+
+    def marked(*events: InputEvent) -> Picking:
+        return reduce(lambda picking, event: step(picking, event, groups), events, opening(groups))
+
+    def standing_of(**overrides: object) -> Status:
+        facts = {"has_changes": False, "upstream": "u", "track": "", "is_merged": False, "is_squashed": False}
+        return classify(**(facts | overrides))
+
+    cases: list[tuple[str, bool]] = [
+        (
+            "for-each-ref output parses into each branch's upstream and track, stripped as `git` strips it",
+            parse_upstreams("a\0refs/remotes/origin/a\0[gone]\nc\0refs/remotes/origin/c\0[ahead 1]\nb\0\0".strip())
+            == {"a": ("refs/remotes/origin/a", "[gone]"), "b": ("", ""), "c": ("refs/remotes/origin/c", "[ahead 1]")},
+        ),
+        (
+            "worktree list parses into the clone's branch and each linked worktree's, skipping a detached one",
+            parse_checkouts(porcelain) == Checkouts(in_clone="main", in_worktrees={"feat/x": Path("/p/dotfiles.worktrees/feat/x")}),
+        ),
+        ("a clone with a detached HEAD has no branch of its own", parse_checkouts("worktree /p/x\nHEAD 1\ndetached\n").in_clone is None),
+        ("changes outrank everything", standing_of(has_changes=True, track="[gone]", is_merged=True) is Status.CHANGED),
+        ("a branch with no upstream is unpushed even when merged", standing_of(upstream="", is_merged=True) is Status.UNPUSHED),
+        ("a merged branch whose upstream is gone is merged", standing_of(track="[gone]", is_merged=True) is Status.MERGED),
+        ("a gone upstream whose patch landed is squash-merged", standing_of(track="[gone]", is_squashed=True) is Status.SQUASHED),
+        ("a gone upstream whose patch did not land is gone", standing_of(track="[gone]") is Status.GONE),
+        ("an unmerged branch with its upstream is unmerged", standing_of(track="[behind 2]") is Status.UNMERGED),
+        (
+            "diffs are labelled for patch-id in order, each behind its own commit header",
+            labelled({"a": "diff a\n", "b": "diff b\n"}) == f"commit {0:040x}\ndiff a\ncommit {1:040x}\ndiff b\n",
+        ),
+        (
+            "a branch is landed when its diff's patch-id is a landed commit's",
+            landed_among(diffs, f"p1 {0:040x}\np2 {1:040x}\n", "p9 c0ffee\np2 beef\n") == {"two"},
+        ),
+        ("a branch whose diff patch-id printed nothing for is never landed", "three" not in landed_among(diffs, f"p1 {0:040x}\n", "p1 beef\n")),
+        ("nothing landed means no branch is landed", landed_among(diffs, f"p1 {0:040x}\np2 {1:040x}\n", "") == frozenset()),
+        ("opening marks the merged and the squash-merged, and nothing else", opening(groups).marked == {squashed, merged}),
+        ("Enter straight away deletes the premarked, in listed order", marked(enter) == Finished(chosen=(squashed, merged))),
+        ("Space unmarks a marked branch", marked(space, enter) == Finished(chosen=(merged,))),
+        ("Space marks an unmarked branch", marked(down, space, enter) == Finished(chosen=(squashed, unpushed, merged))),
+        ("a branch whose worktree has changes cannot be marked", marked(down, down, space, enter) == Finished(chosen=(squashed, merged))),
+        ("Space never narrows the query", marked(space).query == ""),
+        ("Down skips the heading between clones", marked(down, down, down, space, enter) == Finished(chosen=(squashed,))),
+        ("Up from the top wraps to the last", marked(KeyPressed(key=Key.Up), space, enter) == Finished(chosen=(squashed, merged, closed))),
+        ("marks the query hides are still deleted", marked(*typed("old"), space, enter) == Finished(chosen=(squashed,))),
+        ("Enter with nothing marked stays put", isinstance(marked(space, *typed("old"), space, enter), Marking)),
+        ("Escape leaves with nothing chosen", marked(escape, enter) == Finished(chosen=())),
+    ]
+
+    def picked(*steps: object) -> tuple[Branch, ...]:
+        return asyncio.run(
+            asyncio.wait_for(
+                pick(groups, title="git-manage", headless=True, dimensions=(70, 12), autopilot=[*steps, Quit()]),
+                timeout=timedelta(seconds=30).total_seconds(),
+            )
+        )
+
+    cases += [
+        ("the app hands back what was marked", picked(space, enter) == (merged,)),
+        ("the app hands back nothing when left", picked(escape) == ()),
+    ]
+
+    failures = [name for name, passed in cases if not passed]
+    for name in failures:
+        print(f"FAIL: {name}", file=sys.stderr)
+    print(f"git-manage: {len(cases) - len(failures)}/{len(cases)} passed")
+    return 1 if failures else 0
+
+
+def main() -> int:
+    if os.environ.get("CLAUDE_HOOK_SELFTEST"):
+        return _selftest()
+
+    groups = tuple(
+        Group(title=f"~/{root.name}/{clone.name}", branches=standing(clone))
+        for root in CLONE_ROOTS
+        for clone in discover_clones(root)
+    )
+    groups = tuple(group for group in groups if group.branches)
+    if not groups:
+        print("no branches to clean up")
+        return 0
+    return delete(asyncio.run(pick(groups, title="git-manage")))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

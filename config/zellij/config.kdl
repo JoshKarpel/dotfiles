@@ -130,5 +130,17 @@ keybinds {
             }
             SwitchToMode "normal"
         }
+
+        // Branch cleanup, git-manage, for the same reasons as the worktree
+        // picker. Tearing down the worktree of this tab closes the tab, picker
+        // and all, which is why `wt done` closes it after every other.
+        bind "Alt D" {
+            Run "bash" "-c" "git-manage || read -rsn1 -p 'git-manage failed; press any key to close'" {
+                in_place true
+                close_on_exit true
+                name "git-manage"
+            }
+            SwitchToMode "normal"
+        }
     }
 }
