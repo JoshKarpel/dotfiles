@@ -1,0 +1,314 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.15"
+# dependencies = ["counterweight>=0.1.1"]
+# ///
+"""
+Pick a tab of the current zellij session by name and go to it.
+
+Bound to a key in `config/zellij/config.kdl`, which runs it in place of the focused pane.
+Type to narrow the tabs to those whose name contains the text, ignoring case, then Enter to go to the highlighted one.
+Up, Down, Tab, Shift+Tab, Ctrl+N, Ctrl+P and Ctrl+K move the highlight, Backspace deletes a character and Ctrl+U
+the whole query, a digit goes straight to that tab number, so digits never narrow, and Escape or Ctrl+C leaves
+without moving.
+
+The tabs are read once, when it starts, rather than followed as they change:
+following them is what made room reset the highlight whenever any tab updated (rvcas/room#28).
+"""
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests (`_selftest`).
+# This marker line is how `claude-hook-selftests` discovers participating scripts.
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import subprocess
+import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from dataclasses import replace
+from datetime import timedelta
+from typing import assert_never
+
+from counterweight import app
+from counterweight.components import component
+from counterweight.controls import Quit
+from counterweight.elements import Div
+from counterweight.elements import Text
+from counterweight.events import InputEvent
+from counterweight.events import InputResponse
+from counterweight.events import KeyPressed
+from counterweight.events import Pasted
+from counterweight.events import Receiver
+from counterweight.hooks import use_controls
+from counterweight.hooks import use_effect
+from counterweight.hooks import use_state
+from counterweight.keys import Key
+from counterweight.styles import Style
+from counterweight.styles.utilities import *
+
+DOWN_KEYS = frozenset({Key.Down, Key.Tab, Key.ControlN})
+UP_KEYS = frozenset({Key.Up, Key.BackTab, Key.ControlP, Key.ControlK})
+LEAVE_KEYS = frozenset({Key.Escape, Key.ControlC})
+
+
+@dataclass(frozen=True, slots=True)
+class Tab:
+    """One tab of the session, as `zellij action list-tabs --json` reports it."""
+
+    id: int
+    position: int
+    name: str
+    is_active: bool
+
+    @property
+    def number(self) -> int:
+        """The tab's number in the tab bar, which counts from 1 where `position` counts from 0."""
+        return self.position + 1
+
+
+def parse_tabs(listing: str) -> tuple[Tab, ...]:
+    """The tabs in `list-tabs --json` output, in tab bar order; a missing field raises rather than defaulting."""
+    tabs = (
+        Tab(id=tab["tab_id"], position=tab["position"], name=tab["name"], is_active=tab["active"])
+        for tab in json.loads(listing)
+    )
+    return tuple(sorted(tabs, key=lambda tab: tab.position))
+
+
+def matching(query: str, tabs: tuple[Tab, ...]) -> tuple[Tab, ...]:
+    """The tabs whose name contains `query`, ignoring case, in tab bar order."""
+    folded = query.casefold()
+    return tuple(tab for tab in tabs if folded in tab.name.casefold())
+
+
+def numbered(key: str, tabs: tuple[Tab, ...]) -> Tab | None:
+    """The tab a digit key names by its number, whatever the query has narrowed the list to."""
+    return next((tab for tab in tabs if str(tab.number) == key), None)
+
+
+@dataclass(frozen=True, slots=True)
+class Search:
+    """The query and which of the tabs it matches is highlighted."""
+
+    query: str
+    highlighted: int
+
+    def edited(self, query: str) -> Search:
+        """A changed query highlights its first match, since the old index points into a different list."""
+        return self if query == self.query else Search(query=query, highlighted=0)
+
+    def moved(self, by: int, match_count: int) -> Search:
+        """The highlight moved `by` rows, wrapping at either end."""
+        return replace(self, highlighted=(self.highlighted + by) % match_count) if match_count else self
+
+
+@dataclass(frozen=True, slots=True)
+class Finished:
+    """The picker is done, having chosen `tab`, or nothing if it was left."""
+
+    tab: Tab | None
+
+
+type Picking = Search | Finished
+
+
+def opening(tabs: tuple[Tab, ...]) -> Search:
+    """An empty query, highlighting the active tab, so Enter straight away stays put."""
+    return Search(query="", highlighted=next((index for index, tab in enumerate(tabs) if tab.is_active), 0))
+
+
+def step(picking: Picking, event: InputEvent, tabs: tuple[Tab, ...]) -> Picking:
+    """
+    The picker after one more key press or paste.
+
+    Every input goes through here, applied to the latest state, so keys typed faster than the screen redraws
+    (type-ahead while the picker starts, say) land as if each had been seen.
+    """
+    if isinstance(picking, Finished):
+        return picking
+    shown = matching(picking.query, tabs)
+    match event:
+        case KeyPressed(key=key) if key in LEAVE_KEYS:
+            return Finished(tab=None)
+        # Enter typed ahead, before the terminal goes raw, has had its \r turned into \n (Ctrl+J) by the tty.
+        case KeyPressed(key=Key.Enter | Key.ControlJ) if shown:
+            return Finished(tab=shown[picking.highlighted])
+        case KeyPressed(key=key) if key in DOWN_KEYS:
+            return picking.moved(1, len(shown))
+        case KeyPressed(key=key) if key in UP_KEYS:
+            return picking.moved(-1, len(shown))
+        case KeyPressed(key=key) if key.isdigit():
+            return Finished(tab=tab) if (tab := numbered(key, tabs)) else picking
+        case KeyPressed(key=Key.Backspace):
+            return picking.edited(picking.query[:-1])
+        case KeyPressed(key=Key.ControlU):
+            return picking.edited("")
+        # Text is one character; every named key is longer ("enter", "alt+b"), so length tells them apart.
+        case KeyPressed(key=key) if len(key) == 1 and key.isprintable():
+            return picking.edited(picking.query + key)
+        case Pasted(text=text):
+            return picking.edited(picking.query + "".join(c for c in text if c.isprintable() and not c.isdigit()))
+        case _:
+            return picking
+
+
+@component
+def tab_picker(tabs: tuple[Tab, ...], choose: Callable[[Tab], None]) -> Div:
+    picking, set_picking = use_state(lambda: opening(tabs))
+    send_control = use_controls()
+
+    async def finish() -> None:
+        if not isinstance(picking, Finished):
+            return
+        if picking.tab is not None:
+            choose(picking.tab)
+        send_control(Quit())
+
+    use_effect(finish, deps=(picking,))
+
+    def on_input(event: InputEvent, _: Receiver) -> InputResponse:
+        if not isinstance(event, KeyPressed | Pasted):
+            return None
+        set_picking(lambda latest: step(latest, event, tabs))
+        return ()
+
+    match picking:
+        case Finished():
+            return Div(style=full)
+        case Search(query=query, highlighted=highlighted):
+            shown = matching(query, tabs)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+    def tab_row(index: int, tab: Tab) -> Text:
+        return Text(
+            content=f"{tab.number:>2}  {tab.name}",
+            style=text_wrap_none
+            | (text_underline if tab.is_active else Style())
+            | (text_color("amber", 300) | text_bold if index == highlighted else text_color("slate", 300)),
+        )
+
+    return Div(
+        style=full | col | border | border_lightrounded | border_color("slate", 500) | pad_x(1),
+        on_input=on_input,
+        children=(
+            Div(
+                style=row | overflow_x_scroll | stick_to_end_x,
+                children=(
+                    Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
+                    Text(content=query, style=text_wrap_none),
+                    Text(content=" ", style=text_wrap_none | text_bg("sky", 300)),
+                ),
+            ),
+            Div(
+                style=col | fill(1) | overflow_y_scroll,
+                children=tuple(tab_row(index, tab) for index, tab in enumerate(shown))
+                or (Text(content="no tab matches", style=text_color("slate", 400)),),
+            ),
+        ),
+    )
+
+
+async def pick(tabs: tuple[Tab, ...], **app_options: object) -> Tab | None:
+    """Run the picker until it quits, and return the tab chosen, if any."""
+    chosen: list[Tab] = []
+    await app(tab_picker(tabs, chosen.append), **app_options)
+    return chosen[-1] if chosen else None
+
+
+def _selftest() -> int:
+    from functools import reduce
+
+    from counterweight.autopilot import typed
+
+    tabs = (
+        Tab(id=7, position=0, name="● dotfiles", is_active=False),
+        Tab(id=3, position=1, name="whats-new", is_active=True),
+        Tab(id=12, position=2, name="Dotfiles:wt", is_active=False),
+    )
+    enter = KeyPressed(key=Key.Enter)
+
+    def stepped(*events: InputEvent) -> Picking:
+        return reduce(lambda picking, event: step(picking, event, tabs), events, opening(tabs))
+
+    cases: list[tuple[str, bool]] = [
+        (
+            "list-tabs output parses into tab bar order",
+            parse_tabs(
+                '[{"tab_id": 12, "position": 2, "name": "c", "active": false, "x": 1},'
+                ' {"tab_id": 7, "position": 0, "name": "a", "active": true}]'
+            )
+            == (Tab(id=7, position=0, name="a", is_active=True), Tab(id=12, position=2, name="c", is_active=False)),
+        ),
+        ("matching ignores case", matching("DOT", tabs) == (tabs[0], tabs[2])),
+        ("matching is a substring, not a subsequence", matching("dw", tabs) == ()),
+        ("an empty query matches every tab", matching("", tabs) == tabs),
+        ("a digit past the last tab names none", numbered("9", tabs) is None),
+        ("opening highlights the active tab", opening(tabs).highlighted == 1),
+        ("an unchanged query keeps its highlight", Search("d", 2).edited("d") == Search("d", 2)),
+        ("moving with nothing matched stays put", Search("zz", 0).moved(1, 0) == Search("zz", 0)),
+        ("Enter straight away chooses the active tab", stepped(enter) == Finished(tab=tabs[1])),
+        ("typing narrows, then Enter chooses the first match", stepped(*typed("wt"), enter) == Finished(tab=tabs[2])),
+        ("Down then Enter chooses the next tab", stepped(KeyPressed(key=Key.Down), enter) == Finished(tab=tabs[2])),
+        (
+            "Up from the top wraps to the last tab",
+            stepped(*typed("dot"), KeyPressed(key=Key.Up), enter) == Finished(tab=tabs[2]),
+        ),
+        ("a digit jumps without Enter", stepped(KeyPressed(key="1")) == Finished(tab=tabs[0])),
+        ("a digit past the last tab does not narrow the query", stepped(KeyPressed(key="9"), enter) == Finished(tab=tabs[1])),
+        ("Escape leaves without choosing", stepped(KeyPressed(key=Key.Escape), enter) == Finished(tab=None)),
+        ("Enter with nothing matched stays put", stepped(*typed("zz"), enter) == Search("zz", 0)),
+        ("Backspace deletes the last character", stepped(*typed("wtx"), KeyPressed(key=Key.Backspace), enter) == Finished(tab=tabs[2])),
+        ("Ctrl+U clears the query", stepped(*typed("zz"), KeyPressed(key=Key.ControlU), enter) == Finished(tab=tabs[0])),
+        ("a paste narrows by its text", stepped(Pasted(text=":wt\n"), enter) == Finished(tab=tabs[2])),
+    ]
+
+    def picked(*steps: object) -> Tab | None:
+        return asyncio.run(
+            asyncio.wait_for(
+                pick(tabs, headless=True, dimensions=(40, 10), autopilot=[*steps, Quit()]),
+                timeout=timedelta(seconds=30).total_seconds(),
+            )
+        )
+
+    cases += [
+        ("the app hands back the tab chosen", picked(*typed("wt"), enter) == tabs[2]),
+        ("the app hands back nothing when left", picked(KeyPressed(key=Key.Escape)) is None),
+    ]
+
+    failures = [name for name, passed in cases if not passed]
+    for name in failures:
+        print(f"FAIL: {name}", file=sys.stderr)
+    print(f"zellij-pick-tab: {len(cases) - len(failures)}/{len(cases)} passed")
+    return 1 if failures else 0
+
+
+def list_tabs(attempts: int = 3) -> str:
+    """
+    `list-tabs --json` output, asking again when it comes back empty.
+
+    `list-tabs` can exit 0 having printed nothing: the CLI client stops waiting at whichever of the server's unblock
+    and its output arrives first, so the output can lose. That race is transient, so asking again is the remedy.
+    """
+    for _ in range(attempts):
+        listing = subprocess.run(["zellij", "action", "list-tabs", "--json"], check=True, capture_output=True, text=True)
+        if listing.stdout.strip():
+            return listing.stdout
+    raise SystemExit(f"zellij-pick-tab: zellij listed no tabs after {attempts} attempts")
+
+
+def main() -> int:
+    if os.environ.get("CLAUDE_HOOK_SELFTEST"):
+        return _selftest()
+
+    tab = asyncio.run(pick(parse_tabs(list_tabs()), title="tabs"))
+    if tab is not None:
+        subprocess.run(["zellij", "action", "go-to-tab-by-id", str(tab.id)], check=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

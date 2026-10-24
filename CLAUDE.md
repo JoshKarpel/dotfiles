@@ -373,8 +373,10 @@ zellij-web-font "FiraCode Nerd Font" "Fira Code"
 
 # One git worktree per zellij tab, each running its own agent: `wt new` opens a
 # branch in <repo>.worktrees/<branch> beside the clone, in a tab of its own, and
-# `wt done` removes the worktree and closes its tab. The claude-tab-status
-# hook marks each tab working (●), waiting on you (?), or finished (✓).
+# `wt done` removes the worktree and closes its tab. `wt` alone (Alt+Shift+t in
+# zellij) picks the clone, from ~/projects and ~/work, and the worktree or new
+# branch instead of taking them as arguments. The claude-tab-status hook marks
+# each tab working (●), waiting on you (?), or finished (✓).
 # Run with --help for subcommands and flags.
 wt --help
 
@@ -464,7 +466,10 @@ caller. Anything executable in `bin/` that declares the marker is run.
   blocking on the repo root, on `.`, and from a subdirectory, while allowing a
   different repo. `claude-uv-check` uses the same sandbox, `touch`-ing a `uv.lock`
   in one repo and not the other so the fixture covers both the "not a uv project"
-  and "python invoked directly" branches.
+  and "python invoked directly" branches. Run from a `git commit` hook, git's own
+  `GIT_DIR` and `GIT_INDEX_FILE` would point every sandbox back at this clone,
+  so `claude-hook-selftests` clears them before running anything; a self-test
+  reached only through it needs no guard of its own.
 - The installed environment is ambient state too, and CI has none of it: no `dotfiles/bin`
   on PATH and no gitconfig, so a hook that calls a sibling script by name reaches nothing
   and its guard clause passes every case. A hook that shells out to `bin/` prepends its own

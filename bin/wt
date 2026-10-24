@@ -1,22 +1,52 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
-# requires-python = ">=3.11"
-# dependencies = ["typer"]
+# requires-python = ">=3.15"
+# dependencies = ["counterweight>=0.1.1", "typer"]
 # ///
-"""One git worktree per zellij tab, each tab running its own agent."""
+"""One git worktree per zellij tab, each tab running its own agent.
+
+Run with no command to pick a clone and a branch instead of typing them.
+"""
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests (`_selftest`).
+# This marker line is how `claude-hook-selftests` discovers participating scripts.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
+from collections.abc import Mapping
+from dataclasses import dataclass
+from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, assert_never
 
 import typer
+from counterweight import app as counterweight_app
+from counterweight.components import component
+from counterweight.controls import Quit
+from counterweight.elements import Div
+from counterweight.elements import Text
+from counterweight.events import InputEvent
+from counterweight.events import InputResponse
+from counterweight.events import KeyPressed
+from counterweight.events import Pasted
+from counterweight.events import Receiver
+from counterweight.hooks import use_controls
+from counterweight.hooks import use_effect
+from counterweight.hooks import use_state
+from counterweight.keys import Key
+from counterweight.styles.utilities import *
 
-app = typer.Typer(no_args_is_help=True, help=__doc__)
+app = typer.Typer(help=__doc__)
+
+# Where clones are looked for, each listed under its own heading. sync-branches keeps the same pair.
+CLONE_ROOTS = (Path.home() / "projects", Path.home() / "work")
 
 
 def worktrees_root(clone: Path) -> Path:
@@ -207,5 +237,437 @@ def list_tabs(attempts: int = 3) -> list[dict[str, Any]] | None:
     return None
 
 
+@app.callback(invoke_without_command=True)
+def pick(context: typer.Context) -> None:
+    """With no command, pick a clone, then one of its worktrees or a new branch, and open it as `new` does.
+
+    Typing narrows each list to the names containing the text, ignoring case, and Enter takes the
+    highlighted one. Up, Down, Tab, Shift+Tab, Ctrl+N, Ctrl+P and Ctrl+K move the highlight, Backspace
+    deletes a character and Ctrl+U the whole query. Escape goes back from the branches to the clones,
+    and leaves from the clones; Ctrl+C leaves from either.
+    """
+    if context.invoked_subcommand is not None:
+        return
+    if not os.environ.get("ZELLIJ"):
+        raise fail("not inside a zellij session")
+
+    sections = tuple(Section(title=f"~/{root.name}", clones=discover_clones(root)) for root in CLONE_ROOTS)
+    # Read up front, all of them, so stepping the picker never waits on git; it takes milliseconds.
+    branches = {clone: worktree_branches(clone) for section in sections for clone in section.clones}
+    opening = asyncio.run(choose_opening(sections, branches, title="wt"))
+    if opening is None:
+        return
+    typer.echo(f"opening {tab_name(opening.clone, opening.branch)}")
+    new(opening.clone, opening.branch)
+
+
+def discover_clones(root: Path) -> tuple[Path, ...]:
+    """The clones directly under ROOT, by the rule sync-branches uses: a `.git` that is a directory.
+
+    That excludes linked worktrees, whose `.git` is a file, and <repo>.worktrees/, which has none.
+    A ROOT that does not exist has no clones, since not every machine has both.
+    """
+    if not root.is_dir():
+        return ()
+    return tuple(sorted(path for path in root.iterdir() if (path / ".git").is_dir()))
+
+
+def parse_worktree_branches(porcelain: str, clone: Path) -> tuple[str, ...]:
+    """The branches of the worktrees `new` made for CLONE, from `git worktree list --porcelain`.
+
+    Only a worktree at <repo>.worktrees/<branch> counts, since `new` would put the branch anywhere
+    else and fail. CLONE has to be the path git reports, symlinks resolved, for that to match.
+    """
+    root = worktrees_root(clone)
+    branches = []
+    for record in porcelain.strip().split("\n\n"):
+        fields = dict(line.partition(" ")[::2] for line in record.splitlines())
+        # A detached worktree has no branch line, and is nothing `new` can open by name.
+        branch = fields.get("branch", "").removeprefix("refs/heads/")
+        if branch and Path(fields["worktree"]) == root / branch:
+            branches.append(branch)
+    return tuple(sorted(branches))
+
+
+def worktree_branches(clone: Path) -> tuple[str, ...]:
+    """The branches of CLONE's worktrees that `new` can reopen."""
+    return parse_worktree_branches(git(clone, "worktree", "list", "--porcelain"), clone.resolve())
+
+
+@dataclass(frozen=True, slots=True)
+class Section:
+    """The clones under one root, listed under its heading."""
+
+    title: str
+    clones: tuple[Path, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Opening:
+    """What the picker chose: the arguments to `new`."""
+
+    clone: Path
+    branch: str
+
+
+@dataclass(frozen=True, slots=True)
+class Heading:
+    """A row naming the section below it, which the highlight skips."""
+
+    title: str
+
+
+@dataclass(frozen=True, slots=True)
+class Option[T]:
+    """A row the highlight can land on, choosing VALUE."""
+
+    label: str
+    value: T
+
+
+type Row[T] = Heading | Option[T]
+
+
+def contains(query: str, name: str) -> bool:
+    """Whether NAME contains QUERY, ignoring case."""
+    return query.casefold() in name.casefold()
+
+
+def clone_rows(sections: tuple[Section, ...], query: str) -> tuple[Row[Path], ...]:
+    """The clones whose name contains QUERY, under the heading of each section that has any."""
+    rows: list[Row[Path]] = []
+    for section in sections:
+        if matched := [clone for clone in section.clones if contains(query, clone.name)]:
+            rows += [Heading(section.title), *(Option(clone.name, clone) for clone in matched)]
+    return tuple(rows)
+
+
+def branch_rows(branches: tuple[str, ...], query: str) -> tuple[Row[str], ...]:
+    """The worktree branches containing QUERY, then QUERY as a new branch unless it names one of them."""
+    rows: list[Row[str]] = [Option(branch, branch) for branch in branches if contains(query, branch)]
+    if (name := query.strip()) and name not in branches:
+        rows.append(Option(f"+ new branch {name}", name))
+    return tuple(rows)
+
+
+def options[T](rows: tuple[Row[T], ...]) -> tuple[Option[T], ...]:
+    """The rows the highlight can land on."""
+    return tuple(row for row in rows if isinstance(row, Option))
+
+
+@dataclass(frozen=True, slots=True)
+class Search:
+    """A menu's query and which of its options is highlighted, counting options only."""
+
+    query: str
+    highlighted: int
+
+    def edited(self, query: str) -> Search:
+        """A changed query highlights its first option, since the old index points into a different list."""
+        return self if query == self.query else Search(query=query, highlighted=0)
+
+    def moved(self, by: int, option_count: int) -> Search:
+        """The highlight moved BY options, wrapping at either end."""
+        return replace(self, highlighted=(self.highlighted + by) % option_count) if option_count else self
+
+
+EMPTY_SEARCH = Search(query="", highlighted=0)
+
+
+@dataclass(frozen=True, slots=True)
+class Chosen[T]:
+    """A menu's answer to Enter on an option."""
+
+    value: T
+
+
+@dataclass(frozen=True, slots=True)
+class Back:
+    """A menu's answer to Escape."""
+
+
+DOWN_KEYS = frozenset({Key.Down, Key.Tab, Key.ControlN})
+UP_KEYS = frozenset({Key.Up, Key.BackTab, Key.ControlP, Key.ControlK})
+
+
+def navigate[T](search: Search, rows: tuple[Row[T], ...], event: InputEvent) -> Search | Chosen[T] | Back:
+    """What one key press or paste does to a menu showing ROWS for SEARCH's query."""
+    choices = options(rows)
+    match event:
+        case KeyPressed(key=Key.Escape):
+            return Back()
+        # Enter typed ahead, before the terminal goes raw, has had its \r turned into \n (Ctrl+J) by the tty.
+        case KeyPressed(key=Key.Enter | Key.ControlJ) if choices:
+            return Chosen(choices[search.highlighted].value)
+        case KeyPressed(key=key) if key in DOWN_KEYS:
+            return search.moved(1, len(choices))
+        case KeyPressed(key=key) if key in UP_KEYS:
+            return search.moved(-1, len(choices))
+        case KeyPressed(key=Key.Backspace):
+            return search.edited(search.query[:-1])
+        case KeyPressed(key=Key.ControlU):
+            return search.edited("")
+        # Text is one character; every named key is longer ("enter", "alt+b"), so length tells them apart.
+        case KeyPressed(key=key) if len(key) == 1 and key.isprintable():
+            return search.edited(search.query + key)
+        case Pasted(text=text):
+            return search.edited(search.query + "".join(c for c in text if c.isprintable()))
+        case _:
+            return search
+
+
+@dataclass(frozen=True, slots=True)
+class ChoosingClone:
+    """The first step."""
+
+    search: Search
+
+
+@dataclass(frozen=True, slots=True)
+class ChoosingBranch:
+    """The second step, holding the first step's search so Escape returns to it as it was."""
+
+    clone_search: Search
+    clone: Path
+    search: Search
+
+
+@dataclass(frozen=True, slots=True)
+class Finished:
+    """The picker is done, having chosen OPENING, or nothing if it was left."""
+
+    opening: Opening | None
+
+
+type Picking = ChoosingClone | ChoosingBranch | Finished
+
+
+def step(
+    picking: Picking, event: InputEvent, sections: tuple[Section, ...], branches: Mapping[Path, tuple[str, ...]]
+) -> Picking:
+    """The picker after one more key press or paste.
+
+    Every input goes through here, applied to the latest state, so keys typed faster than the screen
+    redraws (type-ahead while the picker starts, say) land as if each had been seen.
+    """
+    if isinstance(picking, Finished):
+        return picking
+    if event == KeyPressed(key=Key.ControlC):
+        return Finished(opening=None)
+
+    match picking:
+        case ChoosingClone(search=search):
+            match navigate(search, clone_rows(sections, search.query), event):
+                case Chosen(value=clone):
+                    return ChoosingBranch(clone_search=search, clone=clone, search=EMPTY_SEARCH)
+                case Back():
+                    return Finished(opening=None)
+                case Search() as moved:
+                    return ChoosingClone(search=moved)
+                case _ as unreachable:
+                    assert_never(unreachable)
+        case ChoosingBranch(clone_search=clone_search, clone=clone, search=search):
+            match navigate(search, branch_rows(branches[clone], search.query), event):
+                case Chosen(value=branch):
+                    return Finished(opening=Opening(clone=clone, branch=branch))
+                case Back():
+                    return ChoosingClone(search=clone_search)
+                case Search() as moved:
+                    return replace(picking, search=moved)
+                case _ as unreachable:
+                    assert_never(unreachable)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def view(
+    picking: ChoosingClone | ChoosingBranch, sections: tuple[Section, ...], branches: Mapping[Path, tuple[str, ...]]
+) -> tuple[str, Search, tuple[Row[object], ...]]:
+    """The title, search and rows the current step shows."""
+    match picking:
+        case ChoosingClone(search=search):
+            return "a clone", search, clone_rows(sections, search.query)
+        case ChoosingBranch(clone=clone, search=search):
+            return f"{clone.name}: a worktree, or type a new branch", search, branch_rows(branches[clone], search.query)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+@component
+def chooser(
+    sections: tuple[Section, ...], branches: Mapping[Path, tuple[str, ...]], choose: Callable[[Opening], None]
+) -> Div:
+    picking, set_picking = use_state(lambda: ChoosingClone(search=EMPTY_SEARCH))
+    send_control = use_controls()
+
+    async def finish() -> None:
+        if not isinstance(picking, Finished):
+            return
+        if picking.opening is not None:
+            choose(picking.opening)
+        send_control(Quit())
+
+    use_effect(finish, deps=(picking,))
+
+    def on_input(event: InputEvent, _: Receiver) -> InputResponse:
+        if not isinstance(event, KeyPressed | Pasted):
+            return None
+        set_picking(lambda latest: step(latest, event, sections, branches))
+        return ()
+
+    if isinstance(picking, Finished):
+        return Div(style=full)
+    title, search, rows = view(picking, sections, branches)
+    choices = options(rows)
+    highlighted = choices[search.highlighted] if choices else None
+
+    def row_text(row: Row[object]) -> Text:
+        match row:
+            case Heading(title=heading):
+                return Text(content=heading, style=text_wrap_none | text_bold | text_color("slate", 400))
+            case Option(label=label) if row is highlighted:
+                return Text(content=f"  {label}", style=text_wrap_none | text_bold | text_color("amber", 300))
+            case Option(label=label):
+                return Text(content=f"  {label}", style=text_wrap_none | text_color("slate", 300))
+            case _ as unreachable:
+                assert_never(unreachable)
+
+    return Div(
+        style=full | col | border | border_lightrounded | border_color("slate", 500) | pad_x(1),
+        on_input=on_input,
+        children=(
+            Text(content=title, style=text_wrap_none | text_color("slate", 400)),
+            Div(
+                style=row | overflow_x_scroll | stick_to_end_x,
+                children=(
+                    Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
+                    Text(content=search.query, style=text_wrap_none),
+                    Text(content=" ", style=text_wrap_none | text_bg("sky", 300)),
+                ),
+            ),
+            Div(
+                style=col | fill(1) | overflow_y_scroll,
+                children=tuple(row_text(row) for row in rows)
+                or (Text(content="nothing matches", style=text_color("slate", 400)),),
+            ),
+        ),
+    )
+
+
+async def choose_opening(
+    sections: tuple[Section, ...], branches: Mapping[Path, tuple[str, ...]], **app_options: object
+) -> Opening | None:
+    """Run the picker until it quits, and return what it chose, if anything."""
+    chosen: list[Opening] = []
+    await counterweight_app(chooser(sections, branches, chosen.append), **app_options)
+    return chosen[-1] if chosen else None
+
+
+def _selftest() -> int:
+    import tempfile
+    from functools import reduce
+
+    from counterweight.autopilot import typed
+
+    projects, work = Path("/p"), Path("/w")
+    sections = (
+        Section(title="~/projects", clones=(projects / "dotfiles", projects / "ray")),
+        Section(title="~/work", clones=(work / "service",)),
+    )
+    branches = {projects / "dotfiles": ("fix-tabs", "wt"), projects / "ray": (), work / "service": ("Feature",)}
+    porcelain = (
+        "worktree /p/dotfiles\nHEAD 1\nbranch refs/heads/master\n\n"
+        "worktree /p/dotfiles.worktrees/feat/x\nHEAD 2\nbranch refs/heads/feat/x\n\n"
+        "worktree /p/dotfiles.worktrees/gone\nHEAD 3\ndetached\n\n"
+        "worktree /elsewhere/y\nHEAD 4\nbranch refs/heads/y\n"
+    )
+
+    with tempfile.TemporaryDirectory() as scratch:
+        root = Path(scratch)
+        for name in ("clone", "other"):
+            (root / name / ".git").mkdir(parents=True)
+        (root / "linked").mkdir()
+        (root / "linked" / ".git").write_text("gitdir: elsewhere\n")
+        (root / "clone.worktrees" / "branch").mkdir(parents=True)
+        (root / "plain").mkdir()
+        discovered = discover_clones(root)
+
+    enter = KeyPressed(key=Key.Enter)
+    escape = KeyPressed(key=Key.Escape)
+    down = KeyPressed(key=Key.Down)
+    backspace = KeyPressed(key=Key.Backspace)
+
+    def stepped(*events: InputEvent) -> Picking:
+        start: Picking = ChoosingClone(search=EMPTY_SEARCH)
+        return reduce(lambda picking, event: step(picking, event, sections, branches), events, start)
+
+    def opened(clone: Path, branch: str) -> Finished:
+        return Finished(opening=Opening(clone=clone, branch=branch))
+
+    cases: list[tuple[str, bool]] = [
+        ("discovery keeps only directories whose .git is a directory", discovered == (root / "clone", root / "other")),
+        ("a missing root has no clones", discover_clones(Path("/nonexistent-wt-root")) == ()),
+        (
+            "only worktrees at <repo>.worktrees/<branch> are listed, nested branches included",
+            parse_worktree_branches(porcelain, projects / "dotfiles") == ("feat/x",),
+        ),
+        (
+            "a heading appears only over a section with matches",
+            clone_rows(sections, "SERV") == (Heading("~/work"), Option("service", work / "service")),
+        ),
+        ("an empty query lists every section", len(clone_rows(sections, "")) == 5),
+        ("an empty query lists every worktree and no new branch", branch_rows(("wt",), "") == (Option("wt", "wt"),)),
+        ("a blank query offers no new branch", branch_rows((), "  ") == ()),
+        (
+            "a query naming no worktree is offered as a new branch, after the matches",
+            branch_rows(("fix-tabs", "wt"), "fix") == (Option("fix-tabs", "fix-tabs"), Option("+ new branch fix", "fix")),
+        ),
+        ("a query naming a worktree exactly is not offered as new", branch_rows(("wt",), "wt") == (Option("wt", "wt"),)),
+        ("Enter twice opens the first clone's first worktree", stepped(enter, enter) == opened(projects / "dotfiles", "fix-tabs")),
+        ("Down skips the heading between sections", stepped(down, down, enter, enter) == opened(work / "service", "Feature")),
+        ("Up from the first clone wraps to the last", stepped(KeyPressed(key=Key.Up), enter, enter) == opened(work / "service", "Feature")),
+        (
+            "typing a new name opens it as a new branch",
+            stepped(*typed("ray"), enter, *typed("spike"), enter) == opened(projects / "ray", "spike"),
+        ),
+        (
+            "keys typed ahead of a step land in it, as if each had been seen",
+            stepped(*typed("serv"), enter, *typed("fea"), enter) == opened(work / "service", "Feature"),
+        ),
+        (
+            "Escape from the branches goes back to the clones, query kept",
+            stepped(*typed("serv"), enter, escape, KeyPressed(key="i"), enter, enter) == opened(work / "service", "Feature"),
+        ),
+        ("Escape from the clones leaves", stepped(escape) == Finished(opening=None)),
+        ("Ctrl+C leaves from the branches", stepped(enter, KeyPressed(key=Key.ControlC)) == Finished(opening=None)),
+        ("keys after finishing change nothing", stepped(escape, enter, enter) == Finished(opening=None)),
+        ("Backspace deletes the last character", stepped(*typed("rayx"), backspace, enter, *typed("b"), enter) == opened(projects / "ray", "b")),
+        ("Ctrl+U clears the query", stepped(*typed("zz"), KeyPressed(key=Key.ControlU), enter, enter) == opened(projects / "dotfiles", "fix-tabs")),
+        ("a paste adds its printable text", stepped(Pasted(text="ray\n"), enter, Pasted(text="a-b"), enter) == opened(projects / "ray", "a-b")),
+        ("Enter with nothing matched stays put", stepped(*typed("zz"), enter) == ChoosingClone(search=Search("zz", 0))),
+    ]
+
+    def picked(*steps: object) -> Opening | None:
+        return asyncio.run(
+            asyncio.wait_for(
+                choose_opening(sections, branches, headless=True, dimensions=(50, 12), autopilot=[*steps, Quit()]),
+                timeout=timedelta(seconds=30).total_seconds(),
+            )
+        )
+
+    cases += [
+        ("the app hands back what was chosen", picked(*typed("ray"), enter, *typed("x"), enter) == Opening(projects / "ray", "x")),
+        ("the app hands back nothing when left", picked(escape) is None),
+    ]
+
+    failures = [name for name, passed in cases if not passed]
+    for name in failures:
+        print(f"FAIL: {name}", file=sys.stderr)
+    print(f"wt: {len(cases) - len(failures)}/{len(cases)} passed")
+    return 1 if failures else 0
+
+
 if __name__ == "__main__":
+    if os.environ.get("CLAUDE_HOOK_SELFTEST"):
+        sys.exit(_selftest())
     sys.exit(app())
