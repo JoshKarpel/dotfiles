@@ -35,6 +35,14 @@ you think the API does.
   an upstream change, search its issue tracker, changelog, and releases for that
   behavior. The likeliest result is a known issue already fixed in a newer release,
   which turns "file a bug" into "upgrade".
+- **The repo's own docs are claims too.** A `CLAUDE.md` gotcha, a README
+  troubleshooting note, or a code comment explaining runtime behavior was written
+  by someone who saw it once, possibly misread it, and the system may have changed
+  since. Probe the mechanism before acting on one when being wrong costs
+  something (deleting data, restarting a service, telling the user to), and
+  before recording a diagnosis of your own as one: a note written from one
+  observation reads to the next session as settled fact. When the probe
+  disagrees, fix the doc in the same change.
 - **Run the control before trusting the experiment.** A reproduction harness you
   just built is itself unproven, so a run that confirms your hypothesis may be
   measuring the harness instead: a nested container with no init system, a health

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stop hook orchestrator: run the blocking checks in sequence, then announce the stop
-# only if neither blocked, so an announcement means Claude is actually stopping rather
+# only if none blocked, so an announcement means Claude is actually stopping rather
 # than retrying after a block. (Hooks within a single Stop group run in parallel, so a
 # separate announcing hook can't know whether a sibling is about to block this attempt.)
 
@@ -9,7 +9,7 @@ set -uo pipefail
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
 # line is how `claude-hook-selftests` discovers participating hooks. This hook decides
 # what happens at stop time (announce immediately, defer while an agent runs, run a check
-# that blocks, propagate a check's error, or announce after both checks pass) from
+# that blocks, propagate a check's error, or announce after every check passes) from
 # branches real Claude output
 # never exercises directly; run these with `CLAUDE_HOOK_SELFTEST=1 claude-stop`.
 if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
@@ -45,22 +45,31 @@ cat >/dev/null
 printf '%s' "$STUB_FINISH_OUT"
 exit "$STUB_FINISH_EXIT"
 EOF
-  chmod +x "$stubs"/claude-sound "$stubs"/claude-tab-status "$stubs"/claude-stop-precommit "$stubs"/claude-stop-finish
+  cat >"$stubs/claude-stop-plan-artifact" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+: > "$STUB_DIR/plan.called"
+printf '%s' "$STUB_PLAN_OUT"
+exit 0
+EOF
+  chmod +x "$stubs"/claude-sound "$stubs"/claude-tab-status "$stubs"/claude-stop-precommit "$stubs"/claude-stop-finish \
+    "$stubs"/claude-stop-plan-artifact
 
   t() {
     local desc="$1" precommit_exit="$2" precommit_out="$3" finish_exit="$4" finish_out="$5"
-    local message="$6" want_exit="$7" want_out="$8" want_called="$9"
+    local message="$6" want_exit="$7" want_out="$8" want_called="$9" plan_out="${10:-}"
 
     rm -f "$stubs"/*.called
     local out exit_code=0
     out=$(env STUB_DIR="$stubs" \
         STUB_PRECOMMIT_EXIT="$precommit_exit" STUB_PRECOMMIT_OUT="$precommit_out" \
-        STUB_FINISH_EXIT="$finish_exit" STUB_FINISH_OUT="$finish_out" \
+        STUB_FINISH_EXIT="$finish_exit" STUB_FINISH_OUT="$finish_out" STUB_PLAN_OUT="$plan_out" \
       PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" <<<"$message" 2>&1) || exit_code=$?
 
     local got=""
     [[ -e "$stubs/precommit.called" ]] && got+="${got:+,}precommit"
     [[ -e "$stubs/finish.called" ]] && got+="${got:+,}finish"
+    [[ -e "$stubs/plan.called" ]] && got+="${got:+,}plan"
     [[ -e "$stubs/sound.called" ]] && got+="${got:+,}sound"
     [[ -e "$stubs/tab-finished.called" ]] && got+="${got:+,}tab-finished"
 
@@ -94,13 +103,13 @@ EOF
   t "running shell does not defer" \
     0 "" 0 "" \
     '{"last_assistant_message":"Done.","background_tasks":[{"type":"shell","status":"running"}]}' \
-    0 "" "precommit,finish,sound,tab-finished"
+    0 "" "precommit,finish,plan,sound,tab-finished"
 
-  # --- neither check blocks: both run in order, then announce ---
+  # --- no check blocks: all run in order, then announce ---
   t "nothing blocks" \
     0 "" 0 "" \
     '{"last_assistant_message":"Done."}' \
-    0 "" "precommit,finish,sound,tab-finished"
+    0 "" "precommit,finish,plan,sound,tab-finished"
 
   # --- the first check blocks: its JSON surfaces, the second check and announce never run ---
   t "first check blocks" \
@@ -113,6 +122,12 @@ EOF
     0 "" 0 '{"b":2}' \
     '{"last_assistant_message":"Done."}' \
     0 '{"b":2}' "precommit,finish"
+
+  # --- the plan check blocks last, once both others pass: its JSON surfaces, announce never runs ---
+  t "plan check blocks" \
+    0 "" 0 "" \
+    '{"last_assistant_message":"Done."}' \
+    0 '{"c":3}' "precommit,finish,plan" '{"c":3}'
 
   # --- a check errors outright: its exit status propagates, nothing after it runs ---
   t "a check errors" \
@@ -153,7 +168,9 @@ if [[ "$RUNNING_AGENTS" -gt 0 ]]; then
   exit 0
 fi
 
-for check in claude-stop-precommit claude-stop-finish; do
+# The plan page goes last: the finishing pass may itself edit the plan, and the page should be
+# rebuilt from what the plan says once it has settled.
+for check in claude-stop-precommit claude-stop-finish claude-stop-plan-artifact; do
   STDOUT=$(echo "$INPUT" | "$check")
   STATUS=$?
   if [[ $STATUS -ne 0 ]]; then

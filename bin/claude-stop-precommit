@@ -28,10 +28,29 @@ printf '%s' "$STUB_VERDICT"
 EOF
   chmod +x "$stubs/pre-commit-verdict"
 
+  # The hook records what it reported under the git dir, so every case runs in a throwaway repo,
+  # with git's own environment unset: during a `git commit` GIT_INDEX_FILE points at the outer
+  # repo's index, and the sandbox would read it instead of its own.
+  repo="$stubs/repo"
+  mkdir -p "$repo"
+  git init -q "$repo"
+  git -C "$repo" config user.email "test@example.com"
+  git -C "$repo" config user.name "test"
+  echo base >"$repo/file"
+  git -C "$repo" add file
+  git -C "$repo" commit -q -m init
+  # shellcheck disable=SC2207
+  unset_git=($(git rev-parse --local-env-vars | sed 's/^/-u /'))
+
+  # A fresh prompt id per case unless one is given, so each case starts with nothing reported.
+  case_number=0
   t() {
-    local desc="$1" verdict="$2" want_message="$3" want_context="$4"
+    local desc="$1" verdict="$2" want_message="$3" want_context="$4" prompt="${5:-}"
     local out exit_code=0
-    out=$(env STUB_VERDICT="$verdict" PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" </dev/null 2>&1) ||
+    case_number=$((case_number + 1))
+    [[ -n "$prompt" ]] || prompt="prompt-$case_number"
+    out=$(cd "$repo" && jq -cn --arg p "$prompt" '{prompt_id: $p}' |
+    env "${unset_git[@]}" STUB_VERDICT="$verdict" PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1) ||
     exit_code=$?
 
     [[ "$exit_code" == 0 ]] ||
@@ -62,14 +81,54 @@ EOF
     "[claude-stop-precommit] pre-commit failing" "ruff....Failed"
   t "an unknown verdict says nothing" '{"verdict":"invented"}' "" ""
 
+  # --- the same state is reported once per prompt, not on every stop ---
+  # A check that is failing on purpose (a floor on an unreleased version) would otherwise send
+  # Claude back on every stop until the user interrupts.
+  failing='{"verdict":"failing","output":"uv-lock....Failed"}'
+  t "a failure is reported the first time" "$failing" \
+    "[claude-stop-precommit] pre-commit failing" "uv-lock....Failed" same-prompt
+  t "the same failure on the same tree is not reported again" "$failing" "" "" same-prompt
+  echo edited >>"$repo/file"
+  t "the same failure after an edit is reported again" "$failing" \
+    "[claude-stop-precommit] pre-commit failing" "uv-lock....Failed" same-prompt
+  t "a different failure on the same tree is reported" '{"verdict":"failing","output":"mypy....Failed"}' \
+    "[claude-stop-precommit] pre-commit failing" "mypy....Failed" same-prompt
+  t "an unchanged failure is reported once to a new prompt" '{"verdict":"failing","output":"mypy....Failed"}' \
+    "[claude-stop-precommit] pre-commit failing" "mypy....Failed" next-prompt
+
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
   fi
   exit "$fails"
 fi
 
+INPUT=$(cat)
+PROMPT_ID=$(printf '%s' "$INPUT" | jq -r '.prompt_id // ""')
+
 VERDICT=$(pre-commit-verdict)
 case "$(printf '%s' "$VERDICT" | jq -r '.verdict // ""')" in
+  strays | failing) ;;
+  *) exit 0 ;;
+esac
+
+# Report a given state at most once per prompt. Without this a check that cannot pass yet (one
+# failing on purpose, or waiting on a release) sends Claude back on every stop, and each reply is
+# another "leaving this unchanged". The state is what Claude would act on: the verdict itself and
+# the tree it was reached on, taken after the verdict ran, since the autofix pass may have just
+# rewritten it. A new prompt hears about it once more, so a failure is never silently forgotten.
+GIT_DIR=$(git rev-parse --git-dir)
+REPORTED="$GIT_DIR/claude-precommit-reported"
+STATE=$(
+  {
+    printf '%s\n%s\n' "$PROMPT_ID" "$VERDICT"
+    git diff HEAD
+    git ls-files --others --exclude-standard
+  } | sha1sum | cut -d' ' -f1
+)
+[[ "$(cat "$REPORTED" 2>/dev/null)" == "$STATE" ]] && exit 0
+printf '%s' "$STATE" >"$REPORTED"
+
+case "$(printf '%s' "$VERDICT" | jq -r '.verdict')" in
   strays)
     MESSAGE="untracked files"
     CONTEXT="There are untracked files.

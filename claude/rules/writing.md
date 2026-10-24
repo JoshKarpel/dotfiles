@@ -44,6 +44,19 @@ READMEs, PR and issue bodies, review comments, and commit messages.
   more convincing in good prose than in bad, and therefore worse. Check
   specifics against the source before writing them down, per the
   verify-empirically rule.
+- **Keep what the sources say apart from what you worked out.** When the reader
+  will take a claim as sourced (slides, a write-up, an issue citing a thread),
+  every claim has to trace to a source you can point at; your own derivation is
+  either labeled as yours or left out. The two blur easily after an
+  investigation, and a measured, confident finding of your own reads exactly like
+  a quotation once it's on the page.
+- **Quote exactly, and copy identifiers from the source.** A quotation keeps its
+  typos (mark them with `[sic]` if they matter), and a hash, issue number, URL,
+  or topic ID is pasted from the page, never typed from memory or shortened.
+- **"The source doesn't say" requires having read all of it.** A forum thread,
+  an issue, or an API listing is often paginated, and a fetch or a `head` shows
+  the first page as if it were the whole. Check the page or post count, or
+  `--paginate`, before telling anyone a topic isn't discussed.
 
 ## Diction
 

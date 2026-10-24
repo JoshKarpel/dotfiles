@@ -93,6 +93,25 @@
   a queue, a condition variable, a future or promise, a channel, or joining the
   task directly, so the test proceeds the instant the awaited state is reached
   and stays fully deterministic.
+- **Give the suite a global per-test timeout that dumps stacks and exits.** A hang
+  is a failure that never reports: CI sits until the job limit and then says
+  "cancelled", with no hint which test or which line. An in-test timeout can't
+  catch it either, since `asyncio.wait_for` and friends never fire while a thread
+  is blocked in a syscall. A process-level watchdog can, so set one for the whole
+  suite, generous enough that no healthy test comes near it. In pytest (9.0+) it's
+  built in, with no plugin:
+
+  ```toml
+  [tool.pytest.ini_options]
+  faulthandler_timeout = 60
+  faulthandler_exit_on_timeout = true
+  ```
+
+  Without the second line the stacks are dumped and the hang carries on.
+  `pytest-timeout` is the alternative where per-test overrides are needed. Bound a
+  run against deliberately broken code the same way (`timeout 60 <test command>`
+  if the suite has no watchdog yet): breaking a cancellation or concurrency path is
+  exactly how a suite that used to finish starts hanging.
 
 ## References
 

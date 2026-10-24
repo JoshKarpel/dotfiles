@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Stop check: when a plan changed this turn, ask for its page to be rebuilt and republished.
+#
+# A plan is a `.md` file carrying an `Artifact: <url>` line, anything under `plans/`, or a `PLAN.md`.
+# Its page is derived by `plan-artifact`, so the only thing to decide is when to rebuild it: once the
+# turn is over and the plan has settled, rather than after every edit. Each plan's content (less its
+# `Artifact:` line, so adding the link after a first publish is not a change) is nudged about once.
+#
+# Claude Code only, run by `claude-stop` after the finishing pass. Mainplate sessions have no
+# Artifact tool, which is why this is not part of `claude-stop-finish`, the hook mainplate shares.
+
+set -euo pipefail
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker line is how
+# `claude-hook-selftests` discovers participating hooks. Every case is a git state, so each runs
+# against a throwaway repository; run these with `CLAUDE_HOOK_SELFTEST=1 claude-stop-plan-artifact`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+  # During a `git commit` GIT_INDEX_FILE points at the outer repo's index; the sandbox needs its own.
+  # shellcheck disable=SC2207
+  unset_git=($(git rev-parse --local-env-vars | sed 's/^/-u /'))
+
+  repo="$workdir/repo"
+  mkdir -p "$repo/plans" "$repo/docs"
+  git init -q "$repo"
+  git -C "$repo" config user.email "test@example.com"
+  git -C "$repo" config user.name "test"
+  printf '# Ship it\n\nArtifact: https://claude.ai/code/artifact/abc\n\nStep one.\n' >"$repo/plans/ship.md"
+  printf '# Guide\n\nNot a plan.\n' >"$repo/docs/guide.md"
+  git -C "$repo" add -A
+  git -C "$repo" commit -q -m init
+
+  call() {
+    OUT=$(cd "$repo" && env "${unset_git[@]}" CLAUDE_HOOK_SELFTEST= "$SELF" </dev/null 2>&1) ||
+    { printf 'FAIL exited non-zero :: %s\n' "$OUT"; fails=1; }
+  }
+  silent() {
+    call
+    [[ -z "$OUT" ]] || { printf 'FAIL %s: expected no output :: %s\n' "$1" "$OUT"; fails=1; }
+  }
+  names() {
+    local desc="$1" needle="$2"
+    call
+    [[ "$OUT" == *"$needle"* ]] || { printf 'FAIL %s: output missing %q :: %s\n' "$desc" "$needle" "$OUT"; fails=1; }
+  }
+
+  silent "an unchanged plan says nothing"
+
+  printf 'Step two.\n' >>"$repo/plans/ship.md"
+  names "an edited plan is named with its url" "plans/ship.md (published at https://claude.ai/code/artifact/abc)"
+  silent "the same edit is not asked about twice"
+
+  printf 'Step three.\n' >>"$repo/plans/ship.md"
+  names "a further edit is asked about again" "plans/ship.md"
+
+  printf '# New\n\nIdea.\n' >"$repo/PLAN.md"
+  names "a new PLAN.md is named as unpublished" "PLAN.md (not published yet)"
+  printf '# New\n\nArtifact: https://claude.ai/code/artifact/def\n\nIdea.\n' >"$repo/PLAN.md"
+  silent "adding the Artifact line after publishing is not a change"
+
+  printf 'More.\n' >>"$repo/docs/guide.md"
+  silent "an ordinary markdown file is not a plan"
+
+  printf '# Notes\n\nArtifact: https://claude.ai/code/artifact/ghi\n' >"$repo/docs/notes.md"
+  names "any file with an Artifact line is a plan" "docs/notes.md (published at"
+
+  rm "$repo/plans/ship.md"
+  silent "a deleted plan has no page to rebuild"
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+cat >/dev/null
+
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$ROOT"
+NUDGED="$(git rev-parse --git-dir)/claude-plan-artifact-nudged"
+
+ARTIFACT_LINE='^Artifact:[[:space:]]*[^[:space:]]+[[:space:]]*$'
+
+# Markdown changed against HEAD or new and untracked; a repository with no commits yet has no HEAD to
+# diff against, so only the untracked files count there.
+CHANGED=$(
+  {
+    git diff --name-only HEAD -- '*.md' 2>/dev/null || true
+    git ls-files --others --exclude-standard -- '*.md'
+  } | sort -u
+)
+
+LINES=""
+while IFS= read -r path; do
+  [[ -n "$path" && -f "$path" ]] || continue
+  if ! grep -qE "$ARTIFACT_LINE" "$path" && [[ ! "$path" =~ (^|/)plans/ && "$(basename "$path")" != "PLAN.md" ]]; then
+    continue
+  fi
+  # Adding the link also adds the blank line under it, so runs of blank lines are squeezed first.
+  KEY=$({ printf '%s\n' "$path"; { grep -vE "$ARTIFACT_LINE" "$path" || true; } | cat -s; } | sha1sum | cut -d' ' -f1)
+  grep -qxsF "$KEY" "$NUDGED" && continue
+  printf '%s\n' "$KEY" >>"$NUDGED"
+  URL=$(grep -m1 -E "$ARTIFACT_LINE" "$path" | sed -E 's/^Artifact:[[:space:]]*//; s/[[:space:]]*$//' || true)
+  if [[ -n "$URL" ]]; then
+    LINES+="- $path (published at $URL)"$'\n'
+  else
+    LINES+="- $path (not published yet)"$'\n'
+  fi
+done <<<"$CHANGED"
+
+[[ -n "$LINES" ]] || exit 0
+
+# Keep the record short; only recent content matters, and an old key costs nothing but a re-ask.
+tail -n 200 "$NUDGED" >"$NUDGED.tmp" && mv "$NUDGED.tmp" "$NUDGED"
+
+CONTEXT="These plans changed, so their published pages are out of date:
+
+${LINES}
+For each one, run \`plan-artifact <plan.md> <scratchpad>/<name>.html\` and publish that file with the Artifact tool. Where the plan has a URL, pass it as \`url\` (read the artifact first if this session hasn't published it); where it has none, publish it new and add an \`Artifact: <url>\` line directly under the plan's \`# Title\`. Don't edit the generated HTML: change the plan and run the script again. Then reply with the link, in one line."
+
+jq -n --arg ctx "$CONTEXT" \
+  '{systemMessage: "[claude-stop-plan-artifact] plan page out of date", hookSpecificOutput: {hookEventName: "Stop", additionalContext: $ctx}}'

@@ -91,10 +91,28 @@ reports no leftover conflict markers.
 ## Check the Result
 
 A clean textual merge can still be broken: a function renamed on one side and
-called by its old name in code the other side added. Run the project's checks
-(build, type checker, tests, and its pre-commit hooks if it has them) and fix
-what the merge broke, staging the fixes. Fix only breakage the merge caused;
-report pre-existing failures rather than fixing them.
+called by its old name in code the other side added. This applies just as much
+when git reported no conflicts at all, which is where it goes unchecked. Run the
+project's checks (build, type checker, tests, and its pre-commit hooks if it has
+them) and fix what the merge broke, staging the fixes. Fix only breakage the
+merge caused; report pre-existing failures rather than fixing them.
+
+Three gaps the checks don't cover on their own:
+
+- **Pre-commit during a merge sees only the conflicted files**, so a generator
+  hook or a linter never runs over everything the merge brought in. Run it over
+  the whole merge instead:
+  `git diff --name-only -z HEAD...MERGE_HEAD | xargs -0 pre-commit run --files`
+  (or against the target ref once the merge is committed).
+- **Callers the other side added.** Where either side changed a signature,
+  grep for every call site on the other side, including tests, examples,
+  benchmarks, and docs snippets the type checker never sees.
+- **Prose that describes the other side's code.** Docs, plans, `CLAUDE.md`, and
+  changelog entries name functions, modules, and behavior that the merge may
+  have renamed, made private, or made false. Grep the identifiers they name
+  against the merged tree, and re-run any probes a plan embeds. A branch that
+  only changes a plan still needs this: "only a doc changed" is the wrong
+  inference when the doc describes code that just moved under it.
 
 ## Hand Off
 

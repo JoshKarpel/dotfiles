@@ -44,6 +44,13 @@
   telling you the script mixes privilege levels and the privileged step belongs elsewhere.
 - After a change with observable runtime behavior, exercise it end-to-end yourself (drive the
   flow, endpoint, or render) to confirm it works, rather than asking the user to eyeball it.
+- Look at anything visual before reporting it done: a screenshot, a generated diagram, a
+  terminal render, an HTML page or Artifact. A clean build or a matching text dump says
+  nothing about a broken border, a shaded cell, or dead space. Render it to a PNG and open
+  it with Read, which displays images. For HTML,
+  `uvx playwright install --only-shell chromium` once (no sudo), then
+  `uvx playwright screenshot --full-page --color-scheme dark <url> <out.png>`; check both
+  color schemes, and check every image you generated, not a sample.
 - When a Bash command is expected to run long (servers, load tests, builds, sweeps), pass an
   explicit `timeout` so the default 2-minute cap doesn't kill it mid-run and orphan child
   processes.
@@ -54,11 +61,7 @@
   duration and learns nothing a Read wouldn't. Past the 10-minute Bash cap the sleep is
   killed having produced nothing at all. Start the work in the background, go do something
   else, and read the output file if you want progress before the notification arrives.
-- Read a file with the Read tool (`offset`/`limit` for a range), never `sed -n`, `head`, or
-  `tail` on the file, whatever a harness hint suggests. Path-scoped rules and nested
-  `CLAUDE.md` files load only when a file tool touches a path, so a shell read skips them.
-  Trim a pipe with `head`/`tail`. In a uv project, Python is `uv run python`, heredocs and
-  one-liners included.
+- In a uv project, Python is `uv run python`, heredocs and one-liners included.
 - Spell the scratchpad path out literally in every command rather than through a variable.
   Shell state doesn't persist between calls, `$TMPDIR` may be unset (it is on exe.dev), so
   `$TMPDIR/x` lands at `/x`, and Claude Code refuses an `rm` whose target is a variable.
@@ -66,16 +69,18 @@
   turns the restore into a lie.
 - When you start a server just to check something, assume I may already be running the app on
   the default port; pick a non-default port and clean it up when done.
-- Whenever you write or edit a markdown plan file (plan mode's, or a plan doc in a repo),
-  publish an HTML Artifact of it in the same turn. Design the page rather than transcribing
-  the markdown: present the plan the way you would if I'd asked for it as an artifact, with
-  whatever layout, navigation, diagrams, or interactive pieces serve this plan. The `.md`
-  stays the source of truth, so rebuild the page from it on every change, carrying the
-  plan's substance without adding or dropping any.
-  Sessions don't remember artifacts, so the file carries the link: an `Artifact: <url>` line
-  directly under the `# Title`. If the line is there, update that artifact (`url`) rather
-  than publishing a new one; if not, publish, then add the line. The artifact is private,
-  so the link is fine to commit even in a public repo.
+- Every markdown plan (plan mode's, or a plan doc in a repo) has a published HTML Artifact,
+  rendered by `plan-artifact <plan.md> <out.html>` and never written or edited by hand: the
+  page is derived from the `.md` each time, so any later session just reruns the script.
+  Put diagrams in the plan itself, as ```` ```mermaid ```` fences or raw `<svg>` colored from
+  the page's tokens (the script's docstring lists them), so a plan stays one self-contained
+  file. Sessions don't remember artifacts, so the file carries the link: an
+  `Artifact: <url>` line directly under the `# Title`. If the line is there, update that
+  artifact (`url`) rather than publishing a new one; if not, publish, then add the line.
+  In a repo, the `claude-stop-plan-artifact` stop check asks for the republish once a
+  turn's edits have settled, so don't republish after every edit; plan mode's file lives
+  outside any repo, so publish that one yourself when you write or revise it. The artifact
+  is private, so the link is fine to commit even in a public repo.
 - Reach past plain `grep` when a code search is structural rather than textual. `ast-grep`
   matches and rewrites by AST pattern (a bare `except`, a call with a literal argument) where
   regex can't. Run `--help` for the interface.

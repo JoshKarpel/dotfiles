@@ -33,6 +33,7 @@ case "$1" in
   auth) [ "${GH_AUTH_OK:-1}" = "1" ] && exit 0 || exit 1 ;;
   repo) if [ -n "${GH_REPO_JSON:-}" ]; then printf '%s' "$GH_REPO_JSON"; else exit 1; fi ;;
   pr) if [ -n "${GH_PR_JSON:-}" ]; then printf '%s' "$GH_PR_JSON"; else exit 1; fi ;;
+  api) [ "$2" = "meta" ] && [ "${GH_META_OK:-1}" = "1" ] && exit 0 || exit 1 ;;
   run) printf '%s' "${GH_RUN_JSON:-[]}" ;;
   *) exit 1 ;;
 esac
@@ -49,7 +50,7 @@ STUB
   call() {
     local cwd="$1"
     shift
-    OUT=$(cd "$cwd" && env -u GH_AUTH_OK -u GH_REPO_JSON -u GH_PR_JSON -u GH_RUN_JSON "$@" \
+    OUT=$(cd "$cwd" && env -u GH_AUTH_OK -u GH_REPO_JSON -u GH_PR_JSON -u GH_RUN_JSON -u GH_META_OK "$@" \
       PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1)
   }
 
@@ -78,6 +79,11 @@ STUB
   check_contains "GitHub-backed repo, no PR, no CI runs" "Current GitHub repository: https://github.com/example/repo (default branch: main)"
   check_not_contains "GitHub-backed repo, no PR, no CI runs" "open PR"
   check_not_contains "GitHub-backed repo, no PR, no CI runs" "Latest CI run"
+
+  check_not_contains "search works" "gh search"
+
+  call "$repo" GH_REPO_JSON="$REPO_JSON" GH_META_OK=0
+  check_contains "search refused by the host" "gh api 'search/issues?q="
 
   call "$repo" GH_REPO_JSON="$REPO_JSON" GH_PR_JSON="$PR_JSON_OPEN"
   check_contains "open PR" "This branch has an open PR #7: Add widget"
@@ -118,6 +124,16 @@ Current GitHub repository: $URL (default branch: $DEFAULT_BRANCH)
 
 When using gh commands (issues, PRs, workflows, etc.), they already default to this repository — omit --repo unless you are explicitly targeting a different one.
 EOF
+
+# `gh search` and `gh issue/pr list --search` call the `meta` endpoint first, and some hosts
+# refuse it (exe.dev's GitHub integration proxy answers 403) while the search API itself works.
+# Asking the endpoint is what decides it, rather than recognising one hostname.
+if ! gh api meta &>/dev/null; then
+  cat <<EOF
+
+On this host \`gh search ...\` and \`gh issue list --search\` / \`gh pr list --search\` fail with HTTP 403, because the host refuses the \`meta\` endpoint they call first. Call the search API directly instead: \`gh api 'search/issues?q=repo:OWNER/NAME+is:issue+TERMS' --jq '.items[] | "#\(.number) \(.title)"'\`, or list with \`--json\` and filter locally.
+EOF
+fi
 
 # If the current branch has an open PR, surface it
 PR_JSON=$(gh pr view --json number,title,state,isDraft 2>/dev/null) || PR_JSON=""

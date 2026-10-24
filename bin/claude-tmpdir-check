@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# PreToolUse hook: block a command that expands `$TMPDIR` while TMPDIR is unset.
+# Unset (as on exe.dev), `cp f "$TMPDIR/f.bak"` writes `/f.bak`, and the cleanup `rm`
+# that follows is refused as outside the work area, leaving the user to delete it.
+
+set -euo pipefail
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the hook's embedded self-tests. This
+# marker line is how `claude-hook-selftests` discovers participating hooks. The tests
+# drive the hook through its own stdin interface (exit 2 = block, 0 = allow).
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  fails=0
+  # Whether TMPDIR is set decides every case, so each one pins it rather than
+  # inheriting whatever the machine running the tests happens to have.
+  t() {
+    local want="$1" tmpdir="$2" cmd="$3" got
+    local -a env_args=(-u TMPDIR)
+    [[ "$tmpdir" == "<unset>" ]] || env_args=(TMPDIR="$tmpdir")
+    jq -cn --arg c "$cmd" '{tool_input: {command: $c}}' \
+      | env "${env_args[@]}" CLAUDE_HOOK_SELFTEST= "$0" >/dev/null 2>&1 && got=0 || got=$?
+    [[ "$got" == "$want" ]] ||
+    { printf 'FAIL want=%s TMPDIR=%s got=%s :: %s\n' "$want" "$tmpdir" "$got" "$cmd"; fails=1; }
+  }
+  # --- BLOCK: expanding an unset TMPDIR ---
+  t 2 '<unset>' 'cp src/app.py "$TMPDIR/app.py.bak" 2>/dev/null || true'
+  t 2 '<unset>' 'cp src/app.py $TMPDIR/app.py.bak'
+  t 2 '<unset>' 'cat "${TMPDIR}/out.log"'
+  t 2 '<unset>' 'mktemp -d "$TMPDIR/probe.XXXX"'
+  t 2 '<unset>' 'echo hi && python - > "$TMPDIR"/x.json'
+  t 2 ''        'cp a "$TMPDIR/a"'
+  # --- ALLOW: TMPDIR is set, so it expands somewhere real ---
+  t 0 '/tmp/claude-1000' 'cp src/app.py "$TMPDIR/app.py.bak"'
+  # --- ALLOW: the expansion carries its own fallback ---
+  t 0 '<unset>' 'cp a "${TMPDIR:-/tmp}/a"'
+  t 0 '<unset>' 'cp a "${TMPDIR-/tmp}/a"'
+  # --- ALLOW: the command sets TMPDIR before using it ---
+  t 0 '<unset>' 'export TMPDIR=/tmp/claude-1000/s && cp a "$TMPDIR/a"'
+  t 0 '<unset>' 'TMPDIR=/tmp/claude-1000/s uv run pytest'
+  # --- ALLOW: TMPDIR named but not expanded ---
+  t 0 '<unset>' "grep -rn '\$TMPDIR' bin/"
+  t 0 '<unset>' 'grep -rn TMPDIR bin/'
+  t 0 '<unset>' 'echo "${MYTMPDIR}/x"'
+  t 0 '<unset>' 'ls -la'
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+INPUT=$(cat)
+
+[[ -n "${TMPDIR:-}" ]] && exit 0
+
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
+
+# A command that assigns TMPDIR itself is using its own value, not the missing one.
+if [[ "$COMMAND" =~ (^|[^A-Za-z0-9_])TMPDIR= ]]; then
+  exit 0
+fi
+
+# Single-quoted text never expands, so drop it before looking: a grep for the literal
+# string `$TMPDIR` is not a use of it.
+UNQUOTED=$(printf '%s' "$COMMAND" | sed -E "s/'[^']*'//g")
+
+# `$TMPDIR` or `${TMPDIR}` with no `:-`/`-` fallback, not part of a longer name.
+if [[ "$UNQUOTED" =~ \$TMPDIR([^A-Za-z0-9_]|$)|\$\{TMPDIR\} ]]; then
+  cat >&2 <<'EOF'
+TMPDIR is unset in this shell, so `$TMPDIR/x` expands to `/x` at the filesystem root, and the `rm` to clean it up will be refused. Nothing in this command ran. Spell the scratchpad path out literally instead, then re-run the whole command.
+EOF
+  exit 2
+fi
+
+exit 0

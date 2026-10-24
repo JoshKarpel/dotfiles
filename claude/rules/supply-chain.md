@@ -8,6 +8,17 @@ well-maintained, widely-used packages with a real release history over a fresh
 or single-maintainer package that happens to fit. A transitive dependency you
 never chose is still yours to trust.
 
+"A few lines of your own code" stops being cheaper in two cases, so take the
+dependency there:
+
+- **The code tracks an external standard.** Unicode widths and grapheme rules,
+  time zones, MIME types, and public suffixes change on someone else's release
+  schedule. A hand-rolled table is right on the day it's written and silently
+  wrong after the next revision; a maintained package is updated for you.
+- **Every project would write the same few lines.** A helper that each repo would
+  otherwise reimplement (a coverage plugin, a test fixture library) is one
+  dependency to vet once, against N private copies that drift apart.
+
 ## Pin and Lock
 
 Commit a lockfile so resolution is reproducible and auditable: everyone, CI

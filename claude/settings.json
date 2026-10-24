@@ -237,7 +237,7 @@
           },
           {
             "type": "command",
-            "command": "claude-read-check"
+            "command": "claude-tmpdir-check"
           },
           {
             "type": "command",

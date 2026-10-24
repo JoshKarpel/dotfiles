@@ -38,6 +38,13 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   t "python after && blocked"                   "$uv_project"    "echo hi && python foo.py"             2
   t "python in package name allowed"            "$uv_project"    "uv pip install python-dotenv"         0
   t "quoted python in grep pattern allowed"     "$uv_project"    'grep "requires-python\|python" x.toml' 0
+  t "quoted | before python allowed"            "$uv_project"    'just check 2>&1 | grep -iv "passed|skipped|python 3.15"' 0
+  t "single-quoted | before python allowed"     "$uv_project"    "grep -in '3\.15\|python version' notes.md" 0
+  t "python after a quoted argument blocked"    "$uv_project"    'echo "a|b"; python3 - <<EOF'          2
+  t "system python by path blocked"             "$uv_project"    "/usr/bin/python3 - <<EOF"             2
+  t "local python by path blocked"              "$uv_project"    "cd x && /usr/local/bin/python -c 1"   2
+  t "python through env blocked"                "$uv_project"    "/usr/bin/env python3 foo.py"          2
+  t "a venv's own python allowed"               "$uv_project"    ".venv-gil/bin/python -VV"             0
   t "plain python allowed outside uv project"   "$plain_project" "python foo.py"                        0
   t "python -m uvicorn blocked despite 'uv' substring" "$uv_project" "python -m uvicorn app:app"        2
   t "python script named with uv substring blocked"    "$uv_project" "python run_uvloop_bench.py"       2
@@ -55,15 +62,20 @@ if ! is-uv-project; then
   exit 0
 fi
 
+# Quoted text is an argument, never a command, so drop it before looking: a `|` inside a grep
+# pattern like "passed|python 3.15" otherwise reads as a pipe into `python`.
+UNQUOTED=$(printf '%s' "$COMMAND" | sed -E "s/'[^']*'//g; s/\"([^\"\\\\]|\\\\.)*\"//g")
+
 # Check if python is invoked as a command: preceded by start or a command separator, and
-# followed by whitespace, a version digit, or end. The trailing check keeps `python` inside a
-# quoted argument from matching, e.g. grep "requires-python\|python" (the `\|` looks like a pipe).
-# `uv run python ...` never matches this at all, since `python` there is preceded by `run `, not
-# by a command separator; there's no legitimate case where a *bare* python invocation needs an
-# escape hatch, so this used to grep the whole command for the substring `uv` and skip blocking
-# if found. That let `python -m uvicorn app:app` (and anything else with `uv` in an arg or
-# filename) straight through unblocked.
-if echo "$COMMAND" | grep -qE '(^|[|;&(])[[:space:]]*python([[:space:]]|[0-9]|$)'; then
+# followed by whitespace, a version digit, or end. The system interpreter spelled by path
+# (`/usr/bin/python3`, `/usr/bin/env python3`) counts too, since reaching for it is the usual
+# way around this block; a virtualenv's own `bin/python` does not, since picking a specific
+# environment on purpose is what that path is for. `uv run python ...` never matches at all,
+# since `python` there is preceded by `run `, not by a command separator; there's no legitimate
+# case where a *bare* python invocation needs an escape hatch, so this used to grep the whole
+# command for the substring `uv` and skip blocking if found. That let `python -m uvicorn
+# app:app` (and anything else with `uv` in an arg or filename) straight through unblocked.
+if echo "$UNQUOTED" | grep -qE '(^|[|;&(])[[:space:]]*((/usr)?(/local)?/bin/(env[[:space:]]+)?)?python([[:space:]]|[0-9]|$)'; then
   echo "Use 'uv run python' instead of 'python' directly." >&2
   exit 2
 fi

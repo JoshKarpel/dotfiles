@@ -11,6 +11,17 @@
 # No `-e`: a failing pre-commit run is expected and handled, not fatal.
 set -uo pipefail
 
+# The hooks only see what the index holds, so a new file nobody has staged passes by never being
+# checked. Say so rather than staging it: whether it belongs in the repo is the caller's decision
+# (`pre-commit-verdict` makes it one at stop time), and a silent `git add --all` would take it.
+UNTRACKED=$(git ls-files --others --exclude-standard)
+if [[ -n "$UNTRACKED" ]]; then
+  {
+    echo "pre-commit-autofix: these untracked files are not checked until they are staged (git add, or git add --intent-to-add):"
+    printf '%s\n' "$UNTRACKED" | sed 's/^/  /'
+  } >&2
+fi
+
 git add --update
 pre-commit-run run "$@" >&2 && exit 0
 

@@ -112,7 +112,9 @@ fi
 # Matches `python` only where it starts a command (after a separator or at the
 # start of the line), not as a substring of a filename or argument: a naive
 # `grep -q 'python'` also fires on `python -m uvicorn` and `run_uvloop_bench.py`.
-if echo "$COMMAND" | grep -qE '(^|[|;&(])[[:space:]]*python([[:space:]]|[0-9]|$)'; then
+# Quoted text is dropped first, so a `|` inside a grep pattern isn't read as a pipe.
+UNQUOTED=$(printf '%s' "$COMMAND" | sed -E "s/'[^']*'//g; s/\"([^\"\\\\]|\\\\.)*\"//g")
+if echo "$UNQUOTED" | grep -qE '(^|[|;&(])[[:space:]]*python([[:space:]]|[0-9]|$)'; then
   echo "Use 'uv run python' instead of 'python' directly." >&2
   exit 2
 fi

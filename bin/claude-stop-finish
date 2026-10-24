@@ -115,16 +115,14 @@ MESSAGE="You made these changes this session:
 
 $PORCELAIN
 
-Before stopping, do a finishing pass on this change-set. Work through these in order,
-keeping each scoped to the change you already made (don't start new work or expand
-scope):
+Before stopping, check this change-set for consistency: update anything it requires to stay
+in sync, e.g. CLAUDE.md, docs, changelogs, skills, justfile recipes, or code comments that
+describe what you changed. Keep it scoped to the change you already made (don't start new
+work or expand scope). Don't re-run checks that already passed.
 
-1. Consistency: update anything the change-set requires to stay in sync, e.g. CLAUDE.md,
-   docs, changelogs, justfile recipes, or code comments.
-2. Verify: confirm your changes work, e.g. by building, type-checking, and running tests.
-
-Fix what genuinely needs fixing; if a step has nothing to do, move on. When the diff is
-consistent and passes, change nothing and stop."
+If you changed something, say in a sentence or two what and why. If nothing needed
+changing, reply with exactly \"Finishing pass: nothing to change.\" and nothing else: your
+previous message already holds the summary, so don't restate it or its results."
 
 jq -n --arg ctx "$MESSAGE" '{"systemMessage":"[claude-stop-finish] finishing pass triggered","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$ctx}}'
 exit 0
