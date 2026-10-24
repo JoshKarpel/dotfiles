@@ -8,6 +8,13 @@ set -uo pipefail
 
 bin_dir="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 
+# Run from a `git commit` hook, git exports GIT_DIR, GIT_INDEX_FILE and the like
+# naming the repo being committed, and they beat `git -C` in every sandbox repo a
+# self-test builds: its `git init`, `config` and `commit` land in this clone
+# instead, flipping it to `core.bare = true` and committing fixtures onto the
+# branch. Nothing a self-test does should see the commit in progress.
+unset $(git rev-parse --local-env-vars)
+
 fails=0
 found=0
 for hook in "$bin_dir"/*; do

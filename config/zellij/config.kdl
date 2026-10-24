@@ -102,19 +102,33 @@ keybinds {
         bind "Esc" { Write 27; }
     }
 
-    // Fuzzy tab switcher. zellij fetches and caches the URL itself, so the
-    // release tag here is the pin; bump it to upgrade. quick_jump makes every
-    // digit a jump to that tab number, so a digit can't be used to filter.
-    // In place rather than floating: room closes only its own pane, so
-    // opening it floating reveals any hidden floating panes in the tab and
-    // leaves them showing after it exits.
+    // Tab picker; bin/zellij-pick-tab says which keys do what. Alt rather
+    // than Ctrl+e, which every pane would lose as end-of-line. In place
+    // rather than floating: opening a floating pane reveals any hidden
+    // floating panes in the tab and leaves them showing after it exits.
+    // Back to normal mode so that, from tab mode, typing reaches the picker
+    // instead of tab mode's own bindings.
     shared_except "locked" {
-        bind "Ctrl y" {
-            LaunchOrFocusPlugin "https://github.com/rvcas/room/releases/download/v1.2.1/room.wasm" {
+        bind "Alt e" {
+            Run "zellij-pick-tab" {
                 in_place true
-                ignore_case true
-                quick_jump true
+                close_on_exit true
+                name "tabs"
             }
+            SwitchToMode "normal"
+        }
+
+        // Worktree picker, `wt` with no command; in place and back to normal
+        // mode for the tab picker's reasons. close_on_exit would close the
+        // pane on wt's error before it could be read, so a failure waits for
+        // a key first.
+        bind "Alt T" {
+            Run "bash" "-c" "wt || read -rsn1 -p 'wt failed; press any key to close'" {
+                in_place true
+                close_on_exit true
+                name "wt"
+            }
+            SwitchToMode "normal"
         }
     }
 }
