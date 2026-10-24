@@ -10,6 +10,14 @@ if exists microk8s; then
   }
 fi
 
+# client-go 1.35+ (k9s 0.50.17+) does each informer's initial list as a watch-list
+# stream, which the API server never gzips, so a pod view pulls every full pod
+# object uncompressed (~15x the bytes of a gzipped LIST) and crawls over a VPN.
+# https://github.com/derailed/k9s/issues/4044
+function k9s() {
+  KUBE_FEATURE_WatchListClient=false command k9s "$@"
+}
+
 alias k="kubectl"
 alias wk="watch kubectl"
 alias h="helm"
