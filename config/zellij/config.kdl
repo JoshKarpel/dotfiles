@@ -122,7 +122,7 @@ keybinds {
         // mode for the tab picker's reasons. close_on_exit would close the
         // pane on wt's error before it could be read, so a failure waits for
         // a key first.
-        bind "Alt T" {
+        bind "Alt E" {
             Run "bash" "-c" "wt || read -rsn1 -p 'wt failed; press any key to close'" {
                 in_place true
                 close_on_exit true

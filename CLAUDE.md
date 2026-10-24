@@ -373,7 +373,7 @@ zellij-web-font "FiraCode Nerd Font" "Fira Code"
 
 # One git worktree per zellij tab, each running its own agent: `wt new` opens a
 # branch in <repo>.worktrees/<branch> beside the clone, in a tab of its own, and
-# `wt done` removes the worktree and closes its tab. `wt` alone (Alt+Shift+t in
+# `wt done` removes the worktree and closes its tab. `wt` alone (Alt+Shift+e in
 # zellij) picks the clone, from ~/projects and ~/work, and the worktree or new
 # branch instead of taking them as arguments. The claude-tab-status hook marks
 # each tab working (●), waiting on you (?), or finished (✓).

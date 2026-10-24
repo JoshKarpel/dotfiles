@@ -44,13 +44,6 @@
   telling you the script mixes privilege levels and the privileged step belongs elsewhere.
 - After a change with observable runtime behavior, exercise it end-to-end yourself (drive the
   flow, endpoint, or render) to confirm it works, rather than asking the user to eyeball it.
-- Look at anything visual before reporting it done: a screenshot, a generated diagram, a
-  terminal render, an HTML page or Artifact. A clean build or a matching text dump says
-  nothing about a broken border, a shaded cell, or dead space. Render it to a PNG and open
-  it with Read, which displays images. For HTML,
-  `uvx playwright install --only-shell chromium` once (no sudo), then
-  `uvx playwright screenshot --full-page --color-scheme dark <url> <out.png>`; check both
-  color schemes, and check every image you generated, not a sample.
 - When a Bash command is expected to run long (servers, load tests, builds, sweeps), pass an
   explicit `timeout` so the default 2-minute cap doesn't kill it mid-run and orphan child
   processes.

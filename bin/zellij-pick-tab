@@ -187,8 +187,8 @@ def tab_picker(tabs: tuple[Tab, ...], choose: Callable[[Tab], None]) -> Div:
         return Text(
             content=f"{tab.number:>2}  {tab.name}",
             style=text_wrap_none
-            | (text_underline if tab.is_active else Style())
-            | (text_color("amber", 300) | text_bold if index == highlighted else text_color("slate", 300)),
+            | (text_bold if tab.is_active else Style())
+            | (text_color("amber", 300) if index == highlighted else text_color("slate", 300)),
         )
 
     return Div(
