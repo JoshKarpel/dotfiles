@@ -12,6 +12,9 @@ alias grep="grep --color=auto"
 alias fgrep="fgrep --color=auto"
 alias egrep="egrep --color=auto"
 
+# tree skips what git ignores (needs tree 2.0+)
+alias tree="tree --gitignore"
+
 # move/copy verbose by default
 alias cp="cp -v"
 alias mv="mv -v"
