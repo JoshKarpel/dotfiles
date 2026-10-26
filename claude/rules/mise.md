@@ -5,6 +5,7 @@ paths:
   - "**/.mise.toml"
   - "**/.mise.*.toml"
   - "**/mise/config.toml"
+  - "**/mise/conf.d/*.toml"
   - "**/.tool-versions"
 ---
 
@@ -66,6 +67,29 @@ tool's own version, so its transitive dependencies float to whatever is newest a
 install time. The sidecar's resolution honors `minimum_release_age`, so the
 cooldown covers the graph even when the tool itself is pinned. Sidecars need
 mise 2026.9.7 or newer and uv 0.12.10 or newer.
+
+## Mirrors and Proxies
+
+- Route mise's HTTP traffic through a mirror (an Artifactory remote, say) with
+  `url_replacements` in `[settings]`. A key is a substring match unless it starts
+  with `regex:`, so write each key with its full `https://` prefix: a bare
+  `"github.com"` also rewrites `api.github.com`.
+- Rewrite only the hosts the mirror actually proxies. A generic remote of
+  `github.com` serves release downloads but not the API, so leave
+  `api.github.com` alone and metadata and attestations keep working. Rewriting
+  `api.github.com` also turns off mise-versions for GitHub metadata, sending every
+  lookup through the mirror.
+- `pipx:` tools install through `uv tool install`, and mise passes uv an index
+  derived from `pypi.registry_url`, replacing `UV_INDEX_URL`. Point that setting
+  at the mirror's simple index, `https://<host>/.../simple/{}/`: a JSON-API URL
+  (`.../pypi/{}/json`) on any host but pypi.org converts to a broken index.
+- Put the mirror's credentials in `~/.netrc`, which mise reads by default for
+  Basic auth, never in the replacement URL.
+- A mirror only some machines can reach goes in a machine-local file, not the
+  shared global config: mise loads `~/.config/mise/conf.d/*.toml` alongside it.
+  Where `~/.config/mise` is a symlink into a dotfiles repo, gitignore `conf.d/`.
+- `MISE_TRACE=1 mise ls-remote <tool>` logs a `Replaced URL` line for each
+  rewrite, and a real `mise install` exercises the download side.
 
 ## [env]
 

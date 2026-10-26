@@ -12,6 +12,10 @@ claude/settings.json
 config/zellij/layouts/*
 !config/zellij/layouts/bare.kdl
 
+# Machine-local mise settings, such as a work mirror that only some machines
+# can reach. ~/.config/mise is a symlink to config/mise, so mise loads these.
+config/mise/conf.d/
+
 /bin/mc
 /bin/amm
 /bin/kubeseal
