@@ -529,7 +529,7 @@ def _selftest() -> int:
     failures = [name for name, passed in cases if not passed]
     for name in failures:
         print(f"FAIL: {name}", file=sys.stderr)
-    print(f"port-manage: {len(cases) - len(failures)}/{len(cases)} passed")
+    print(f"manage-ports: {len(cases) - len(failures)}/{len(cases)} passed")
     return 1 if failures else 0
 
 

@@ -371,23 +371,32 @@ zellij-restart-session
 # installed where the browser runs.
 zellij-web-font "FiraCode Nerd Font" "Fira Code"
 
-# One git worktree per zellij tab, each running its own agent: `wt new` opens a
-# branch in <repo>.worktrees/<branch> beside the clone, in a tab of its own, and
-# `wt done` removes the worktree and closes its tab. `wt` alone (Alt+Shift+e in
-# zellij) picks the clone, from ~/projects and ~/work, and the worktree or new
-# branch instead of taking them as arguments. The claude-tab-status hook marks
-# each tab working (●), waiting on you (?), or finished (✓).
-# Run with --help for subcommands and flags.
-wt --help
+# One git worktree per zellij tab, each running its own agent, aliased `wt`:
+# `wt new` opens a branch in <repo>.worktrees/<branch> beside the clone, in a
+# tab of its own, and `wt done` removes the worktree and closes its tab. `wt`
+# alone (Alt+Shift+e in zellij) picks the clone, from ~/projects and ~/work, and
+# the worktree or new branch instead of taking them as arguments. The
+# claude-tab-status hook marks each tab working (●), waiting on you (?), or
+# finished (✓). Run with --help for subcommands and flags.
+manage-worktrees --help
 
 # Pick local branches across every clone to delete (Alt+Shift+d in zellij),
 # with the ones merged or squash-merged into origin/HEAD already marked. A
 # branch checked out in a worktree goes through `wt done`, tab and all.
-git-manage
+manage-git
 
 # See what is listening on which TCP port, copy a port's URL (exe.dev's on a VM),
 # and stop the process behind one: the interactive port-user and port-kill.
-port-manage
+manage-ports
+
+# See this account's own systemd user services, folded together with their
+# timers, and the highlighted one's journal, and start, restart, or stop them.
+manage-units
+
+# Pick a recipe from the justfile here and run it, typing any arguments after
+# its name. Aliased `jp`; Alt+j in zellij runs it in the focused pane's
+# directory and holds the output until a key.
+pick-just
 
 # Exit 0 only on an exe.dev VM tagged `dev-box`. The guard the services that
 # exist to be looked at by a person are gated on.
@@ -561,6 +570,19 @@ would apply a style to every session on every machine. The `harry` alias in
 
 ## Conventions
 
+- Scripts in `bin/` come in families named by a shared leading word, so typing
+  the word and Tab lists the family: `claude-*`, `is-*`, `converge-*`, and the
+  TUIs, `pick-*` for choosing one thing and acting on it or printing it, and
+  `manage-*` for a live list acted on row by row. Name a new script into its
+  family, leading with the family word rather than the object (`manage-git`,
+  not `git-manage`). A short name for typing is a shell alias in `sources/`
+  (`wt`, `jp`), never the script's own name, and anything that is not an
+  interactive shell (a hook, a zellij binding, another script) calls the full
+  name, since the alias does not exist there.
+- The `pick-*` and `manage-*` TUIs are [counterweight](https://www.counterweight.dev/)
+  apps sharing one key scheme and a pure `step` function that their self-tests
+  drive. Start a new one from the closest: `pick-kube` for a one-shot pick,
+  `manage-ports` for a live list.
 - Python scripts in `bin/` run under `uv`, not the system interpreter. Use the
   [PEP 723](https://peps.python.org/pep-0723/) inline-script shebang
   `#!/usr/bin/env -S uv run --quiet --script` followed by a `# /// script` metadata

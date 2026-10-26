@@ -1,0 +1,509 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.15"
+# dependencies = ["counterweight>=0.1.1", "typer"]
+# ///
+"""
+Pick a recipe from the justfile here and run it, with any arguments typed after its name.
+
+Backs `jp` (sources/aliases.sh) and Alt+j in zellij. The recipes are the ones `just --list` shows, private ones left
+out, under the same group headings, with a module's recipes listed by their `module::recipe` path.
+
+The query is the command line. Its first word narrows the recipes to those whose name contains it, ignoring case, and
+highlights the one it names exactly, if any; whatever follows the first space is passed to the recipe as arguments,
+split as the shell would split them. Enter runs `just <recipe> <arguments>` in this terminal once the picker has left
+the screen, so the output stays and a `[confirm]` recipe asks as it would anywhere. A recipe missing a required
+argument says which instead of running. Up, Down, Tab, Shift+Tab, Ctrl+N, Ctrl+P and Ctrl+K move the highlight,
+Backspace deletes a character and Ctrl+U the whole query, and Escape or Ctrl+C leaves without running anything.
+
+Exits with the recipe's status, or 0 when left.
+"""
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests (`_selftest`).
+# This marker line is how `claude-hook-selftests` discovers participating scripts.
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import shlex
+import subprocess
+import sys
+import termios
+import tty
+from collections.abc import Callable
+from collections.abc import Mapping
+from dataclasses import dataclass
+from dataclasses import replace
+from datetime import timedelta
+from typing import Annotated, Any, assert_never
+
+import typer
+from counterweight import app as counterweight_app
+from counterweight.components import component
+from counterweight.controls import Quit
+from counterweight.elements import Div
+from counterweight.elements import Text
+from counterweight.events import InputEvent
+from counterweight.events import InputResponse
+from counterweight.events import KeyPressed
+from counterweight.events import Pasted
+from counterweight.events import Receiver
+from counterweight.hooks import use_controls
+from counterweight.hooks import use_effect
+from counterweight.hooks import use_state
+from counterweight.keys import Key
+from counterweight.styles import Style
+from counterweight.styles.utilities import *
+
+DOWN_KEYS = frozenset({Key.Down, Key.Tab, Key.ControlN})
+UP_KEYS = frozenset({Key.Up, Key.BackTab, Key.ControlP, Key.ControlK})
+LEAVE_KEYS = frozenset({Key.Escape, Key.ControlC})
+
+KIND_PREFIXES = {"singular": "", "plus": "+", "star": "*"}
+
+
+@dataclass(frozen=True, slots=True)
+class Parameter:
+    """One of a recipe's parameters, as `just --dump --dump-format json` reports it."""
+
+    name: str
+    kind: str
+    # A string, an expression just keeps as nested lists, or None when there is no default.
+    default: object
+    # Given as --long or -s by an `[arg]` attribute, rather than by position.
+    is_option: bool
+
+    @property
+    def is_required(self) -> bool:
+        """Whether the recipe cannot run without an argument for it: `*` takes zero or more, `+` one or more."""
+        return self.default is None and self.kind != "star" and not self.is_option
+
+    @property
+    def signature(self) -> str:
+        """The parameter as `just --list` writes it, an expression default abbreviated to `…`."""
+        signature = KIND_PREFIXES[self.kind] + self.name
+        match self.default:
+            case None:
+                return signature
+            case str(text):
+                return f"{signature}='{text}'"
+            case _:
+                return f"{signature}=…"
+
+
+@dataclass(frozen=True, slots=True)
+class Recipe:
+    """A recipe the picker can run, by the path `just` takes on its command line."""
+
+    path: str
+    parameters: tuple[Parameter, ...]
+    doc: str | None
+    groups: tuple[str, ...]
+
+    @property
+    def signature(self) -> str:
+        return " ".join((self.path, *(parameter.signature for parameter in self.parameters)))
+
+    def missing(self, argument_count: int) -> tuple[str, ...]:
+        """The required parameters ARGUMENT_COUNT arguments leave unfilled; just puts every one before the rest."""
+        return tuple(parameter.name for parameter in self.parameters if parameter.is_required)[argument_count:]
+
+
+def parse_recipe(recipe: Mapping[str, Any]) -> Recipe:
+    """One recipe of the dump; a missing field raises rather than defaulting."""
+    return Recipe(
+        path=recipe["namepath"],
+        parameters=tuple(
+            Parameter(
+                name=parameter["name"],
+                kind=parameter["kind"],
+                default=parameter["default"],
+                is_option=bool(parameter["long"] or parameter["short"]),
+            )
+            for parameter in recipe["parameters"]
+        ),
+        doc=recipe["doc"],
+        # An attribute is a bare string (`private`) or a one-key object (`{"group": "rust"}`).
+        groups=tuple(
+            attribute["group"]
+            for attribute in recipe["attributes"]
+            if isinstance(attribute, dict) and "group" in attribute
+        ),
+    )
+
+
+def parse_recipes(justfile: Mapping[str, Any]) -> tuple[Recipe, ...]:
+    """The public recipes of the dump and of every module in it, by path."""
+    recipes = [parse_recipe(recipe) for recipe in justfile["recipes"].values() if not recipe["private"]]
+    for module in justfile["modules"].values():
+        recipes += parse_recipes(module)
+    return tuple(sorted(recipes, key=lambda recipe: recipe.path))
+
+
+@dataclass(frozen=True, slots=True)
+class Heading:
+    """A row naming the group below it, which the highlight skips."""
+
+    title: str
+
+
+type Row = Heading | Recipe
+
+
+def command_line(query: str) -> tuple[str, str]:
+    """The query's first word, which narrows the recipes, and the rest, which is the recipe's arguments."""
+    word, _, arguments = query.lstrip().partition(" ")
+    return word, arguments
+
+
+def recipe_rows(recipes: tuple[Recipe, ...], word: str) -> tuple[Row, ...]:
+    """
+    The recipes whose path contains WORD, ignoring case, laid out as `just --list` does.
+
+    Ungrouped recipes come first with no heading, then each group under its own, so a recipe in two groups is listed
+    under both.
+    """
+    folded = word.casefold()
+    matched = [recipe for recipe in recipes if folded in recipe.path.casefold()]
+    rows: list[Row] = [recipe for recipe in matched if not recipe.groups]
+    for group in sorted({group for recipe in matched for group in recipe.groups}):
+        rows += [Heading(f"[{group}]"), *(recipe for recipe in matched if group in recipe.groups)]
+    return tuple(rows)
+
+
+def options(rows: tuple[Row, ...]) -> tuple[Recipe, ...]:
+    """The rows the highlight can land on."""
+    return tuple(row for row in rows if isinstance(row, Recipe))
+
+
+@dataclass(frozen=True, slots=True)
+class Search:
+    """The query, which of the recipes it matches is highlighted, and why Enter last refused to run one."""
+
+    query: str
+    highlighted: int
+    notice: str
+
+    def edited(self, query: str, recipes: tuple[Recipe, ...]) -> Search:
+        """
+        The query changed to QUERY.
+
+        Only a changed first word moves the highlight, to the recipe it names exactly or else the first match, since
+        the old index points into a different list. Typing arguments leaves it where it is.
+        """
+        word = command_line(query)[0]
+        if word == command_line(self.query)[0]:
+            return replace(self, query=query, notice="")
+        shown = options(recipe_rows(recipes, word))
+        exact = next((index for index, recipe in enumerate(shown) if recipe.path == word), 0)
+        return Search(query=query, highlighted=exact, notice="")
+
+    def moved(self, by: int, match_count: int) -> Search:
+        """The highlight moved BY rows, wrapping at either end."""
+        return replace(self, highlighted=(self.highlighted + by) % match_count) if match_count else self
+
+
+EMPTY_SEARCH = Search(query="", highlighted=0, notice="")
+
+
+@dataclass(frozen=True, slots=True)
+class Finished:
+    """The picker is done, having chosen the arguments to `just`, or nothing if it was left."""
+
+    command: tuple[str, ...] | None
+
+
+type Picking = Search | Finished
+
+
+def chosen(search: Search, recipe: Recipe) -> Picking:
+    """What Enter on RECIPE does: run it with the query's arguments, or say why it cannot."""
+    try:
+        arguments = shlex.split(command_line(search.query)[1])
+    except ValueError as error:
+        return replace(search, notice=f"the arguments don't split: {error}")
+    if missing := recipe.missing(len(arguments)):
+        return replace(search, notice=f"{recipe.path} needs {' '.join(missing)}")
+    return Finished(command=(recipe.path, *arguments))
+
+
+def step(picking: Picking, event: InputEvent, recipes: tuple[Recipe, ...]) -> Picking:
+    """
+    The picker after one more key press or paste.
+
+    Every input goes through here, applied to the latest state, so keys typed faster than the screen redraws
+    (type-ahead while just dumps the justfile, say) land as if each had been seen.
+    """
+    if isinstance(picking, Finished):
+        return picking
+    shown = options(recipe_rows(recipes, command_line(picking.query)[0]))
+    match event:
+        case KeyPressed(key=key) if key in LEAVE_KEYS:
+            return Finished(command=None)
+        # Enter typed ahead, before the terminal goes raw, has had its \r turned into \n (Ctrl+J) by the tty.
+        case KeyPressed(key=Key.Enter | Key.ControlJ) if shown:
+            return chosen(picking, shown[picking.highlighted])
+        case KeyPressed(key=key) if key in DOWN_KEYS:
+            return picking.moved(1, len(shown))
+        case KeyPressed(key=key) if key in UP_KEYS:
+            return picking.moved(-1, len(shown))
+        case KeyPressed(key=Key.Backspace):
+            return picking.edited(picking.query[:-1], recipes)
+        case KeyPressed(key=Key.ControlU):
+            return picking.edited("", recipes)
+        # Text is one character; every named key is longer ("enter", "alt+b"), so length tells them apart.
+        case KeyPressed(key=key) if len(key) == 1 and key.isprintable():
+            return picking.edited(picking.query + key, recipes)
+        case Pasted(text=text):
+            return picking.edited(picking.query + "".join(c for c in text if c.isprintable()), recipes)
+        case _:
+            return picking
+
+
+@component
+def recipe_picker(recipes: tuple[Recipe, ...], choose: Callable[[tuple[str, ...]], None]) -> Div:
+    picking, set_picking = use_state(EMPTY_SEARCH)
+    send_control = use_controls()
+
+    async def finish() -> None:
+        if not isinstance(picking, Finished):
+            return
+        if picking.command is not None:
+            choose(picking.command)
+        send_control(Quit())
+
+    use_effect(finish, deps=(picking,))
+
+    def on_input(event: InputEvent, _: Receiver) -> InputResponse:
+        if not isinstance(event, KeyPressed | Pasted):
+            return None
+        set_picking(lambda latest: step(latest, event, recipes))
+        return ()
+
+    match picking:
+        case Finished():
+            return Div(style=full)
+        case Search(query=query, highlighted=highlighted, notice=notice):
+            word, arguments = command_line(query)
+            rows = recipe_rows(recipes, word)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+    # Aligned across every recipe rather than the ones shown, so the docs hold still as the query narrows.
+    width = max(len(recipe.signature) for recipe in recipes)
+    # A recipe in two groups is two rows, so the highlight is found by counting, not by identity.
+    option_indexes = iter(range(len(rows)))
+
+    def row_line(row: Row) -> Text | Div:
+        match row:
+            case Heading(title=title):
+                return Text(content=title, style=text_wrap_none | text_bold | text_color("slate", 400))
+            case Recipe(signature=signature, doc=doc):
+                is_highlighted = next(option_indexes) == highlighted
+                return Div(
+                    style=row_style,
+                    children=(
+                        Text(
+                            content=f"  {signature.ljust(width)}",
+                            style=text_wrap_none
+                            | (text_bold | text_color("amber", 300) if is_highlighted else text_color("slate", 300)),
+                        ),
+                        Text(content=f"  # {doc}" if doc else "", style=text_wrap_none | text_color("slate", 500)),
+                    ),
+                )
+            case _ as unreachable:
+                assert_never(unreachable)
+
+    shown = options(rows)
+    preview = shlex.join(["just", shown[highlighted].path]) + (f" {arguments}" if arguments else "") if shown else ""
+    return Div(
+        style=full | col | border | border_lightrounded | border_color("slate", 500) | pad_x(1),
+        on_input=on_input,
+        children=(
+            Text(content="a recipe, then any arguments after a space", style=text_wrap_none | text_color("slate", 400)),
+            Div(
+                style=row_style | overflow_x_scroll | stick_to_end_x,
+                children=(
+                    Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
+                    Text(content=query, style=text_wrap_none),
+                    Text(content=" ", style=text_wrap_none | text_bg("sky", 300)),
+                ),
+            ),
+            Div(
+                style=col | fill(1) | overflow_y_scroll,
+                children=tuple(row_line(row) for row in rows)
+                or (Text(content="nothing matches", style=text_color("slate", 400)),),
+            ),
+            Text(content=notice or preview, style=text_wrap_none | (text_color("red", 400) if notice else text_color("sky", 300))),
+        ),
+    )
+
+
+# `row` from the style utilities, renamed so the Row rows above don't read as it.
+row_style: Style = row
+
+
+async def pick(recipes: tuple[Recipe, ...], **app_options: object) -> tuple[str, ...] | None:
+    """Run the picker until it quits, and return the arguments to `just` it chose, if any."""
+    chosen_commands: list[tuple[str, ...]] = []
+    await counterweight_app(recipe_picker(recipes, chosen_commands.append), **app_options)
+    return chosen_commands[-1] if chosen_commands else None
+
+
+def wait_for_key(message: str) -> None:
+    """Say MESSAGE and wait for any key, so a pane that closes when this exits can still be read."""
+    with open("/dev/tty", "rb", buffering=0) as terminal:
+        fd = terminal.fileno()
+        original = termios.tcgetattr(fd)
+        print(message, end="", flush=True)
+        try:
+            tty.setcbreak(fd)
+            terminal.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, original)
+            print()
+
+
+def run_just(command: tuple[str, ...]) -> int:
+    """
+    Run just with COMMAND in this terminal and return its status.
+
+    Ctrl+C reaches just as well as this process, and just decides whether the recipe stops, so an interrupt here only
+    goes back to waiting. `subprocess.run` would instead kill just a quarter-second later, orphaning the recipe.
+    """
+    process = subprocess.Popen(["just", *command])
+    while True:
+        try:
+            return process.wait()
+        except KeyboardInterrupt:
+            continue
+
+
+def run_picked() -> tuple[int, bool]:
+    """
+    Pick a recipe and run it, returning its status and whether anything was printed.
+
+    The status is just's own when there is no justfile to read, and 0 when the picker was left, the one outcome that
+    prints nothing.
+    """
+    # stderr passes through, so a missing or broken justfile reads as just's own message.
+    dump = subprocess.run(["just", "--dump", "--dump-format", "json"], stdout=subprocess.PIPE, text=True)
+    if dump.returncode != 0:
+        return dump.returncode, True
+    recipes = parse_recipes(json.loads(dump.stdout))
+    if not recipes:
+        print("pick-just: the justfile has no public recipes", file=sys.stderr)
+        return 1, True
+
+    command = asyncio.run(pick(recipes, title="just"))
+    if command is None:
+        return 0, False
+    print(f"$ {shlex.join(['just', *command])}", flush=True)
+    return run_just(command), True
+
+
+def main(
+    hold: Annotated[
+        bool, typer.Option(help="Wait for a key before exiting, so a pane that closes on exit can still be read.")
+    ] = False,
+) -> None:
+    status, printed = run_picked()
+    if hold and printed:
+        wait_for_key(f"just exited {status}; press any key to close")
+    raise typer.Exit(status)
+
+
+def _selftest() -> int:
+    from functools import reduce
+
+    from counterweight.autopilot import typed
+
+    def parameter(name: str, kind: str = "singular", default: object = None, long: str | None = None) -> dict[str, Any]:
+        return {"name": name, "kind": kind, "default": default, "long": long, "short": None}
+
+    def recipe(path: str, *parameters: dict[str, Any], doc: str | None = None, attributes: list[Any] | None = None, private: bool = False) -> dict[str, Any]:
+        return {"namepath": path, "parameters": list(parameters), "doc": doc, "attributes": attributes or [], "private": private}
+
+    dump = {
+        "recipes": {
+            "_hidden": recipe("_hidden", private=True),
+            "also-hidden": recipe("also-hidden", attributes=["private"], private=True),
+            "bump": recipe("bump", parameter("part", default=["concatenate", "x", ["variable", "v"]]), parameter("args", "star", "")),
+            "lint": recipe("lint", doc="Lint everything", attributes=[{"group": "checks"}]),
+            "lint-all": recipe("lint-all"),
+            "test": recipe(
+                "test", parameter("target"), parameter("mode", default="debug"), parameter("jobs", long="jobs"),
+                attributes=[{"group": "rust"}, {"group": "checks"}],
+            ),
+        },
+        "modules": {"sub": {"recipes": {"inner": recipe("sub::inner", parameter("x", "plus"))}, "modules": {}}},
+    }
+    recipes = parse_recipes(dump)
+    by_path = {recipe.path: recipe for recipe in recipes}
+    enter, escape, down = KeyPressed(key=Key.Enter), KeyPressed(key=Key.Escape), KeyPressed(key=Key.Down)
+
+    def stepped(*events: InputEvent) -> Picking:
+        start: Picking = EMPTY_SEARCH
+        return reduce(lambda picking, event: step(picking, event, recipes), events, start)
+
+    def shown_paths(word: str) -> tuple[str, ...]:
+        return tuple(row.title if isinstance(row, Heading) else row.path for row in recipe_rows(recipes, word))
+
+    cases: list[tuple[str, bool]] = [
+        ("private recipes are left out, and a module's are listed by path", tuple(by_path) == ("bump", "lint", "lint-all", "sub::inner", "test")),
+        ("a signature writes a string default quoted and an expression one abbreviated", by_path["bump"].signature == "bump part=… *args=''"),
+        ("a signature marks + parameters", by_path["sub::inner"].signature == "sub::inner +x"),
+        ("groups are read from attributes, other attributes ignored", by_path["test"].groups == ("rust", "checks")),
+        (
+            "ungrouped recipes come first, then each group under its heading, a recipe in two under both",
+            shown_paths("") == ("bump", "lint-all", "sub::inner", "[checks]", "lint", "test", "[rust]", "test"),
+        ),
+        ("a heading appears only over a group with matches", shown_paths("LINT") == ("lint-all", "[checks]", "lint")),
+        ("only the first word narrows", shown_paths(command_line("sub a b")[0]) == ("sub::inner",)),
+        ("a required parameter left out is missing", by_path["test"].missing(0) == ("target",)),
+        ("defaulted and option parameters are never missing", by_path["test"].missing(1) == ()),
+        ("a + parameter needs one argument", by_path["sub::inner"].missing(0) == ("x",)),
+        ("Enter runs a recipe needing nothing", stepped(enter) == Finished(command=("bump",))),
+        ("a first word naming a recipe exactly highlights it over earlier matches", stepped(*typed("lint"), enter) == Finished(command=("lint",))),
+        (
+            "the words after the first are the recipe's arguments, split as the shell would",
+            stepped(*typed("test 'a b' -k"), enter) == Finished(command=("test", "a b", "-k")),
+        ),
+        ("typing arguments leaves the highlight where it was", stepped(*typed("lin"), down, *typed(" x"), enter) == Finished(command=("lint", "x"))),
+        ("a module's recipe runs by its path", stepped(*typed("inner x"), enter) == Finished(command=("sub::inner", "x"))),
+        ("Enter on a recipe missing an argument says so and stays", stepped(*typed("test"), enter) == Search("test", 0, "test needs target")),
+        ("arguments that don't split say so", isinstance(stepped(*typed("test 'a"), enter), Search)),
+        ("typing clears the notice", stepped(*typed("test"), enter, *typed(" a")) == Search("test a", 0, "")),
+        ("Down from the last wraps to the first", stepped(*typed("lint"), down, enter) == Finished(command=("lint-all",))),
+        ("Escape leaves without running anything", stepped(escape, enter) == Finished(command=None)),
+        ("Enter with nothing matched stays put", stepped(*typed("zz"), enter) == Search("zz", 0, "")),
+        ("Ctrl+U clears the query", stepped(*typed("zz"), KeyPressed(key=Key.ControlU), enter) == Finished(command=("bump",))),
+        ("a paste adds its printable text", stepped(Pasted(text="sub y\n"), enter) == Finished(command=("sub::inner", "y"))),
+    ]
+
+    def picked(*steps: object) -> tuple[str, ...] | None:
+        return asyncio.run(
+            asyncio.wait_for(
+                pick(recipes, title="just", headless=True, dimensions=(60, 14), autopilot=[*steps, Quit()]),
+                timeout=timedelta(seconds=30).total_seconds(),
+            )
+        )
+
+    cases += [
+        ("the app hands back the command chosen", picked(*typed("test a"), enter) == ("test", "a")),
+        ("the app hands back nothing when left", picked(escape) is None),
+    ]
+
+    failures = [name for name, passed in cases if not passed]
+    for name in failures:
+        print(f"FAIL: {name}", file=sys.stderr)
+    print(f"pick-just: {len(cases) - len(failures)}/{len(cases)} passed")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    if os.environ.get("CLAUDE_HOOK_SELFTEST"):
+        sys.exit(_selftest())
+    typer.run(main)

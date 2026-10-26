@@ -111,10 +111,10 @@ def current_config(kubeconfig: str, kube_dir: Path) -> str | None:
 def choose(prompt: str, names: tuple[str, ...], current: str | None) -> None:
     """Run the picker, then print the name chosen, or exit 1 if it was left."""
     if not names:
-        typer.echo(f"kube-pick: there is no {prompt.removeprefix('a ')} to pick", err=True)
+        typer.echo(f"pick-kube: there is no {prompt.removeprefix('a ')} to pick", err=True)
         raise typer.Exit(1)
     with terminal_as_stdout() as answer:
-        chosen = asyncio.run(pick(prompt, names, current, title="kube-pick"))
+        chosen = asyncio.run(pick(prompt, names, current, title="pick-kube"))
     if chosen is None:
         raise typer.Exit(1)
     answer.write(f"{chosen}\n")
@@ -313,7 +313,7 @@ def _selftest() -> int:
         return asyncio.run(
             asyncio.wait_for(
                 pick(
-                    "a context", names, "prod-us-1", title="kube-pick", headless=True, dimensions=(40, 10),
+                    "a context", names, "prod-us-1", title="pick-kube", headless=True, dimensions=(40, 10),
                     autopilot=[*steps, Quit()],
                 ),
                 timeout=timedelta(seconds=30).total_seconds(),
@@ -328,7 +328,7 @@ def _selftest() -> int:
     failures = [name for name, passed in cases if not passed]
     for name in failures:
         print(f"FAIL: {name}", file=sys.stderr)
-    print(f"kube-pick: {len(cases) - len(failures)}/{len(cases)} passed")
+    print(f"pick-kube: {len(cases) - len(failures)}/{len(cases)} passed")
     return 1 if failures else 0
 
 

@@ -11,10 +11,10 @@ clone itself has checked out, with where each stands against origin/HEAD. Space 
 branch and Enter deletes every marked one, including any the query is hiding, whether or not git counts it merged:
 marking it is the decision `git branch -d` would otherwise make. So only branches whose work is on origin/HEAD start
 out marked: those merged into it, and those squash-merged into it, found by the patch of the branch's whole diff. A
-branch with no upstream is never marked for you, because a branch `wt new` just made looks merged until its first
+branch with no upstream is never marked for you, because a branch `manage-worktrees new` just made looks merged until its first
 commit, and one whose worktree has changes cannot be marked at all.
 
-A branch checked out in a worktree is handed to `wt done --delete-unmerged`, which removes the worktree and closes
+A branch checked out in a worktree is handed to `manage-worktrees done --delete-unmerged`, which removes the worktree and closes
 its tab, the focused tab last, so the tab this runs in can go too. Typing narrows the list as in the other pickers;
 Space never does, since no branch name has one. Escape or Ctrl+C leaves without deleting anything.
 
@@ -54,7 +54,7 @@ from counterweight.hooks import use_state
 from counterweight.keys import Key
 from counterweight.styles.utilities import *
 
-# Where clones are looked for, each listed under its own heading. sync-branches and wt keep the same pair.
+# Where clones are looked for, each listed under its own heading. sync-branches and manage-worktrees keep the same pair.
 CLONE_ROOTS = (Path.home() / "projects", Path.home() / "work")
 
 DOWN_KEYS = frozenset({Key.Down, Key.Tab, Key.ControlN})
@@ -88,7 +88,7 @@ class Branch:
 
     @property
     def is_markable(self) -> bool:
-        """Whether deleting it could succeed; `wt done` refuses a worktree with changes."""
+        """Whether deleting it could succeed; `manage-worktrees done` refuses a worktree with changes."""
         return self.status is not Status.CHANGED
 
 
@@ -114,7 +114,7 @@ def git(cwd: Path, *args: str | Path) -> str:
 
 
 def discover_clones(root: Path) -> tuple[Path, ...]:
-    """The clones directly under ROOT, by the rule sync-branches and wt use: a `.git` that is a directory."""
+    """The clones directly under ROOT, by the rule sync-branches and manage-worktrees use: a `.git` that is a directory."""
     if not root.is_dir():
         return ()
     return tuple(sorted(path for path in root.iterdir() if (path / ".git").is_dir()))
@@ -458,9 +458,9 @@ async def pick(groups: tuple[Group, ...], **app_options: object) -> tuple[Branch
 
 def delete(chosen: tuple[Branch, ...]) -> int:
     """
-    Delete the branches with no worktree, then hand the rest to `wt done`, returning the worst exit status.
+    Delete the branches with no worktree, then hand the rest to `manage-worktrees done`, returning the worst exit status.
 
-    `wt done` goes last because closing the tab this runs in ends it, and it keeps its own tabs in order.
+    `manage-worktrees done` goes last because closing the tab this runs in ends it, and it keeps its own tabs in order.
     """
     status = 0
     for branch in chosen:
@@ -471,7 +471,7 @@ def delete(chosen: tuple[Branch, ...]) -> int:
             print(f"deleted branch {branch.name}")
         status = max(status, result.returncode)
     if worktrees := [str(branch.worktree) for branch in chosen if branch.worktree is not None]:
-        status = max(status, subprocess.run(["wt", "done", "--delete-unmerged", *worktrees]).returncode)
+        status = max(status, subprocess.run(["manage-worktrees", "done", "--delete-unmerged", *worktrees]).returncode)
     return status
 
 
@@ -549,7 +549,7 @@ def _selftest() -> int:
     def picked(*steps: object) -> tuple[Branch, ...]:
         return asyncio.run(
             asyncio.wait_for(
-                pick(groups, title="git-manage", headless=True, dimensions=(70, 12), autopilot=[*steps, Quit()]),
+                pick(groups, title="manage-git", headless=True, dimensions=(70, 12), autopilot=[*steps, Quit()]),
                 timeout=timedelta(seconds=30).total_seconds(),
             )
         )
@@ -562,7 +562,7 @@ def _selftest() -> int:
     failures = [name for name, passed in cases if not passed]
     for name in failures:
         print(f"FAIL: {name}", file=sys.stderr)
-    print(f"git-manage: {len(cases) - len(failures)}/{len(cases)} passed")
+    print(f"manage-git: {len(cases) - len(failures)}/{len(cases)} passed")
     return 1 if failures else 0
 
 
@@ -579,7 +579,7 @@ def main() -> int:
     if not groups:
         print("no branches to clean up")
         return 0
-    return delete(asyncio.run(pick(groups, title="git-manage")))
+    return delete(asyncio.run(pick(groups, title="manage-git")))
 
 
 if __name__ == "__main__":

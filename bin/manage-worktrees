@@ -46,7 +46,7 @@ from counterweight.styles.utilities import *
 
 app = typer.Typer(help=__doc__)
 
-# Where clones are looked for, each listed under its own heading. sync-branches and git-manage keep the same pair.
+# Where clones are looked for, each listed under its own heading. sync-branches and manage-git keep the same pair.
 CLONE_ROOTS = (Path.home() / "projects", Path.home() / "work")
 
 
@@ -108,7 +108,7 @@ def clone_of(path: Path) -> Path:
 
 def fail(message: str) -> typer.Exit:
     """Report MESSAGE on stderr and return the exit to raise."""
-    typer.echo(f"wt: {message}", err=True)
+    typer.echo(f"manage-worktrees: {message}", err=True)
     return typer.Exit(1)
 
 
@@ -158,7 +158,7 @@ def new(
     # Hooks live in the clone's git dir, shared by every worktree, so one install
     # covers them all. It runs from the clone rather than the worktree because the
     # hook pins the interpreter that installed it, and a worktree's venv is gone
-    # after `wt done`. That pin is also why a hook can stop working: a uv cache
+    # after `manage-worktrees done`. That pin is also why a hook can stop working: a uv cache
     # interpreter is gone after `tidy`. A working hook is left alone, since in a
     # uv project the install goes through `uv run`, which syncs the clone's venv.
     # When one is needed it runs in a floating pane of the new tab rather than
@@ -205,7 +205,7 @@ def done(
     it would discard them, and goes on to the rest. A branch git will not delete
     with `-d` is kept, so its commits survive the worktree, and git says why. A
     squash-merged branch is one of those, since git cannot see that its commits
-    landed; git-manage passes --delete-unmerged for the branches it has found
+    landed; manage-git passes --delete-unmerged for the branches it has found
     landed, or that were picked by hand.
 
     Closing a tab ends the agent running in it, and this command too when it is
@@ -318,7 +318,7 @@ def pick(context: typer.Context) -> None:
     sections = tuple(Section(title=f"~/{root.name}", clones=discover_clones(root)) for root in CLONE_ROOTS)
     # Read up front, all of them, so stepping the picker never waits on git; it takes milliseconds.
     branches = {clone: worktree_branches(clone) for section in sections for clone in section.clones}
-    opening = asyncio.run(choose_opening(sections, branches, title="wt"))
+    opening = asyncio.run(choose_opening(sections, branches, title="worktrees"))
     if opening is None:
         return
     typer.echo(f"opening {tab_name(opening.clone, opening.branch)}")
@@ -745,7 +745,7 @@ def _selftest() -> int:
     failures = [name for name, passed in cases if not passed]
     for name in failures:
         print(f"FAIL: {name}", file=sys.stderr)
-    print(f"wt: {len(cases) - len(failures)}/{len(cases)} passed")
+    print(f"manage-worktrees: {len(cases) - len(failures)}/{len(cases)} passed")
     return 1 if failures else 0
 
 

@@ -1,0 +1,729 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.15"
+# dependencies = ["counterweight>=0.1.1"]
+# ///
+"""
+See this account's own systemd user services and their timers, watch their journals, and start, restart or stop them.
+
+Each row is a service with a unit file in ~/.config/systemd/user, which is where install.sh and the tools it
+converges write theirs, folded together with the timer that triggers it: its state, how its last run ended, and when
+the timer fires next. Below the rows are the highlighted service's latest journal lines.
+
+Type to narrow the rows to those whose name or description contains the text, ignoring case. Up, Down, Tab,
+Shift+Tab, Ctrl+N, Ctrl+P and Ctrl+K move the highlight, Backspace deletes a character and Ctrl+U the whole query.
+Ctrl+S starts the highlighted service, which for one a timer triggers means running it now, Ctrl+R restarts it, and
+Ctrl+X stops it, each queued with --no-block, so a long run shows as activating rather than freezing the screen.
+Enter opens the service's whole journal in a pager, and quitting the pager comes back here. Escape or Ctrl+C
+leaves.
+
+The rows and the journal are read again every second, and the highlight stays on its service while rows come and go
+around it.
+"""
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests (`_selftest`).
+# This marker line is how `claude-hook-selftests` discovers participating scripts.
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import shutil
+import subprocess
+import sys
+from collections.abc import Callable
+from collections.abc import Iterable
+from collections.abc import Mapping
+from collections.abc import Sequence
+from dataclasses import dataclass
+from dataclasses import replace
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
+from pathlib import Path
+from typing import Any, assert_never
+
+from counterweight import app
+from counterweight.components import component
+from counterweight.controls import Quit
+from counterweight.controls import Suspend
+from counterweight.elements import Div
+from counterweight.elements import Text
+from counterweight.events import InputEvent
+from counterweight.events import InputResponse
+from counterweight.events import KeyPressed
+from counterweight.events import Pasted
+from counterweight.events import Receiver
+from counterweight.hooks import use_controls
+from counterweight.hooks import use_effect
+from counterweight.hooks import use_state
+from counterweight.keys import Key
+from counterweight.programs import Exited
+from counterweight.programs import FailedToStart
+from counterweight.programs import ProgramOutcome
+from counterweight.styles import Style
+from counterweight.styles.utilities import *
+
+DOWN_KEYS = frozenset({Key.Down, Key.Tab, Key.ControlN})
+UP_KEYS = frozenset({Key.Up, Key.BackTab, Key.ControlP, Key.ControlK})
+LEAVE_KEYS = frozenset({Key.Escape, Key.ControlC})
+VERBS = {Key.ControlS: "start", Key.ControlR: "restart", Key.ControlX: "stop"}
+POLL_INTERVAL = timedelta(seconds=1)
+JOURNAL_LINES = 10
+
+UNIT_DIRECTORY = Path.home() / ".config" / "systemd" / "user"
+SHOWN_PROPERTIES = (
+    "Id",
+    "Description",
+    "LoadState",
+    "ActiveState",
+    "SubState",
+    "Result",
+    "ExecMainStatus",
+    "StateChangeTimestamp",
+    "Triggers",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class Timer:
+    """The timer that triggers a service, and when it last fired and fires next, if ever."""
+
+    name: str
+    next: datetime | None
+    last: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class Unit:
+    """A row: a service, or a timer whose service has no unit file of its own here, with the timer folded in."""
+
+    name: str
+    description: str
+    load_state: str
+    active_state: str
+    sub_state: str
+    result: str
+    # The main process's exit status, which only a service has.
+    exit_status: int | None
+    changed: datetime | None
+    timer: Timer | None
+
+    @property
+    def short_name(self) -> str:
+        return self.name.removesuffix(".service")
+
+    @property
+    def searchable(self) -> str:
+        return f"{self.name} {self.description}"
+
+
+def unit_names(filenames: Iterable[str]) -> tuple[str, ...]:
+    """
+    The services and timers among FILENAMES, as `systemctl show` takes them.
+
+    A template (`name@.service`) is not a unit until it is instantiated, so it is left out, as are the slices and
+    `.wants` directories that share the directory.
+    """
+    return tuple(
+        sorted(name for name in filenames if name.endswith((".service", ".timer")) and "@." not in name)
+    )
+
+
+def parse_show(output: str) -> dict[str, dict[str, str]]:
+    """Each unit's properties from `systemctl show`, which prints one block of KEY=VALUE lines per unit."""
+    blocks = {}
+    for block in output.strip().split("\n\n"):
+        fields = dict(line.partition("=")[::2] for line in block.splitlines())
+        blocks[fields["Id"]] = fields
+    return blocks
+
+
+def from_microseconds(value: int | None) -> datetime | None:
+    """A `list-timers` time, where 0 or null means never."""
+    return datetime.fromtimestamp(value / 1_000_000, UTC) if value else None
+
+
+def parse_timers(listing: str) -> dict[str, tuple[datetime | None, datetime | None]]:
+    """Each timer's next and last firing, from `systemctl list-timers --all --output=json`."""
+    return {
+        timer["unit"]: (from_microseconds(timer["next"]), from_microseconds(timer["last"]))
+        for timer in json.loads(listing)
+    }
+
+
+def from_unix_timestamp(value: str) -> datetime | None:
+    """A `--timestamp=unix` property, `@<seconds>`, where empty means never."""
+    return datetime.fromtimestamp(int(value.removeprefix("@")), UTC) if value else None
+
+
+def build_units(
+    show: Mapping[str, Mapping[str, str]], timers: Mapping[str, tuple[datetime | None, datetime | None]]
+) -> tuple[Unit, ...]:
+    """The rows, by name: each service with the timer that triggers it, and each timer whose service isn't listed."""
+    services = {name for name in show if name.endswith(".service")}
+    timer_of: dict[str, Timer] = {}
+    orphans: list[Timer] = []
+    for name, fields in show.items():
+        if not name.endswith(".timer"):
+            continue
+        next_firing, last_firing = timers.get(name, (None, None))
+        timer = Timer(name=name, next=next_firing, last=last_firing)
+        triggered = [service for service in fields["Triggers"].split() if service in services]
+        for service in triggered:
+            timer_of[service] = timer
+        if not triggered:
+            orphans.append(timer)
+
+    def unit(name: str, timer: Timer | None) -> Unit:
+        fields = show[name]
+        return Unit(
+            name=name,
+            description=fields["Description"],
+            load_state=fields["LoadState"],
+            active_state=fields["ActiveState"],
+            sub_state=fields["SubState"],
+            result=fields["Result"],
+            exit_status=int(fields["ExecMainStatus"]) if name.endswith(".service") else None,
+            changed=from_unix_timestamp(fields["StateChangeTimestamp"]),
+            timer=timer,
+        )
+
+    rows = [unit(name, timer_of.get(name)) for name in services] + [unit(timer.name, timer) for timer in orphans]
+    return tuple(sorted(rows, key=lambda row: row.name))
+
+
+def systemctl(*args: str) -> str:
+    """systemctl's stdout, for the user manager; a failure raises with its stderr, since this runs under the TUI."""
+    result = subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"systemctl --user {' '.join(args)} exited {result.returncode}: {result.stderr.strip()}")
+    return result.stdout
+
+
+def read_units(directory: Path = UNIT_DIRECTORY) -> tuple[Unit, ...]:
+    """The rows for the unit files in DIRECTORY, as the user manager sees them now."""
+    names = unit_names(path.name for path in directory.iterdir())
+    if not names:
+        return ()
+    show = parse_show(systemctl("show", "--timestamp=unix", f"--property={','.join(SHOWN_PROPERTIES)}", "--", *names))
+    return build_units(show, parse_timers(systemctl("list-timers", "--all", "--output=json")))
+
+
+def read_journal(name: str) -> tuple[str, ...]:
+    """The unit's latest journal lines; empty, rather than failing, when the journal has none to show."""
+    result = subprocess.run(
+        ["journalctl", "--user", "--unit", name, "--lines", str(JOURNAL_LINES), "--no-pager", "--no-hostname"],
+        capture_output=True,
+        text=True,
+    )
+    # Lines, not entries: a `-- Boot <id> --` separator between entries is a line of its own.
+    return tuple(result.stdout.splitlines()[-JOURNAL_LINES:])
+
+
+def span(delta: timedelta) -> str:
+    """DELTA in the one unit that reads at a glance."""
+    seconds = int(abs(delta.total_seconds()))
+    if seconds < 90:
+        return f"{seconds}s"
+    if seconds < 90 * 60:
+        return f"{seconds // 60}m"
+    if seconds < 36 * 60 * 60:
+        return f"{seconds // 3600}h"
+    return f"{seconds // 86400}d"
+
+
+def state_text(unit: Unit) -> str:
+    """The unit's state as `systemctl status` writes it, the sub-state kept only where it says something."""
+    if unit.load_state != "loaded":
+        return unit.load_state
+    if unit.active_state in ("active", "activating", "deactivating"):
+        return f"{unit.active_state} ({unit.sub_state})"
+    return unit.active_state
+
+
+def outcome_text(unit: Unit, now: datetime) -> str:
+    """How long a running unit has been up, or how its last run ended and when."""
+    if unit.changed is None:
+        return "never run"
+    ago = span(now - unit.changed)
+    if unit.active_state in ("active", "activating", "deactivating"):
+        return f"for {ago}"
+    if unit.result != "success":
+        status = f" ({unit.exit_status})" if unit.exit_status else ""
+        return f"{unit.result}{status} {ago} ago"
+    return f"ok {ago} ago"
+
+
+def next_text(unit: Unit, now: datetime) -> str:
+    """When the unit's timer fires next, if it has one that will."""
+    if unit.timer is None or unit.timer.next is None:
+        return ""
+    return f"next in {span(unit.timer.next - now)}" if unit.timer.next > now else "next now"
+
+
+def matching(query: str, units: tuple[Unit, ...]) -> tuple[Unit, ...]:
+    """The units whose name or description contains QUERY, ignoring case."""
+    folded = query.casefold()
+    return tuple(unit for unit in units if folded in unit.searchable.casefold())
+
+
+@dataclass(frozen=True, slots=True)
+class Control:
+    """Ask the user manager to apply VERB to UNIT."""
+
+    verb: str
+    unit: str
+
+
+@dataclass(frozen=True, slots=True)
+class Page:
+    """Hand the terminal to a pager on UNIT's whole journal, taking it back when the pager exits."""
+
+    unit: str
+
+
+type Action = Control | Page
+
+
+def pager_argv(unit: str) -> tuple[str, ...]:
+    """The command that pages UNIT's journal, opened at its end."""
+    return ("journalctl", "--user", "--unit", unit, "--pager-end")
+
+
+@dataclass(frozen=True, slots=True)
+class Journal:
+    """The latest journal lines of the unit named UNIT."""
+
+    unit: str
+    lines: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Managing:
+    """
+    The rows, the query, the highlight, the highlighted unit's journal, and the actions yet to be carried out.
+
+    The highlight is held both by its unit's name and by its position. The name keeps it on its unit while the rows
+    above come and go; the position is where it lands when its own row goes.
+    """
+
+    units: tuple[Unit, ...]
+    query: str
+    highlighted_name: str | None
+    highlighted_index: int
+    journal: Journal | None
+    pending: tuple[Action, ...]
+    notice: str
+
+    @property
+    def shown(self) -> tuple[Unit, ...]:
+        return matching(self.query, self.units)
+
+    @property
+    def highlighted(self) -> Unit | None:
+        shown = self.shown
+        if not shown:
+            return None
+        by_name = next((unit for unit in shown if unit.name == self.highlighted_name), None)
+        return by_name or shown[min(self.highlighted_index, len(shown) - 1)]
+
+    @property
+    def journal_lines(self) -> tuple[str, ...]:
+        """The journal shown, which is nothing until the highlighted unit's own has been read."""
+        highlighted = self.highlighted
+        if self.journal is None or highlighted is None or self.journal.unit != highlighted.name:
+            return ()
+        return self.journal.lines
+
+    def landed(self) -> Managing:
+        """The highlight's name and position made to agree with the row it is on now."""
+        highlighted = self.highlighted
+        if highlighted is None:
+            return replace(self, highlighted_name=None, highlighted_index=0)
+        return replace(self, highlighted_name=highlighted.name, highlighted_index=self.shown.index(highlighted))
+
+    def moved(self, by: int) -> Managing:
+        """The highlight moved BY rows, wrapping at either end."""
+        shown, highlighted = self.shown, self.highlighted
+        if highlighted is None:
+            return self
+        index = (shown.index(highlighted) + by) % len(shown)
+        return replace(self, highlighted_name=shown[index].name, highlighted_index=index)
+
+    def edited(self, query: str) -> Managing:
+        """A changed query highlights its first match, as the other pickers' does."""
+        if query == self.query:
+            return self
+        return replace(self, query=query, highlighted_name=None, highlighted_index=0).landed()
+
+
+@dataclass(frozen=True, slots=True)
+class Finished:
+    """The manager was left."""
+
+
+@dataclass(frozen=True, slots=True)
+class Refreshed:
+    """A new listing arrived."""
+
+    units: tuple[Unit, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Carried:
+    """The component carried out the first COUNT pending actions, saying NOTICE about how they went."""
+
+    count: int
+    notice: str
+
+
+@dataclass(frozen=True, slots=True)
+class Paged:
+    """The pager handed the terminal back, having ended with OUTCOME."""
+
+    outcome: ProgramOutcome
+
+
+type Manager = Managing | Finished
+
+
+def opening(units: tuple[Unit, ...]) -> Managing:
+    """An empty query highlighting the first unit."""
+    return Managing(
+        units=units, query="", highlighted_name=None, highlighted_index=0, journal=None, pending=(), notice=""
+    ).landed()
+
+
+def step(manager: Manager, event: InputEvent | Refreshed | Journal | Carried | Paged) -> Manager:
+    """
+    The manager after one more key press, paste, listing, journal, or report of actions carried out.
+
+    Every one goes through here, applied to the latest state, so keys typed while a listing is being read land as if
+    each had been seen. Actions are queued in `pending` rather than carried out here, keeping this pure.
+    """
+    if isinstance(manager, Finished):
+        return manager
+    match event:
+        case Refreshed(units=units):
+            return replace(manager, units=units).landed()
+        case Journal() as journal:
+            return replace(manager, journal=journal)
+        case Carried(count=count, notice=notice):
+            return replace(manager, pending=manager.pending[count:], notice=notice)
+        case Paged(outcome=Exited(status=0)):
+            return manager
+        case Paged(outcome=Exited(status=status)):
+            return replace(manager, notice=f"the pager exited {status}")
+        case Paged(outcome=FailedToStart(reason=reason)):
+            return replace(manager, notice=f"the pager didn't start: {reason}")
+        case KeyPressed(key=key) if key in LEAVE_KEYS:
+            return Finished()
+        # Enter typed ahead, before the terminal goes raw, has had its \r turned into \n (Ctrl+J) by the tty.
+        case KeyPressed(key=Key.Enter | Key.ControlJ) if (unit := manager.highlighted) is not None:
+            return replace(manager, pending=(*manager.pending, Page(unit=unit.name)))
+        case KeyPressed(key=key) if key in VERBS and (unit := manager.highlighted) is not None:
+            return replace(manager, pending=(*manager.pending, Control(verb=VERBS[key], unit=unit.name)))
+        case KeyPressed(key=key) if key in DOWN_KEYS:
+            return manager.moved(1)
+        case KeyPressed(key=key) if key in UP_KEYS:
+            return manager.moved(-1)
+        case KeyPressed(key=Key.Backspace):
+            return manager.edited(manager.query[:-1])
+        case KeyPressed(key=Key.ControlU):
+            return manager.edited("")
+        # Text is one character; every named key is longer ("enter", "alt+b"), so length tells them apart.
+        case KeyPressed(key=key) if len(key) == 1 and key.isprintable():
+            return manager.edited(manager.query + key)
+        case Pasted(text=text):
+            return manager.edited(manager.query + "".join(c for c in text if c.isprintable()))
+        case _:
+            return manager
+
+
+def send(control: Control) -> str | None:
+    """Queue the job with the user manager, returning why it refused, if it did."""
+    result = subprocess.run(
+        ["systemctl", "--user", "--no-block", control.verb, control.unit], capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        return None
+    return result.stderr.strip() or f"systemctl {control.verb} {control.unit} exited {result.returncode}"
+
+
+STATE_COLORS = {"active": ("green", 400), "failed": ("red", 400), "activating": ("amber", 300)}
+
+
+@component
+def manager_view(
+    units: tuple[Unit, ...],
+    poll: Callable[[], tuple[Unit, ...]],
+    journal_of: Callable[[str], tuple[str, ...]],
+    send_control: Callable[[Control], str | None],
+    pager: Callable[[str], Sequence[str]],
+) -> Div:
+    manager, set_manager = use_state(lambda: opening(units))
+    send_app_control = use_controls()
+
+    async def refresh() -> None:
+        while True:
+            await asyncio.sleep(POLL_INTERVAL.total_seconds())
+            listing = await asyncio.to_thread(poll)
+            set_manager(lambda latest: step(latest, Refreshed(units=listing)))
+
+    use_effect(refresh, deps=())
+
+    highlighted_name = manager.highlighted.name if isinstance(manager, Managing) and manager.highlighted else None
+
+    # Restarted, and the old one cancelled, whenever the highlight moves to another unit.
+    async def follow_journal() -> None:
+        if highlighted_name is None:
+            return
+        while True:
+            lines = await asyncio.to_thread(journal_of, highlighted_name)
+            set_manager(lambda latest: step(latest, Journal(unit=highlighted_name, lines=lines)))
+            await asyncio.sleep(POLL_INTERVAL.total_seconds())
+
+    use_effect(follow_journal, deps=(highlighted_name,))
+
+    pending = manager.pending if isinstance(manager, Managing) else ()
+
+    # Synchronous to the end: an effect is cancelled when its deps change, and they change as soon as this reports.
+    async def carry_out() -> None:
+        if isinstance(manager, Finished):
+            send_app_control(Quit())
+            return
+        if not pending:
+            return
+        failures, queued = [], []
+        for action in pending:
+            match action:
+                case Control() as control:
+                    if (failure := send_control(control)) is None:
+                        queued.append(f"queued {control.verb} of {control.unit}")
+                    else:
+                        failures.append(failure)
+                case Page(unit=unit):
+                    # The app suspends at its next render, after this effect reports, and resumes when the pager exits.
+                    send_app_control(
+                        Suspend.to_program(
+                            pager(unit), on_exit=lambda outcome: set_manager(lambda latest: step(latest, Paged(outcome)))
+                        )
+                    )
+                case _ as unreachable:
+                    assert_never(unreachable)
+        notice = "; ".join(failures) or (queued[-1] if queued else "")
+        set_manager(lambda latest: step(latest, Carried(count=len(pending), notice=notice)))
+
+    use_effect(carry_out, deps=(isinstance(manager, Finished), pending))
+
+    def on_input(event: InputEvent, _: Receiver) -> InputResponse:
+        if not isinstance(event, KeyPressed | Pasted):
+            return None
+        set_manager(lambda latest: step(latest, event))
+        return ()
+
+    if isinstance(manager, Finished):
+        return Div(style=full)
+    shown, highlighted = manager.shown, manager.highlighted
+    now = datetime.now(UTC)
+    name_width = max((len(unit.short_name) for unit in manager.units), default=0)
+
+    def unit_row(unit: Unit) -> Div:
+        is_highlighted = unit is highlighted
+        name_color = text_color("amber", 300) if is_highlighted else text_color("slate", 300)
+        color, shade = STATE_COLORS.get(unit.active_state, ("slate", 400))
+        return Div(
+            style=row,
+            children=(
+                Text(content=f"{unit.short_name.ljust(name_width)}  ", style=text_wrap_none | name_color | (text_bold if is_highlighted else Style())),
+                Text(content=f"{state_text(unit):<20}", style=text_wrap_none | text_color(color, shade)),
+                Text(content=f"{outcome_text(unit, now):<22}", style=text_wrap_none | text_color("slate", 300)),
+                Text(content=f"{next_text(unit, now):<14}", style=text_wrap_none | text_color("sky", 300)),
+                Text(content=unit.description, style=text_wrap_none | text_color("slate", 500)),
+            ),
+        )
+
+    journal = manager.journal_lines
+    return Div(
+        style=full | col | border | border_lightrounded | border_color("slate", 500) | pad_x(1),
+        on_input=on_input,
+        children=(
+            Text(
+                content="Ctrl+S starts, Ctrl+R restarts, Ctrl+X stops, Enter pages the journal, Esc leaves",
+                style=text_wrap_none | text_color("slate", 400),
+            ),
+            Div(
+                style=row | overflow_x_scroll | stick_to_end_x,
+                children=(
+                    Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
+                    Text(content=manager.query, style=text_wrap_none),
+                    Text(content=" ", style=text_wrap_none | text_bg("sky", 300)),
+                ),
+            ),
+            Div(
+                style=col | fill(1) | overflow_y_scroll,
+                children=tuple(unit_row(unit) for unit in shown)
+                or (
+                    Text(
+                        content="no unit matches" if manager.units else f"no units in {UNIT_DIRECTORY}",
+                        style=text_color("slate", 400),
+                    ),
+                ),
+            ),
+            Text(content=manager.notice, style=text_wrap_none | text_color("sky", 300)),
+            Text(
+                content=f"journal of {highlighted.name}" if highlighted else "",
+                style=text_wrap_none | text_bold | text_color("slate", 400),
+            ),
+            Div(
+                style=col | height(JOURNAL_LINES),
+                # Cut to the box's inner width by hand: a line Text wider than the box overruns its padding and right
+                # border, though the rows above, the same width, are clipped. The box is the terminal, as
+                # counterweight measures it, less a border and a pad each side.
+                children=tuple(
+                    Text(content=line[: shutil.get_terminal_size().columns - 4], style=text_wrap_none | text_color("slate", 300))
+                    for line in journal
+                ),
+            ),
+        ),
+    )
+
+
+async def manage(
+    units: tuple[Unit, ...],
+    poll: Callable[[], tuple[Unit, ...]],
+    journal_of: Callable[[str], tuple[str, ...]] = read_journal,
+    send_control: Callable[[Control], str | None] = send,
+    pager: Callable[[str], Sequence[str]] = pager_argv,
+    **app_options: object,
+) -> None:
+    """Run the manager until it is left."""
+    await app(manager_view(units, poll, journal_of, send_control, pager), **app_options)
+
+
+def _selftest() -> int:
+    import tempfile
+    from functools import reduce
+
+    from counterweight.autopilot import typed
+
+    show_output = (
+        "Id=tidy.service\nDescription=Reclaim disk\nLoadState=loaded\nActiveState=inactive\nSubState=dead\n"
+        "Result=success\nExecMainStatus=0\nStateChangeTimestamp=@1700000000\nTriggers=\n\n"
+        "Id=tidy.timer\nDescription=Reclaim disk weekly\nLoadState=loaded\nActiveState=active\nSubState=waiting\n"
+        "Result=success\nStateChangeTimestamp=@1699990000\nTriggers=tidy.service\n\n"
+        "Id=zellij-web.service\nDescription=Serve zellij=web\nLoadState=loaded\nActiveState=active\n"
+        "SubState=running\nResult=success\nExecMainStatus=0\nStateChangeTimestamp=@1699996400\nTriggers=\n\n"
+        "Id=lonely.timer\nDescription=A timer whose service is elsewhere\nLoadState=loaded\nActiveState=active\n"
+        "SubState=waiting\nResult=success\nStateChangeTimestamp=\nTriggers=elsewhere.service\n"
+    )
+    timers_output = json.dumps(
+        [
+            {"unit": "tidy.timer", "next": 1_700_086_400_000_000, "last": 1_699_999_000_000_000},
+            {"unit": "lonely.timer", "next": 0, "last": None},
+        ]
+    )
+    units = build_units(parse_show(show_output), parse_timers(timers_output))
+    by_name = {unit.name: unit for unit in units}
+    now = datetime.fromtimestamp(1_700_003_600, UTC)
+    tidy, web, lonely = by_name.get("tidy.service"), by_name.get("zellij-web.service"), by_name.get("lonely.timer")
+
+    enter, escape, down, up = (KeyPressed(key=key) for key in (Key.Enter, Key.Escape, Key.Down, Key.Up))
+
+    def stepped(*events: InputEvent | Refreshed | Journal | Carried | Paged) -> Manager:
+        return reduce(step, events, opening(units))
+
+    def managing(*events: InputEvent | Refreshed | Journal | Carried | Paged) -> Managing:
+        result = stepped(*events)
+        assert isinstance(result, Managing)
+        return result
+
+    failed = replace(web, active_state="failed", sub_state="failed", result="exit-code", exit_status=2) if web else None
+
+    cases: list[tuple[str, bool]] = [
+        (
+            "unit names keep services and timers, leaving out templates, slices and .wants directories",
+            unit_names(["a.service", "b@.service", "c.timer", "claude-work.slice", "default.target.wants"]) == ("a.service", "c.timer"),
+        ),
+        ("a property value keeps any = in it", web is not None and web.description == "Serve zellij=web"),
+        ("a timer folds into the service it triggers", tidy is not None and tidy.timer is not None and tidy.timer.name == "tidy.timer"),
+        ("a timer whose service isn't listed is its own row", lonely is not None and lonely.timer is not None),
+        ("rows are by name, and a folded timer has none of its own", tuple(by_name) == ("lonely.timer", "tidy.service", "zellij-web.service")),
+        ("a timer's next firing of 0 means never", lonely is not None and lonely.timer is not None and lonely.timer.next is None),
+        ("an empty timestamp means never", lonely is not None and lonely.changed is None),
+        ("a timer has no exit status", lonely is not None and lonely.exit_status is None),
+        ("spans read in one unit", (span(timedelta(seconds=45)), span(timedelta(minutes=5)), span(timedelta(hours=30)), span(timedelta(days=3))) == ("45s", "5m", "30h", "3d")),
+        ("a running service says how long it has been up", web is not None and outcome_text(web, now) == "for 2h"),
+        ("a finished oneshot says it went fine and when", tidy is not None and outcome_text(tidy, now) == "ok 60m ago"),
+        ("a failed run says how, with its exit status", failed is not None and outcome_text(failed, now) == "exit-code (2) 2h ago"),
+        ("a unit that never ran says so", lonely is not None and outcome_text(lonely, now) == "never run"),
+        ("the sub-state is kept for an active unit", web is not None and state_text(web) == "active (running)"),
+        ("and dropped for an inactive one", tidy is not None and state_text(tidy) == "inactive"),
+        ("a unit that failed to load says why", tidy is not None and state_text(replace(tidy, load_state="bad-setting")) == "bad-setting"),
+        ("a timer's next firing is shown", tidy is not None and next_text(tidy, now) == "next in 23h"),
+        ("a service with no timer has no next firing", web is not None and next_text(web, now) == ""),
+        ("typing narrows by description too, ignoring case", managing(*typed("DISK")).shown == (tidy,)),
+        ("Ctrl+S queues a start of the highlighted unit", managing(down, KeyPressed(key=Key.ControlS)).pending == (Control("start", "tidy.service"),)),
+        ("Ctrl+R queues a restart", managing(KeyPressed(key=Key.ControlR)).pending == (Control("restart", "lonely.timer"),)),
+        ("Ctrl+X queues a stop", managing(up, KeyPressed(key=Key.ControlX)).pending == (Control("stop", "zellij-web.service"),)),
+        (
+            "sent controls leave the queue, and one queued meanwhile stays",
+            managing(KeyPressed(key=Key.ControlS), KeyPressed(key=Key.ControlX), Carried(count=1, notice="")).pending
+            == (Control("stop", "lonely.timer"),),
+        ),
+        ("Enter queues paging the highlighted unit's journal", managing(down, enter).pending == (Page("tidy.service"),)),
+        ("a pager that exits cleanly says nothing", managing(Paged(Exited(status=0))).notice == ""),
+        ("a pager that fails says how it exited", managing(Paged(Exited(status=3))).notice == "the pager exited 3"),
+        ("a pager that can't start says why", managing(Paged(FailedToStart(reason="gone"))).notice == "the pager didn't start: gone"),
+        ("Escape leaves", stepped(escape) == Finished()),
+        ("the highlighted unit's journal is shown", managing(Journal("lonely.timer", ("a",))).journal_lines == ("a",)),
+        ("another unit's journal is not", managing(Journal("lonely.timer", ("a",)), down).journal_lines == ()),
+        (
+            "the highlight stays on its unit as a row above it goes",
+            tidy is not None and web is not None and managing(down, Refreshed(units=(tidy, web))).highlighted == tidy,
+        ),
+        (
+            "when its own row goes, the highlight lands on the row that took its place",
+            managing(down, Refreshed(units=tuple(unit for unit in units if unit is not tidy))).highlighted == web,
+        ),
+    ]
+
+    sent: list[Control] = []
+    with tempfile.TemporaryDirectory() as scratch:
+        # The pager leaves a file named for its unit, so the suspension is seen to have run it.
+        asyncio.run(
+            asyncio.wait_for(
+                manage(
+                    units, lambda: units, lambda name: (f"{name} says hi",), lambda control: sent.append(control),
+                    pager=lambda name: ("touch", str(Path(scratch) / name)),
+                    headless=True, dimensions=(100, 20),
+                    autopilot=[down, KeyPressed(key=Key.ControlS), down, enter, KeyPressed(key=Key.ControlX), Quit()],
+                ),
+                timeout=timedelta(seconds=30).total_seconds(),
+            )
+        )
+        paged = sorted(path.name for path in Path(scratch).iterdir())
+    cases += [
+        ("the app sends the controls queued, before and after paging", sent == [Control("start", "tidy.service"), Control("stop", "zellij-web.service")]),
+        ("the app runs the pager on the highlighted unit", paged == ["zellij-web.service"]),
+    ]
+
+    failures = [name for name, passed in cases if not passed]
+    for name in failures:
+        print(f"FAIL: {name}", file=sys.stderr)
+    print(f"manage-units: {len(cases) - len(failures)}/{len(cases)} passed")
+    return 1 if failures else 0
+
+
+def main() -> int:
+    if os.environ.get("CLAUDE_HOOK_SELFTEST"):
+        return _selftest()
+
+    asyncio.run(manage(read_units(), read_units, title="units"))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

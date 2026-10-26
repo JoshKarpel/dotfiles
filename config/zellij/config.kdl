@@ -102,7 +102,7 @@ keybinds {
         bind "Esc" { Write 27; }
     }
 
-    // Tab picker; bin/zellij-pick-tab says which keys do what. Alt rather
+    // Tab picker; bin/pick-tab says which keys do what. Alt rather
     // than Ctrl+e, which every pane would lose as end-of-line. In place
     // rather than floating: opening a floating pane reveals any hidden
     // floating panes in the tab and leaves them showing after it exits.
@@ -110,7 +110,7 @@ keybinds {
     // instead of tab mode's own bindings.
     shared_except "locked" {
         bind "Alt e" {
-            Run "zellij-pick-tab" {
+            Run "pick-tab" {
                 in_place true
                 close_on_exit true
                 name "tabs"
@@ -118,27 +118,44 @@ keybinds {
             SwitchToMode "normal"
         }
 
-        // Worktree picker, `wt` with no command; in place and back to normal
-        // mode for the tab picker's reasons. close_on_exit would close the
-        // pane on wt's error before it could be read, so a failure waits for
-        // a key first.
+        // Worktree picker, manage-worktrees with no command, by name rather
+        // than the `wt` alias, which bash -c never defines. In place and back
+        // to normal mode for the tab picker's reasons. close_on_exit would
+        // close the pane on an error before it could be read, so a failure
+        // waits for a key first.
         bind "Alt E" {
-            Run "bash" "-c" "wt || read -rsn1 -p 'wt failed; press any key to close'" {
+            Run "bash" "-c" "manage-worktrees || read -rsn1 -p 'manage-worktrees failed; press any key to close'" {
                 in_place true
                 close_on_exit true
-                name "wt"
+                name "worktrees"
             }
             SwitchToMode "normal"
         }
 
-        // Branch cleanup, git-manage, for the same reasons as the worktree
-        // picker. Tearing down the worktree of this tab closes the tab, picker
-        // and all, which is why `wt done` closes it after every other.
-        bind "Alt D" {
-            Run "bash" "-c" "git-manage || read -rsn1 -p 'git-manage failed; press any key to close'" {
+        // Recipe picker, pick-just, in place and back to normal mode for the
+        // tab picker's reasons. A Run pane starts in the focused pane's
+        // directory, which is where just looks for the justfile. --hold keeps
+        // the recipe's output until a key, since the pane closes on exit.
+        // Taking Alt+j gives up its default, moving focus down, which Alt+Down
+        // still does.
+        bind "Alt j" {
+            Run "pick-just" "--hold" {
                 in_place true
                 close_on_exit true
-                name "git-manage"
+                name "just"
+            }
+            SwitchToMode "normal"
+        }
+
+        // Branch cleanup, manage-git, for the same reasons as the worktree
+        // picker. Tearing down the worktree of this tab closes the tab, picker
+        // and all, which is why `manage-worktrees done` closes it after every
+        // other.
+        bind "Alt D" {
+            Run "bash" "-c" "manage-git || read -rsn1 -p 'manage-git failed; press any key to close'" {
+                in_place true
+                close_on_exit true
+                name "manage-git"
             }
             SwitchToMode "normal"
         }

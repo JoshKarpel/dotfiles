@@ -37,8 +37,12 @@ alias untar="tar -xvf"
 # wsl clock drift
 alias fix-clock-drift="sudo ntpdate -sb time.nist.gov"
 
-# just
+# just, and its recipe picker
 alias j="just"
+alias jp="pick-just"
+
+# one worktree per zellij tab
+alias wt="manage-worktrees"
 
 # watchfiles
 alias w="uvx watchfiles"

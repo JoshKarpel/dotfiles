@@ -282,7 +282,7 @@ def _selftest() -> int:
     failures = [name for name, passed in cases if not passed]
     for name in failures:
         print(f"FAIL: {name}", file=sys.stderr)
-    print(f"zellij-pick-tab: {len(cases) - len(failures)}/{len(cases)} passed")
+    print(f"pick-tab: {len(cases) - len(failures)}/{len(cases)} passed")
     return 1 if failures else 0
 
 
@@ -297,7 +297,7 @@ def list_tabs(attempts: int = 3) -> str:
         listing = subprocess.run(["zellij", "action", "list-tabs", "--json"], check=True, capture_output=True, text=True)
         if listing.stdout.strip():
             return listing.stdout
-    raise SystemExit(f"zellij-pick-tab: zellij listed no tabs after {attempts} attempts")
+    raise SystemExit(f"pick-tab: zellij listed no tabs after {attempts} attempts")
 
 
 def main() -> int:
