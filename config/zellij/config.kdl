@@ -104,8 +104,10 @@ keybinds {
 
     // Zen mode: the focused pane over the whole display, bars included. The
     // default is Shift+f in pane mode, which nothing on screen advertises.
+    // Not Alt+Shift+z, which Chrome takes for its tab groups before the web
+    // client sees it.
     shared_except "locked" {
-        bind "Alt Z" { ToggleFocusNoUiFullscreen; }
+        bind "Alt V" { ToggleFocusNoUiFullscreen; }
     }
 
     // Tab picker; bin/pick-tab says which keys do what. Alt rather
