@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Show this Claude session's state as a glyph on the zellij tab it runs in, so the
-# tab bar says which agents are working (●), which are waiting on you (?), and
-# which have finished their turn (✓). Reads the hook payload on stdin.
-# Usage: claude-tab-status <idle|working|waiting|finished>
+# tab bar says which agents are working (●), which are waiting on you (?), which
+# have ended a turn with work pending that will wake them again (◌), and which have
+# finished their turn (✓). Reads the hook payload on stdin.
+# Usage: claude-tab-status <idle|working|waiting|paused|finished>
 #
 # The tab name is the only state: each call strips whatever glyph is there and
 # applies the new one, so nothing has to be kept in step with it. `idle` leaves
@@ -18,12 +19,13 @@ set -euo pipefail
 render() {
   local state="$1" name="$2"
   case "$name" in
-    "● "* | "? "* | "✓ "*) name="${name#* }" ;;
+    "● "* | "? "* | "◌ "* | "✓ "*) name="${name#* }" ;;
   esac
   case "$state" in
     idle) printf '%s' "$name" ;;
     working) printf '● %s' "$name" ;;
     waiting) printf '? %s' "$name" ;;
+    paused) printf '◌ %s' "$name" ;;
     finished) printf '✓ %s' "$name" ;;
   esac
 }
@@ -46,6 +48,8 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   }
   check_render working "feat" "● feat"
   check_render waiting "● feat" "? feat"
+  check_render paused "● feat" "◌ feat"
+  check_render finished "◌ feat" "✓ feat"
   check_render finished "? feat" "✓ feat"
   check_render idle "✓ feat" "feat"
   check_render idle "feat" "feat"
@@ -81,7 +85,7 @@ EOF
     out=$(env ZELLIJ=0 ZELLIJ_PANE_ID=4 ZELLIJ_SESSION_NAME=work XDG_RUNTIME_DIR="$stubs/run" \
         STUB_DIR="$stubs" STUB_TABS="$tabs" STUB_PANES="$PANES" "$@" \
         PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" "$state" \
-      <<<"{\"hook_event_name\":\"$event\"}" 2>&1) || exit_code=$?
+      <<<"{\"hook_event_name\":\"$event\"${STUB_PAYLOAD_EXTRA:-}}" 2>&1) || exit_code=$?
 
     local got_rename="" got_lookup=no
     [[ -e "$stubs/rename" ]] && got_rename=$(cat "$stubs/rename")
@@ -103,6 +107,11 @@ EOF
   t "an empty tab name still counts as a tab" working PostToolUse '[{"tab_id":7,"name":""}]' 7 "7 ● " no
   t "outside zellij nothing is called" working PostToolUse "$TABS" 7 "" no ZELLIJ=
   t "an empty tab listing is skipped" working PostToolUse "" 7 "" no
+  # The payload is built in this shell, so its extra fields ride on the call to t.
+  STUB_PAYLOAD_EXTRA=',"agent_id":"a1"' \
+    t "a subagent's tool call does not mark the tab working" working PostToolUse "$TABS" 7 "" no
+  STUB_PAYLOAD_EXTRA=',"agent_id":"a1"' \
+    t "a subagent still raises waiting" waiting Notification "$TABS" 7 "7 ? repo:feat" no
 
   invalid_exit=0
   CLAUDE_HOOK_SELFTEST= "$SELF" bogus </dev/null >/dev/null 2>&1 || invalid_exit=$?
@@ -117,15 +126,22 @@ fi
 
 STATE="${1:-}"
 case "$STATE" in
-  idle | working | waiting | finished) ;;
+  idle | working | waiting | paused | finished) ;;
   *)
     # Exit 1, never 2: on UserPromptSubmit a 2 would block the prompt itself.
-    echo "usage: claude-tab-status <idle|working|waiting|finished>" >&2
+    echo "usage: claude-tab-status <idle|working|waiting|paused|finished>" >&2
     exit 1
     ;;
 esac
 
 INPUT=$(cat)
+
+# A background subagent's tool calls fire this session's PostToolUse too, after the
+# parent's Stop has set the glyph, so they would put ● back over ◌ or ✓. Its activity
+# is the parent's pause, not a new turn. A subagent needing you still counts.
+if [[ "$STATE" == working ]] && jq -e '.agent_id // empty' <<<"$INPUT" >/dev/null; then
+  exit 0
+fi
 
 [[ -n "${ZELLIJ:-}" && "${ZELLIJ_PANE_ID:-}" =~ ^[0-9]+$ ]] || exit 0
 

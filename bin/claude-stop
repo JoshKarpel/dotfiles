@@ -71,6 +71,7 @@ EOF
     [[ -e "$stubs/finish.called" ]] && got+="${got:+,}finish"
     [[ -e "$stubs/plan.called" ]] && got+="${got:+,}plan"
     [[ -e "$stubs/sound.called" ]] && got+="${got:+,}sound"
+    [[ -e "$stubs/tab-paused.called" ]] && got+="${got:+,}tab-paused"
     [[ -e "$stubs/tab-finished.called" ]] && got+="${got:+,}tab-finished"
 
     [[ "$exit_code" == "$want_exit" ]] ||
@@ -93,17 +94,35 @@ EOF
     '{"last_assistant_message":"Should I proceed?","background_tasks":[{"type":"subagent","status":"running"}]}' \
     0 "" "sound,tab-finished"
 
-  # --- a running background agent: the session is paused, so nothing runs or announces ---
+  # --- a running background agent: the session is paused, so no check runs and no sound plays ---
   t "running agent defers" \
     0 '{"a":1}' 0 '{"b":2}' \
     '{"last_assistant_message":"Launched.","background_tasks":[{"type":"subagent","status":"running"}]}' \
-    0 "" ""
+    0 "" "tab-paused"
 
-  # --- a background shell (a dev server) doesn't defer, or it would defer forever ---
-  t "running shell does not defer" \
+  # --- a background shell (a Monitor, a build) doesn't defer, or a server would defer forever, but it pauses ---
+  t "running shell pauses without deferring" \
     0 "" 0 "" \
     '{"last_assistant_message":"Done.","background_tasks":[{"type":"shell","status":"running"}]}' \
+    0 "" "precommit,finish,plan,sound,tab-paused"
+
+  # --- a task that has ended wakes nothing, so the stop is a finish ---
+  t "ended shell finishes" \
+    0 "" 0 "" \
+    '{"last_assistant_message":"Done.","background_tasks":[{"type":"shell","status":"completed"}]}' \
     0 "" "precommit,finish,plan,sound,tab-finished"
+
+  # --- a scheduled job will wake the session, so the stop is a pause ---
+  t "pending cron pauses" \
+    0 "" 0 "" \
+    '{"last_assistant_message":"Done.","background_tasks":[],"session_crons":[{"id":"c1","recurring":false}]}' \
+    0 "" "precommit,finish,plan,sound,tab-paused"
+
+  # --- a question is your turn whatever else is pending ---
+  t "question with a cron pending" \
+    0 "" 0 "" \
+    '{"last_assistant_message":"Should I proceed?","session_crons":[{"id":"c1","recurring":true}]}' \
+    0 "" "sound,tab-finished"
 
   # --- no check blocks: all run in order, then announce ---
   t "nothing blocks" \
@@ -145,16 +164,24 @@ INPUT=$(cat)
 
 # Every announcement, together, so the two stop paths below can't drift apart.
 announce() {
+  local state="$1"
   claude-sound stop || true
-  echo "$INPUT" | claude-tab-status finished || true
+  echo "$INPUT" | claude-tab-status "$state" || true
 }
+
+# Work this session started that will wake it again without you: a background shell
+# or Monitor ending (a Monitor's output too), an agent reporting, a scheduled job
+# firing. Ending a turn with any of it pending is a pause, not a finish. The payload
+# lists a dev server as the same `shell` as a Monitor, so one started from the session
+# pauses it too; dev servers run by hand, outside it, are what that trade rests on.
+PENDING=$(echo "$INPUT" | jq '[.background_tasks[]? | select(.status == "running")] + [.session_crons[]?] | length')
 
 # If Claude's last message looks like a question, it's handing control back to the user.
 # Don't let any check block the stop and force it to keep working — Claude is genuinely
 # stopping to await a reply, so announce it and let it stop.
 LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // ""')
 if [[ "$LAST_MESSAGE" == *"?"* ]]; then
-  announce
+  announce finished
   exit 0
 fi
 
@@ -165,6 +192,7 @@ fi
 # Background shells don't count: a server running in one would defer the checks forever.
 RUNNING_AGENTS=$(echo "$INPUT" | jq '[.background_tasks[]? | select(.status == "running" and (.type == "subagent" or .type == "workflow"))] | length')
 if [[ "$RUNNING_AGENTS" -gt 0 ]]; then
+  echo "$INPUT" | claude-tab-status paused || true
   exit 0
 fi
 
@@ -182,5 +210,9 @@ for check in claude-stop-precommit claude-stop-finish claude-stop-plan-artifact;
   fi
 done
 
-announce
+if [[ "$PENDING" -gt 0 ]]; then
+  announce paused
+else
+  announce finished
+fi
 exit 0

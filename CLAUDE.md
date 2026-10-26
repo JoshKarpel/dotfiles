@@ -376,8 +376,9 @@ zellij-web-font "FiraCode Nerd Font" "Fira Code"
 # tab of its own, and `wt done` removes the worktree and closes its tab. `wt`
 # alone (Alt+Shift+e in zellij) picks the clone, from ~/projects and ~/work, and
 # the worktree or new branch instead of taking them as arguments. The
-# claude-tab-status hook marks each tab working (●), waiting on you (?), or
-# finished (✓). Run with --help for subcommands and flags.
+# claude-tab-status hook marks each tab working (●), waiting on you (?), paused
+# on background work or a scheduled job that will wake it (◌), or finished (✓).
+# Run with --help for subcommands and flags.
 manage-worktrees --help
 
 # Pick local branches across every clone to delete (Alt+Shift+d in zellij),
