@@ -13,7 +13,7 @@ set -uo pipefail
 
 # The hooks only see what the index holds, so a new file nobody has staged passes by never being
 # checked. Say so rather than staging it: whether it belongs in the repo is the caller's decision
-# (`pre-commit-verdict` makes it one at stop time), and a silent `git add --all` would take it.
+# (`claude-stop-precommit` makes it one at stop time), and a silent `git add --all` would take it.
 UNTRACKED=$(git ls-files --others --exclude-standard)
 if [[ -n "$UNTRACKED" ]]; then
   {

@@ -133,39 +133,33 @@ feedback. A hook that blocks by exiting 2 must guard `stop_hook_active` (see
 above); one that reports through the `additionalContext` JSON below does not,
 since it always exits 0 and never re-triggers the loop that field guards against.
 
-Example: `claude-stop-precommit`, which renders whatever `pre-commit-verdict`
-decided about the repository:
+Example: `claude-stop-precommit`, abridged:
 ```bash
-VERDICT=$(pre-commit-verdict)
-case "$(printf '%s' "$VERDICT" | jq -r '.verdict // ""')" in
-  strays)
-    MESSAGE="untracked files"
-    CONTEXT="There are untracked files.
+git rev-parse --show-toplevel &>/dev/null || exit 0
+
+UNTRACKED=$(git ls-files --others --exclude-standard)
+if [[ -n "$UNTRACKED" ]]; then
+  jq -n --arg ctx "There are untracked files.
 For each file, decide what to do with it: stage it with git add, add it to .gitignore, or delete it.
 Files:
 
-$(printf '%s' "$VERDICT" | jq -r '.paths[]')"
-    ;;
-  failing)
-    MESSAGE="pre-commit failing"
-    CONTEXT="pre-commit is still failing after auto-fixing:
+$UNTRACKED" '{"systemMessage":"[claude-stop-precommit] untracked files","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$ctx}}'
+  exit 0
+fi
 
-$(printf '%s' "$VERDICT" | jq -r '.output')"
-    ;;
-  *)
-    exit 0
-    ;;
-esac
+if ! is-pre-commit-project; then
+  git add --update
+  exit 0
+fi
 
-jq -n --arg message "[claude-stop-precommit] $MESSAGE" --arg ctx "$CONTEXT" \
-  '{systemMessage: $message, hookSpecificOutput: {hookEventName: "Stop", additionalContext: $ctx}}'
+OUTPUT=$(pre-commit-autofix 2>/dev/null) && exit 0
+
+jq -n --arg ctx "pre-commit is still failing after auto-fixing:
+
+$OUTPUT" '{"systemMessage":"[claude-stop-precommit] pre-commit failing","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$ctx}}'
 ```
 
 Key preferences:
-- Keep the decision out of the hook when something else already needs it. The
-  mainplate plugin `pre-commit` renders the same three verdicts into that
-  console's vocabulary, so the logic lives in `pre-commit-verdict` and both
-  tools check a repository identically rather than by being kept in step.
 - Handle untracked files separately from a `git add --update`, with a nudge that
   names them: staging them silently would commit files nobody decided belong in
   the repo.

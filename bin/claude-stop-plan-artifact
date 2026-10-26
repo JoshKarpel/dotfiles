@@ -6,8 +6,7 @@
 # turn is over and the plan has settled, rather than after every edit. Each plan's content (less its
 # `Artifact:` line, so adding the link after a first publish is not a change) is nudged about once.
 #
-# Claude Code only, run by `claude-stop` after the finishing pass. Mainplate sessions have no
-# Artifact tool, which is why this is not part of `claude-stop-finish`, the hook mainplate shares.
+# Run by `claude-stop` after the finishing pass, since that pass may itself edit the plan.
 
 set -euo pipefail
 
