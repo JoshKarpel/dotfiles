@@ -102,6 +102,12 @@ keybinds {
         bind "Esc" { Write 27; }
     }
 
+    // Zen mode: the focused pane over the whole display, bars included. The
+    // default is Shift+f in pane mode, which nothing on screen advertises.
+    shared_except "locked" {
+        bind "Alt Z" { ToggleFocusNoUiFullscreen; }
+    }
+
     // Tab picker; bin/pick-tab says which keys do what. Alt rather
     // than Ctrl+e, which every pane would lose as end-of-line. In place
     // rather than floating: opening a floating pane reveals any hidden
