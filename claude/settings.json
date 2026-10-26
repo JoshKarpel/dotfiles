@@ -366,9 +366,6 @@
     "command": "claude-statusline",
     "refreshInterval": 10
   },
-  "enabledPlugins": {
-    "rust-analyzer-lsp@claude-plugins-official": true
-  },
   "feedbackSurveyRate": 0,
   "effortLevel": "high",
   "promptSuggestionEnabled": false,
