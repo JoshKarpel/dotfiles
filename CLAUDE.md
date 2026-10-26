@@ -371,6 +371,10 @@ zellij-restart-session
 # installed where the browser runs.
 zellij-web-font "FiraCode Nerd Font" "Fira Code"
 
+# List the keybindings config/zellij/config.kdl adds or unbinds, which the
+# status bar never advertises: key, modes, and actions, read from the file.
+zellij-custom-keybinds
+
 # One git worktree per zellij tab, each running its own agent, aliased `wt`:
 # `wt new` opens a branch in <repo>.worktrees/<branch> beside the clone, in a
 # tab of its own, and `wt done` removes the worktree and closes its tab. `wt`

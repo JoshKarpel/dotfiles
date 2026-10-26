@@ -1,0 +1,167 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["kdl-py>=1.2"]
+# ///
+"""
+Print the keybindings ~/.config/zellij/config.kdl adds or removes, one per line: the key, the modes it applies in, and
+what it does.
+
+Zellij's status bar advertises only its own defaults, so the bindings this config adds are discoverable nowhere but the
+file. Reading them from the file rather than keeping a list beside it means the list can't drift. The config holds only
+deviations from the defaults, so this is exactly the set worth remembering; why each one exists is in the comments
+above it there.
+
+Actions are printed as written, every action a key runs joined by `;`, with an argument quoted only when it holds
+whitespace.
+"""
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests (`_selftest`).
+# This marker line is how `claude-hook-selftests` discovers participating scripts.
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+import kdl
+
+CONFIG = Path.home() / ".config" / "zellij" / "config.kdl"
+
+
+@dataclass(frozen=True, slots=True)
+class Binding:
+    key: str
+    modes: str
+    action: str
+
+
+def modes_of(block: kdl.Node) -> str:
+    """Say in words which modes a block under `keybinds` covers, from its name and arguments."""
+    names = ", ".join(str(arg) for arg in block.args)
+    match block.name:
+        case "shared":
+            return "all"
+        case "shared_except":
+            return f"all but {names}"
+        case "shared_among":
+            return names
+        case mode:
+            return mode
+
+
+def argument(value: object) -> str:
+    """Render one action argument: KDL v1 has no integers, so a whole number drops its `.0`."""
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    text = str(value)
+    return json.dumps(text) if not text or any(c.isspace() for c in text) else text
+
+
+def action_of(bind: kdl.Node) -> str:
+    """Render the actions a `bind` runs, leaving out their own options (a `Run`'s `in_place` and the like)."""
+    return "; ".join(" ".join([action.name, *map(argument, action.args)]) for action in bind.nodes)
+
+
+def bindings(config: str) -> list[Binding]:
+    """The bindings and unbindings in a zellij config's `keybinds` blocks, one per key, in file order."""
+    found: list[Binding] = []
+    for keybinds in (node for node in kdl.parse(config).nodes if node.name == "keybinds"):
+        for block in keybinds.nodes:
+            # An unbind directly under keybinds applies in every mode.
+            if block.name == "unbind":
+                found += [Binding(str(key), "all", "unbound") for key in block.args]
+                continue
+            modes = modes_of(block)
+            for node in block.nodes:
+                action = "unbound" if node.name == "unbind" else action_of(node)
+                found += [Binding(str(key), modes, action) for key in node.args]
+    return found
+
+
+def render(found: list[Binding]) -> str:
+    """Lay the bindings out in aligned columns."""
+    if not found:
+        return ""
+    key_width = max(len(binding.key) for binding in found)
+    modes_width = max(len(binding.modes) for binding in found)
+    return "\n".join(
+        f"{binding.key:<{key_width}}  {binding.modes:<{modes_width}}  {binding.action}" for binding in found
+    )
+
+
+def main() -> int:
+    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
+    text = render(bindings(CONFIG.read_text()))
+    if text:
+        print(text)
+    return 0
+
+
+def _selftest() -> int:
+    config = """
+        show_startup_tips false
+        keybinds {
+            unbind "Ctrl g"
+            shared_except "locked" {
+                unbind "Ctrl q" "Ctrl h"
+            }
+            shared_except "tab" "locked" {
+                bind "Alt t" { SwitchToMode "Tab"; }
+            }
+            tab {
+                bind "Alt t" { SwitchToMode "Normal"; }
+            }
+            shared_among "normal" "locked" {
+                bind "Esc" { Write 27; }
+            }
+            shared {
+                bind "Alt x" "Alt X" {
+                    Run "bash" "-c" "a || b" {
+                        in_place true
+                        name "x"
+                    }
+                    SwitchToMode "normal"
+                }
+            }
+        }
+    """
+    found = bindings(config)
+    cases: list[tuple[str, bool]] = [
+        ("an unbind directly under keybinds applies in every mode", found[0] == Binding("Ctrl g", "all", "unbound")),
+        (
+            "an unbind of two keys is a row for each",
+            found[1:3] == [Binding("Ctrl q", "all but locked", "unbound"), Binding("Ctrl h", "all but locked", "unbound")],
+        ),
+        ("shared_except names the modes left out", found[3] == Binding("Alt t", "all but tab, locked", "SwitchToMode Tab")),
+        ("a single mode block names its mode", found[4] == Binding("Alt t", "tab", "SwitchToMode Normal")),
+        ("shared_among names the modes it covers, and a whole number drops its .0", found[5] == Binding("Esc", "normal, locked", "Write 27")),
+        (
+            "a bind of two keys is a row for each, its actions joined and their options left out",
+            found[6:] == [Binding(key, "all", 'Run bash -c "a || b"; SwitchToMode normal') for key in ("Alt x", "Alt X")],
+        ),
+        ("a config with no keybinds has none", bindings("show_startup_tips false") == []),
+        (
+            "columns align on the widest key and mode list",
+            render([Binding("Esc", "tab", "A"), Binding("Alt t", "all", "B")]) == "Esc    tab  A\nAlt t  all  B",
+        ),
+        ("the live config parses", bool(bindings(CONFIG.read_text())) if CONFIG.exists() else True),
+    ]
+
+    failures = [name for name, passed in cases if not passed]
+    for name in failures:
+        print(f"FAIL: {name}", file=sys.stderr)
+    print(f"zellij-custom-keybinds: {len(cases) - len(failures)}/{len(cases)} passed")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    if os.environ.get("CLAUDE_HOOK_SELFTEST"):
+        sys.exit(_selftest())
+    sys.exit(main())
