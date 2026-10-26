@@ -64,6 +64,11 @@ path_prefix "$DOTFILES/bin"
 # rust environment
 path_postfix "$HOME/.cargo/bin"
 
+# IntelliJ's `idea` launcher lives inside the app bundle, which a drag-install
+# never puts on PATH
+d="/Applications/IntelliJ IDEA.app/Contents/MacOS"
+[[ -d "$d" ]] && path_postfix "$d"
+
 # repository-local node modules binaries
 export PATH="$PATH:./node_modules/.bin"
 
