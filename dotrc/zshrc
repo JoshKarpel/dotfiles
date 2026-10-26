@@ -21,6 +21,11 @@ setopt HIST_REDUCE_BLANKS        # Remove superfluous blanks before recording en
 setopt HIST_VERIFY               # Don't execute immediately upon history expansion.
 setopt HIST_BEEP                 # Beep when accessing nonexistent history.
 
+# zsh picks vi mode if $EDITOR or $VISUAL mentions "vi" when keymaps are first
+# set up, so the keymap would depend on whether the parent already exported
+# EDITOR (a zellij pane inherits it from the server; a fresh terminal doesn't).
+bindkey -e
+
 # Set up history search
 # https://superuser.com/questions/585003/searching-through-history-with-up-and-down-arrow-in-zsh
 autoload -U up-line-or-beginning-search
