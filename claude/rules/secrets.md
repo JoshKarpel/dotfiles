@@ -19,21 +19,18 @@ and auditability. Only drop down when the step above genuinely isn't available.
    queues, other APIs that support IAM auth); reach for a stored secret only for
    third parties that can't do identity-based auth.
 
-2. **External secrets manager, projected short-lived.** When a static secret
-   is unavoidable, keep it in a dedicated manager (AWS Secrets Manager, GCP
-   Secret Manager, Vault) and pull it into the cluster at runtime with the
-   [Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/)
-   or [External Secrets Operator](https://external-secrets.io/). The secret
-   lives in one auditable, rotatable place; the cluster gets a synced or
+2. **External secrets manager, synced at runtime.** When a static secret is
+   unavoidable, keep it in a dedicated manager (AWS Secrets Manager, GCP Secret
+   Manager, Vault) and have the platform pull it in at runtime. The secret lives
+   in one auditable, rotatable place; the workload gets a synced or
    freshly-fetched copy rather than the source of truth.
 
-3. **Mounted Kubernetes `Secret` as a file.** Project the `Secret` as a volume
-   and read it from disk at the point of use. The kubelet propagates updates to
-   mounted files, so a rotated `Secret` reaches a running pod without a restart,
-   and file contents don't leak the way the environment does.
+3. **A platform-mounted secret file.** Read it from disk at the point of use.
+   A platform that refreshes the mount delivers a rotated value without a
+   restart, and file contents don't leak the way the environment does.
 
 **Never mount secrets as env vars.** Env vars are fixed at process start, so a
-rotated `Secret` never reaches a running pod without a restart, defeating
+rotated secret never reaches a running process without a restart, defeating
 rotation entirely. They also leak readily: inherited by every child process,
 surfaced in crash dumps and error trackers, exposed in `/proc/<pid>/environ`,
 and easy to log by accident. Mount as a file and read it off disk instead.
@@ -68,5 +65,3 @@ rotated without a rebuild.
 ## References
 
 - [Kubernetes Secrets](https://kubernetes.io/docs/concepts/configuration/secret/)
-- [Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/)
-- [External Secrets Operator](https://external-secrets.io/)

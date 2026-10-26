@@ -90,6 +90,23 @@ volumeMounts:
     # no subPath: the directory updates when my-secret changes
 ```
 
+For a credential that has to be a static secret, keep the source of truth in an
+external manager and sync it into the cluster with the
+[Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/) or
+[External Secrets Operator](https://external-secrets.io/), then mount the result
+as above.
+
+## Roll Pods When Restart-Applied Config Changes
+
+Config that applies on restart has to change the pod template when it changes,
+or pods keep the old value until something unrelated restarts them. Prefer
+putting such values directly in the pod spec as env vars: changing one changes
+the template, so Kubernetes rolls the deployment with no extra tooling. (Secrets
+are the exception: never env vars; see the secrets style guide.) When values
+must live in a `ConfigMap`, editing it in place changes nothing in the pod
+spec, so tie it to the template another way: hash the config into a checksum
+annotation, or reference a versioned `ConfigMap` name.
+
 ## Use Helm Built-in Objects
 
 Prefer [Helm's built-in objects](https://helm.sh/docs/chart_template_guide/builtin_objects)
@@ -302,3 +319,5 @@ require it as a `values.yaml` entry and let the operator supply it.
 - [Helm named templates](https://helm.sh/docs/chart_template_guide/named_templates)
 - [Crossplane docs](https://docs.crossplane.io/)
 - [`function-go-templating`](https://github.com/crossplane-contrib/function-go-templating)
+- [Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/)
+- [External Secrets Operator](https://external-secrets.io/)

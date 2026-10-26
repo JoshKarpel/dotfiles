@@ -38,15 +38,9 @@ Decide deliberately, per setting, how a change takes effect:
   pool sizing, for instance, means tearing down and rebuilding the pool, which
   is rarely worth doing live). This is a fine default, but the restart must be
   triggered *by the config change itself*, never left as an out-of-band manual
-  step. Prefer putting the values directly in the pod spec as env vars for
-  simplicity: changing one changes the pod template, so Kubernetes rolls the
-  deployment automatically with no extra tooling. (Secrets are the exception:
-  never env vars; see the secrets style guide.) When values must live in a
-  `ConfigMap` or file, editing it in place changes nothing in the pod spec, so
-  pods keep the old value until something restarts them; tie the change to the
-  pod template another way, such as hashing the config into a checksum
-  annotation or referencing a versioned `ConfigMap` name. Load at startup and
-  document that a change requires a rollout.
+  step: an edit that doesn't change what the deployment runs reaches no process
+  until something unrelated restarts it. Load at startup and document that a
+  change requires a rollout.
 
 The failure mode to avoid is the silent middle: loading once at startup while
 assuming rotation "just works" because the mount updates underneath you.

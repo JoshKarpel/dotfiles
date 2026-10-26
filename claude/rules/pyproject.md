@@ -85,6 +85,21 @@ names beats each project hand-rolling its own scheme. Don't name a rule
 Use it where CI runs a platform matrix too, gating each job on its own data rather
 than on `coverage combine`.
 
+## Test Watchdog
+
+Give the suite a process-level timeout that dumps every thread's stack and exits,
+so a hang fails with a location instead of running until CI cancels the job.
+pytest (9.0+) has it built in, with no plugin:
+
+```toml
+[tool.pytest.ini_options]
+faulthandler_timeout = 60
+faulthandler_exit_on_timeout = true
+```
+
+Without the second line the stacks are dumped and the hang carries on.
+`pytest-timeout` is the alternative where per-test overrides are needed.
+
 ## Ruff
 
 Use `line-length = 120`. Select broadly; each selected group links its

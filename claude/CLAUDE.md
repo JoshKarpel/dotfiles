@@ -16,10 +16,9 @@
   without conflicts, is fine. A merge whose conflicts you resolved stays uncommitted for
   me to review, and pushing is never yours to do.
 - Auto-memory is off, so nothing persists automatically between sessions. When something
-  is worth keeping past this one, put it in a committed artifact: a rule in
-  `claude/rules/` for portable doctrine, `CLAUDE.md` for how-to-work-with-me guidance, a
-  skill for a procedure, a hook for something the harness should enforce. Ask where it
-  belongs when that isn't obvious, rather than dropping it in the nearest file.
+  is worth keeping past this one, put it in a committed artifact (the harness-context
+  rule says which mechanism), and ask where it belongs when that isn't obvious, rather
+  than dropping it in the nearest file.
 - Context that belongs in every session but is only true at a point in time wants a
   `SessionStart` hook that computes it, not a hand-maintained list that drifts. Repo
   state, available recipes, the current toolchain version: derive it at startup so it
