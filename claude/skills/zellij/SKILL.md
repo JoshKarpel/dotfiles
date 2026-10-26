@@ -223,6 +223,13 @@ killing; that is cosmetic.
   ships no font files, so the font must be installed where the browser runs.
   The terminal draws to a canvas, so check `window.term.options.fontFamily`,
   not element CSS.
+- A strip down the right edge, with the grid stopping short of it, is xterm.js
+  5.5's `.xterm-viewport { overflow-y: scroll }` drawing a classic scrollbar,
+  so it shows only in browsers without overlay scrollbars (Chrome on a laptop,
+  where Firefox was clean). The assets are compiled into the binary, so the fix
+  lives in the browser: a user stylesheet setting
+  `.xterm-viewport { overflow-y: hidden !important; }` for that host. Confirm
+  first from the console by setting that style and dispatching a `resize`.
 - Tokens: `zellij web --create-token` shows the value once;
   `--create-read-only-token` can't take `--token-name`. A temporary read-only
   token, used with `curl` against `POST /command/login` and then revoked, lets
