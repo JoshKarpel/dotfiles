@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Bring a local copy of zellij's documentation source up to date and print the
+# directory holding its pages, so the whole corpus can be searched with `rg`.
+# zellij.dev serves the docs only as rendered HTML; the markdown behind them is
+# the docs/src tree of the website repository, which is all this checks out.
+#
+# The checkout is shallow and sparse, so a sync is one small fetch. It is a
+# cache: anything in it can be thrown away, which is why it is reset rather than
+# merged.
+
+repo=https://github.com/zellij-org/zellij-org.github.io.git
+dir="${XDG_CACHE_HOME:-$HOME/.cache}/zellij-docs"
+
+if [[ ! -d $dir/.git ]]; then
+  git clone --quiet --depth 1 --filter=blob:none --sparse "$repo" "$dir"
+  git -C "$dir" sparse-checkout set docs/src
+else
+  git -C "$dir" fetch --quiet --depth 1 origin HEAD
+  git -C "$dir" reset --quiet --hard FETCH_HEAD
+fi
+
+# The docs track releases ("doc updates for 0.45.1"), so the last commit to
+# touch them says which version they describe. Compare it against the zellij
+# actually installed before trusting a page about behavior that changed.
+echo "docs last updated $(git -C "$dir" log -1 --format='%cs: %s' -- docs/src)" >&2
+if command -v zellij > /dev/null; then
+  echo "installed: $(zellij --version)" >&2
+fi
+
+echo "$dir/docs/src"

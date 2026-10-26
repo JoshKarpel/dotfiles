@@ -19,6 +19,17 @@ activate_if_available mise mise activate "$1"
 activate_if_interactive starship starship init "$1"
 activate_if_interactive gh gh completion -s "$1"
 
+# Besides completion, zellij's script defines its documented pane helpers
+# (`zr`, `ze`, `zpipe`, and their floating and in-place variants). The bash
+# completer matches the top-level word against whatever was typed, so the `z`
+# alias from sources/zellij.sh only needs registering, with the spec the script
+# chose for its bash version (`-o nosort` needs 4.4); zsh expands the alias for
+# completion by itself.
+activate_if_interactive zellij zellij setup --generate-completion "$1"
+if [[ $- == *i* && $1 == bash ]] && complete -p zellij &> /dev/null; then
+  eval "$(complete -p zellij) z"
+fi
+
 # exe-dev works out the shell for itself rather than taking it as an argument.
 activate_if_interactive exe-dev exe-dev --show-completion
 
