@@ -365,6 +365,15 @@ goes the other way.
     lists. One script, no state, derived from the same frontmatter. It costs context: a
     Python repo carries `python`, `pyproject`, `pre-commit`, `github-actions`, and more
     from the first turn.
+  - Either way the rules reach Codex as hook `additionalContext`, which Codex caps per
+    handler at about 2,500 tokens by default. Past the cap the model gets a head-and-tail
+    preview and the path of a file holding the full text, so the middle of a rule is read
+    only if the model chooses to read it. `python.md` alone is about 5,000 tokens. On
+    Codex 0.163.0, a `SessionStart` hook returning it lost the middle half under the
+    default and arrived whole with `additionalContextLimit = 12000` on the handler. The
+    handler therefore sets `additionalContextLimit`, and the hook caps its own output
+    below it, since the limit applies per handler and nothing caps the total. Static
+    instruction files have no such cap: the 77 KB `AGENTS.override.md` arrives whole.
 - D3. Skills in `~/.agents/skills` or `~/.codex/skills`.
   - `~/.agents/skills` is the Agent Skills standard location, and pi reads it too, so pi
     gets the skills without any pi work. The cost is that a Codex-only step changes pi's
