@@ -52,6 +52,11 @@ node = "lts"
 # runs `uv tool install` wherever uv is on the box, which is everywhere this
 # config is.
 "pipx:exe-dev-atlas" = "latest"
+# Global so that a git hook pre-commit installed always finds a `pre-commit` on
+# PATH, which it falls back to when the interpreter it pinned at install time is
+# gone. Without a global version, mise's shim for it (there whenever any
+# project's mise.toml names pre-commit) fails in every directory that doesn't.
+pre-commit = "latest"
 ripgrep = "latest"
 rust = "stable"
 sd = "latest"

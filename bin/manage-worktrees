@@ -158,8 +158,9 @@ def new(
     # Hooks live in the clone's git dir, shared by every worktree, so one install
     # covers them all. It runs from the clone rather than the worktree because the
     # hook pins the interpreter that installed it, and a worktree's venv is gone
-    # after `manage-worktrees done`. That pin is also why a hook can stop working: a uv cache
-    # interpreter is gone after `tidy`. A working hook is left alone, since in a
+    # after `manage-worktrees done`. That pin is also why a hook can go stale: one installed
+    # through uvx pins a uv cache interpreter, gone after `tidy`, and one through mise pins a
+    # version gone after an upgrade. A working hook is left alone, since in a
     # uv project the install goes through `uv run`, which syncs the clone's venv.
     # When one is needed it runs in a floating pane of the new tab rather than
     # here, so opening the tab never waits on it and its output lands in the tab

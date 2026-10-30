@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # Run pre-commit through whichever runner is available, forwarding all arguments.
+#
+# A project's own pre-commit comes first, then the one on PATH (mise's, set
+# globally), and uvx only where neither exists. `pre-commit install` pins the
+# interpreter it ran under into the git hook, and uvx's is a throwaway
+# environment in the uv cache that the next `uv cache prune` deletes.
 
 set -euo pipefail
 
 if is-uv-project 2>/dev/null; then
   exec uv run pre-commit "$@"
-elif command -v uvx &>/dev/null; then
-  exec uvx pre-commit "$@"
 elif command -v pre-commit &>/dev/null; then
   exec pre-commit "$@"
+elif command -v uvx &>/dev/null; then
+  exec uvx pre-commit "$@"
 fi
 
 echo "pre-commit-run: no runner found (need uv or pre-commit on PATH)" >&2

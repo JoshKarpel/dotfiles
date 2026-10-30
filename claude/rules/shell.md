@@ -101,7 +101,7 @@ already exited.
 long-running process (a dev server, a watcher):
 
 ```bash
-exec uv run uvicorn app:app --reload
+exec .venv/bin/uvicorn app:app --reload
 ```
 
 Without `exec`, the shell stays alive as the parent process and intercepts

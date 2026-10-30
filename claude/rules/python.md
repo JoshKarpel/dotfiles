@@ -297,6 +297,18 @@ pair genuinely can't express the invariant.
 
 - **[`uv`](https://docs.astral.sh/uv/)** for project management and running scripts
   (`uv run`, `uv add`)
+  - Start a long-lived process in a uv project (a dev server, a file watcher,
+    an MCP server, a service) with `uv sync` and then `exec .venv/bin/<cmd>`,
+    not `uv run`.
+    `uv run` holds a shared lock on the uv cache until its child exits,
+    so one left running blocks every `uv cache prune` on the machine.
+    The project venv's packages are hardlinked or copied out of the cache,
+    so pruning while the process runs leaves it intact.
+    That stops holding under `--link-mode=symlink`, so keep `uv run` there.
+    Without `uv run`, `.venv/bin` is no longer on `PATH`,
+    so a command the process spawns by bare name (`python`) needs the venv path.
+    Scripts, `uvx`, and `uv run --with` run from environments inside the cache,
+    so the lock is protecting them: leave those on `uv run`.
 - **[`ruff`](https://docs.astral.sh/ruff/)** for formatting and linting
 - **[`mypy`](https://mypy.readthedocs.io/)** for static type checking;
   use strict settings unless the project has a different established baseline;
