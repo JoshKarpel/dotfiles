@@ -39,4 +39,8 @@ else
   sudo tailscale up --operator="$(id -un)" "$@"
 fi
 
+# Off by default on Linux. `set` rather than an `up` flag, so it also reaches a
+# machine that joined before this line existed.
+sudo tailscale set --accept-routes
+
 tailscale status
