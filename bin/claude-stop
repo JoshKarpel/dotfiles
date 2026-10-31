@@ -8,10 +8,9 @@ set -uo pipefail
 
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
 # line is how `claude-hook-selftests` discovers participating hooks. This hook decides
-# what happens at stop time (announce immediately, defer while an agent runs, run a check
-# that blocks, propagate a check's error, or announce after every check passes) from
-# branches real Claude output
-# never exercises directly; run these with `CLAUDE_HOOK_SELFTEST=1 claude-stop`.
+# what happens at stop time (defer while an agent runs, run a check that blocks,
+# propagate a check's error, or announce after every check passes) from branches real
+# Claude output never exercises directly; run these with `CLAUDE_HOOK_SELFTEST=1 claude-stop`.
 if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   SELF=$(realpath "$0")
   fails=0
@@ -82,17 +81,11 @@ EOF
     { printf 'FAIL %s: want_called=%s got_called=%s\n' "$desc" "$want_called" "${got:-none}"; fails=1; }
   }
 
-  # --- a question hands control back to the user: announce, never run the checks ---
-  t "question hand-back" \
+  # --- a question gets no special treatment: the checks run as for any stop ---
+  t "question runs the checks" \
     0 "" 0 "" \
     '{"last_assistant_message":"Should I proceed?"}' \
-    0 "" "sound,tab-finished"
-
-  # --- a question with an agent still running hands back all the same ---
-  t "question while an agent runs" \
-    0 "" 0 "" \
-    '{"last_assistant_message":"Should I proceed?","background_tasks":[{"type":"subagent","status":"running"}]}' \
-    0 "" "sound,tab-finished"
+    0 "" "precommit,finish,plan,sound,tab-finished"
 
   # --- a running background agent: the session is paused, so no check runs and no sound plays ---
   t "running agent defers" \
@@ -117,12 +110,6 @@ EOF
     0 "" 0 "" \
     '{"last_assistant_message":"Done.","background_tasks":[],"session_crons":[{"id":"c1","recurring":false}]}' \
     0 "" "precommit,finish,plan,sound,tab-paused"
-
-  # --- a question is your turn whatever else is pending ---
-  t "question with a cron pending" \
-    0 "" 0 "" \
-    '{"last_assistant_message":"Should I proceed?","session_crons":[{"id":"c1","recurring":true}]}' \
-    0 "" "sound,tab-finished"
 
   # --- no check blocks: all run in order, then announce ---
   t "nothing blocks" \
@@ -162,7 +149,7 @@ fi
 
 INPUT=$(cat)
 
-# Every announcement, together, so the two stop paths below can't drift apart.
+# Every announcement, together, so the paused and finished stops below can't drift apart.
 announce() {
   local state="$1"
   claude-sound stop || true
@@ -175,15 +162,6 @@ announce() {
 # lists a dev server as the same `shell` as a Monitor, so one started from the session
 # pauses it too; dev servers run by hand, outside it, are what that trade rests on.
 PENDING=$(echo "$INPUT" | jq '[.background_tasks[]? | select(.status == "running")] + [.session_crons[]?] | length')
-
-# If Claude's last message looks like a question, it's handing control back to the user.
-# Don't let any check block the stop and force it to keep working — Claude is genuinely
-# stopping to await a reply, so announce it and let it stop.
-LAST_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // ""')
-if [[ "$LAST_MESSAGE" == *"?"* ]]; then
-  announce finished
-  exit 0
-fi
 
 # A running background agent means the session is paused, not done: the change-set is
 # half-built, and a check that blocks here sends Claude to stage or fix files the agent
