@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reclaim disk by removing what the tools installed on this machine can get back
-# on their own. install.sh schedules it weekly on exe.dev VMs, and `update` runs
+# on their own. install.sh schedules it daily on exe.dev VMs, and `update` runs
 # it after install.sh; it is also safe to run by hand.
 #
 # Every step is user-level, so this never asks for a password. apt and brew are
@@ -238,6 +238,20 @@ function prune_claude_scratch() {
   done
 }
 
+# Everything but the build cache, which BuildKit garbage-collects itself after
+# each build, within the budget install.sh writes into daemon.json where it can.
+# Pruning it here would empty it on every run, and the next image build would
+# start cold, cargo's cache mounts included.
+#
+# Not `docker volume prune`: a dev stack's database often lives in an anonymous
+# volume, which becomes unused, and so prunable, the moment its container is
+# stopped. Unlike everything else here, nothing re-downloads it.
+function prune_docker() {
+  docker container prune --force &&
+  docker image prune --all --force &&
+  docker network prune --force
+}
+
 # Neither tool prunes to just the current revision. Playwright's `uninstall
 # --all` and `npx @puppeteer/browsers clear` each remove everything, and
 # puppeteer's has to fetch its CLI over the network to do it, so removing the
@@ -279,10 +293,7 @@ if have go && [[ -d $(go env GOCACHE) || -d $(go env GOMODCACHE) ]]; then
   step "Cleaning go caches..." go clean -cache -testcache -fuzzcache -modcache
 fi
 
-# Not `--volumes`: a dev stack's database often lives in an anonymous volume,
-# which becomes unused, and so prunable, the moment its container is stopped.
-# Unlike everything else here, nothing re-downloads it.
-have docker && step "Pruning docker..." docker system prune --all --force
+have docker && step "Pruning docker..." prune_docker
 have podman && step "Pruning podman..." podman system prune --all --force
 
 step "Removing browser bundles..." prune_browser_bundles

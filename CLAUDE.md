@@ -10,6 +10,7 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 
 - **`dotrc/`** — Files symlinked as `~/.<filename>` (bashrc, zshrc, commonrc-pre, commonrc-post, gitconfig, etc.)
 - **`config/`** — Top-level entries symlinked into `~/.config/` under their own names. An entry that is a file lands as a file, so `starship.toml` becomes `~/.config/starship.toml`, not `~/.config/starship/`. Adding a tool's config needs no change to `install.sh`.
+- **`cargo/`** — `config.toml`, linked to `$CARGO_HOME/config.toml` by `install.sh`, since cargo doesn't read `~/.config`. It sets the dev profile for every project on the machine, and outranks a project's `Cargo.toml` profiles.
 - **`claude/`** — Source files symlinked into `~/.claude/` via `bin/link-claude`: the global `CLAUDE.md`, `settings.json`, `skills/`, `rules/`, and `output-styles/`. Anything else added here lands at the matching path under `~/.claude/`, and a symlink whose source is later deleted is pruned on the next run wherever it sits. Edit these here, not the symlinks in `~/.claude/`.
 - **`sources/`** — Shell scripts sourced by `commonrc-pre` at shell startup (aliases, git helpers, path management, etc.)
 - **`targets/`** — Package lists for apt and brew (one package per line, kept sorted by pre-commit)
@@ -185,7 +186,7 @@ can just use the name.
 pre-commit run
 
 # Reclaim disk by removing what installed tools can re-download or rebuild.
-# install.sh schedules it weekly on exe.dev VMs, and `update` runs it after
+# install.sh schedules it daily on exe.dev VMs, and `update` runs it after
 # install.sh; run it by hand to reclaim now.
 tidy
 

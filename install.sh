@@ -43,6 +43,18 @@ function do_config() {
     ln -nsf "$dir" "$target"
   done
 
+  # Cargo reads its user config from CARGO_HOME, not ~/.config, so it is linked
+  # on its own rather than through config/.
+  cargo_config="${CARGO_HOME:-$HOME/.cargo}/config.toml"
+  mkdir -p "$(dirname "$cargo_config")"
+  if exists_and_not_symlink "$cargo_config"; then
+    mkdir -p $BACKUPS
+    echo "mv $cargo_config -> $BACKUPS/cargo-config.toml"
+    mv "$cargo_config" "$BACKUPS/cargo-config.toml"
+  fi
+  echo "link $cargo_config -> $BASEDIR/cargo/config.toml"
+  ln -sf "$BASEDIR/cargo/config.toml" "$cargo_config"
+
   "$BASEDIR/bin/link-claude"
 }
 
@@ -132,6 +144,52 @@ EOF
   sudo sysctl --load=/etc/sysctl.d/99-perf-event.conf
 }
 
+# Gives Docker's build cache a fixed budget. BuildKit garbage-collects it after
+# each build, and bin/tidy leaves it to that rather than emptying it. Its
+# defaults are fractions of the disk sized for a box that only builds images,
+# letting the cache take most of it, where here it shares the disk with cargo
+# target directories that nothing bounds.
+#
+# All three sizes or none: moby fills in its percentage defaults only when every
+# one is unset, so setting just the cap zeroes the other two. The reserve is
+# what GC never goes below, and it also sizes the cache-mount allowance (about
+# 14% of it) that keeps a Dockerfile's cargo target mount warm. Min free
+# is the disk headroom that starts collection before the cap is reached.
+#
+# The builder config is not one dockerd reloads, so a change restarts it,
+# stopping running containers; those with a restart policy come back.
+function do_docker_build_cache() {
+  local config=/etc/docker/daemon.json
+
+  exists docker && [[ -d /etc/docker ]] || return 0
+
+  log "Budgeting docker build cache..."
+
+  local want
+  want=$(python3 - "$config" << 'EOF'
+import json, pathlib, sys
+
+path = pathlib.Path(sys.argv[1])
+config = json.loads(path.read_text()) if path.exists() else {}
+config.setdefault("builder", {})["gc"] = {
+    "enabled": True,
+    "defaultReservedSpace": "8GB",
+    "defaultMaxUsedSpace": "16GB",
+    "defaultMinFreeSpace": "10GB",
+}
+print(json.dumps(config, indent=2))
+EOF
+  ) || return 1
+
+  if [[ -f $config ]] && [[ $(< "$config") == "$want" ]]; then
+    echo "$config already budgets the build cache"
+    return 0
+  fi
+
+  printf '%s\n' "$want" | sudo tee "$config" > /dev/null
+  sudo systemctl restart docker
+}
+
 function do_brew() {
   if ! [[ $(uname) == "Darwin" ]]; then
     return 0
@@ -190,6 +248,16 @@ function do_mise() {
 
   "$HOME/.local/bin/mise" install
   "$HOME/.local/bin/mise" upgrade
+
+  # mise resolves `rust = "stable"` to a release and installs that toolchain
+  # under its version number, while rustup's default is a separate toolchain
+  # named `stable` that only `rustup update` advances: two copies of one
+  # compiler, and the second drifts. Pointing the default at mise's resolution
+  # leaves `stable` named by nothing, so bin/tidy removes it. From $HOME, so a
+  # project pin in the working directory doesn't decide the default.
+  if exists rustup; then
+    rustup default "$("$HOME/.local/bin/mise" -C "$HOME" current rust)"
+  fi
 }
 
 # Schedules bin/sync-branches hourly: a systemd timer on exe.dev, where the
@@ -306,7 +374,7 @@ function use_user_bus() {
   fi
 }
 
-# Schedules bin/tidy weekly. Gated on exe.dev rather than on a dev box, since a
+# Schedules bin/tidy daily. Gated on exe.dev rather than on a dev box, since a
 # bot box fills its disk just the same, and nowhere else: a laptop's owner runs
 # it through `update`.
 function do_tidy() {
@@ -338,14 +406,14 @@ Nice=19
 IOSchedulingClass=idle
 EOF
 
-  # Persistent catches up a week the box was off for. No run now: install.sh is
+  # Persistent catches up a day the box was off for. No run now: install.sh is
   # usually reached through `update`, which runs tidy itself right after.
   cat > "$units/tidy.timer" << EOF
 [Unit]
-Description=Reclaim disk weekly
+Description=Reclaim disk daily
 
 [Timer]
-OnCalendar=weekly
+OnCalendar=daily
 Persistent=true
 RandomizedDelaySec=1h
 
@@ -729,6 +797,7 @@ do_ssh_key
 do_apt
 do_locale
 do_perf_sysctl
+do_docker_build_cache
 do_brew
 do_mise
 do_sync_branches

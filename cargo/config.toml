@@ -1,0 +1,17 @@
+# Linked to $CARGO_HOME/config.toml by install.sh, so it applies to every
+# project's dev and test builds on this machine.
+#
+# A target directory keeps every artifact it has ever linked, and each worktree
+# has its own, so the size of one debug artifact is multiplied many times over.
+# Line tables keep backtraces and panics pointing at file and line; what goes is
+# a debugger's view of local variables, here and in every dependency.
+#
+# This file outranks a project's Cargo.toml [profile] tables, so a manifest
+# cannot opt back in. A project's own .cargo/config.toml outranks this file, but
+# table by table: restoring full debug info there takes both [profile.dev] and
+# [profile.dev.package."*"], since the second is more specific than the first.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
