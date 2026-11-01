@@ -1,7 +1,11 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.15"
-# dependencies = ["counterweight>=0.1.1", "typer"]
+# dependencies = ["counterweight==0.2.0", "typer==0.27.3"]
+#
+# [tool.uv]
+# exclude-newer = "7 days"
+# exclude-newer-package = { counterweight = false, evp = false, waxy = false, without-cli = false, without-logging = false, without-streams = false }
 # ///
 """One git worktree per zellij tab, each tab running its own agent.
 
@@ -31,6 +35,7 @@ import typer
 from counterweight import app as counterweight_app
 from counterweight.components import component
 from counterweight.controls import Quit
+from counterweight.controls import ScrollIntoView
 from counterweight.elements import Div
 from counterweight.elements import Text
 from counterweight.events import InputEvent
@@ -38,8 +43,13 @@ from counterweight.events import InputResponse
 from counterweight.events import KeyPressed
 from counterweight.events import Pasted
 from counterweight.events import Receiver
-from counterweight.hooks import use_controls
-from counterweight.hooks import use_effect
+from counterweight.events import response_controls
+from counterweight.focus import ElementHandle
+from counterweight.headless import Highlight
+from counterweight.headless import TextInput
+from counterweight.headless import substring_matches
+from counterweight.headless import use_text_input
+from counterweight.hooks import get_state
 from counterweight.hooks import use_state
 from counterweight.keys import Key
 from counterweight.styles.utilities import *
@@ -306,10 +316,11 @@ def list_tabs(attempts: int = 3) -> list[dict[str, Any]] | None:
 def pick(context: typer.Context) -> None:
     """With no command, pick a clone, then one of its worktrees or a new branch, and open it as `new` does.
 
-    Typing narrows each list to the names containing the text, ignoring case, and Enter takes the
-    highlighted one. Up, Down, Tab, Shift+Tab, Ctrl+N, Ctrl+P and Ctrl+K move the highlight, Backspace
-    deletes a character and Ctrl+U the whole query. Escape goes back from the branches to the clones,
-    and leaves from the clones; Ctrl+C leaves from either.
+    Typing narrows each list to the names containing the text, ignoring case, with one the text names
+    exactly first, and Enter takes the highlighted one. Up, Down, Tab, Shift+Tab, Ctrl+N, Ctrl+P and
+    Ctrl+K move the highlight, and the query edits as a shell's line does (Left, Right, Ctrl+A, Ctrl+E,
+    Ctrl+W, Ctrl+U and the rest). Escape goes back from the branches to the clones, and leaves from the
+    clones; Ctrl+C leaves from either.
     """
     if context.invoked_subcommand is not None:
         return
@@ -393,23 +404,18 @@ class Option[T]:
 type Row[T] = Heading | Option[T]
 
 
-def contains(query: str, name: str) -> bool:
-    """Whether NAME contains QUERY, ignoring case."""
-    return query.casefold() in name.casefold()
-
-
 def clone_rows(sections: tuple[Section, ...], query: str) -> tuple[Row[Path], ...]:
     """The clones whose name contains QUERY, under the heading of each section that has any."""
     rows: list[Row[Path]] = []
     for section in sections:
-        if matched := [clone for clone in section.clones if contains(query, clone.name)]:
+        if matched := substring_matches(query, section.clones, key=lambda clone: clone.name):
             rows += [Heading(section.title), *(Option(clone.name, clone) for clone in matched)]
     return tuple(rows)
 
 
 def branch_rows(branches: tuple[str, ...], query: str) -> tuple[Row[str], ...]:
     """The worktree branches containing QUERY, then QUERY as a new branch unless it names one of them."""
-    rows: list[Row[str]] = [Option(branch, branch) for branch in branches if contains(query, branch)]
+    rows: list[Row[str]] = [Option(branch, branch) for branch in substring_matches(query, branches)]
     if (name := query.strip()) and name not in branches:
         rows.append(Option(f"+ new branch {name}", name))
     return tuple(rows)
@@ -425,18 +431,14 @@ class Search:
     """A menu's query and which of its options is highlighted, counting options only."""
 
     query: str
-    highlighted: int
+    highlight: Highlight
 
     def edited(self, query: str) -> Search:
-        """A changed query highlights its first option, since the old index points into a different list."""
-        return self if query == self.query else Search(query=query, highlighted=0)
-
-    def moved(self, by: int, option_count: int) -> Search:
-        """The highlight moved BY options, wrapping at either end."""
-        return replace(self, highlighted=(self.highlighted + by) % option_count) if option_count else self
+        """A changed query highlights its first option, since the old highlight is on a different list."""
+        return self if query == self.query else Search(query=query, highlight=Highlight())
 
 
-EMPTY_SEARCH = Search(query="", highlighted=0)
+EMPTY_SEARCH = Search(query="", highlight=Highlight())
 
 
 @dataclass(frozen=True, slots=True)
@@ -455,30 +457,21 @@ DOWN_KEYS = frozenset({Key.Down, Key.Tab, Key.ControlN})
 UP_KEYS = frozenset({Key.Up, Key.BackTab, Key.ControlP, Key.ControlK})
 
 
-def navigate[T](search: Search, rows: tuple[Row[T], ...], event: InputEvent) -> Search | Chosen[T] | Back:
-    """What one key press or paste does to a menu showing ROWS for SEARCH's query."""
+def navigate[T](search: Search, rows: tuple[Row[T], ...], event: InputEvent) -> Search | Chosen[T] | Back | None:
+    """What a key that picks does to a menu showing ROWS for SEARCH's query, or `None` for one the query's field edits with."""
     choices = options(rows)
     match event:
         case KeyPressed(key=Key.Escape):
             return Back()
         # Enter typed ahead, before the terminal goes raw, has had its \r turned into \n (Ctrl+J) by the tty.
-        case KeyPressed(key=Key.Enter | Key.ControlJ) if choices:
-            return Chosen(choices[search.highlighted].value)
+        case KeyPressed(key=Key.Enter | Key.ControlJ) if (index := search.highlight.index_in(choices)) is not None:
+            return Chosen(choices[index].value)
         case KeyPressed(key=key) if key in DOWN_KEYS:
-            return search.moved(1, len(choices))
+            return replace(search, highlight=search.highlight.moved(choices, 1))
         case KeyPressed(key=key) if key in UP_KEYS:
-            return search.moved(-1, len(choices))
-        case KeyPressed(key=Key.Backspace):
-            return search.edited(search.query[:-1])
-        case KeyPressed(key=Key.ControlU):
-            return search.edited("")
-        # Text is one character; every named key is longer ("enter", "alt+b"), so length tells them apart.
-        case KeyPressed(key=key) if len(key) == 1 and key.isprintable():
-            return search.edited(search.query + key)
-        case Pasted(text=text):
-            return search.edited(search.query + "".join(c for c in text if c.isprintable()))
+            return replace(search, highlight=search.highlight.moved(choices, -1))
         case _:
-            return search
+            return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -508,15 +501,16 @@ type Picking = ChoosingClone | ChoosingBranch | Finished
 
 
 def step(
-    picking: Picking, event: InputEvent, sections: tuple[Section, ...], branches: Mapping[Path, tuple[str, ...]]
-) -> Picking:
-    """The picker after one more key press or paste.
+    picking: ChoosingClone | ChoosingBranch,
+    event: InputEvent,
+    sections: tuple[Section, ...],
+    branches: Mapping[Path, tuple[str, ...]],
+) -> Picking | None:
+    """The picker after a key that picks rather than edits, or `None` for an event the query's field handles.
 
-    Every input goes through here, applied to the latest state, so keys typed faster than the screen
-    redraws (type-ahead while the picker starts, say) land as if each had been seen.
+    The component steps from the latest state, so keys typed faster than the screen redraws (type-ahead
+    while the picker starts, say) land as if each had been seen.
     """
-    if isinstance(picking, Finished):
-        return picking
     if event == KeyPressed(key=Key.ControlC):
         return Finished(opening=None)
 
@@ -529,6 +523,8 @@ def step(
                     return Finished(opening=None)
                 case Search() as moved:
                     return ChoosingClone(search=moved)
+                case None:
+                    return None
                 case _ as unreachable:
                     assert_never(unreachable)
         case ChoosingBranch(clone_search=clone_search, clone=clone, search=search):
@@ -539,10 +535,52 @@ def step(
                     return ChoosingClone(search=clone_search)
                 case Search() as moved:
                     return replace(picking, search=moved)
+                case None:
+                    return None
                 case _ as unreachable:
                     assert_never(unreachable)
         case _ as unreachable:
             assert_never(unreachable)
+
+
+def queried(picking: Picking, edit: Callable[[str], str]) -> Picking:
+    """The picker with the current step's query edited; a finished picker has none."""
+    match picking:
+        case ChoosingClone(search=search):
+            return ChoosingClone(search=search.edited(edit(search.query)))
+        case ChoosingBranch(search=search):
+            return replace(picking, search=search.edited(edit(search.query)))
+        case Finished():
+            return picking
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def query_of(picking: Picking) -> str:
+    """The current step's query, or nothing once the picker is finished."""
+    return "" if isinstance(picking, Finished) else picking.search.query
+
+
+def trimmed(event: InputEvent) -> InputEvent:
+    """A paste without the line break a copied line ends with, which the field would make a trailing space."""
+    return Pasted(text=event.text.rstrip("\r\n")) if isinstance(event, Pasted) else event
+
+
+def query_row(field: TextInput) -> Div:
+    """The query after its prompt, with the cursor drawn over the cell it's in."""
+    return Div(
+        style=row | overflow_x_scroll | stick_to_end_x,
+        children=(
+            Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
+            Text(content=field.before_cursor, style=text_wrap_none),
+            Text(
+                content=field.at_cursor,
+                handle=field.cursor_cell,
+                style=text_wrap_none | text_color("slate", 900) | text_bg("sky", 300),
+            ),
+            Text(content=field.after_cursor, style=text_wrap_none),
+        ),
+    )
 
 
 def view(
@@ -562,36 +600,51 @@ def view(
 def chooser(
     sections: tuple[Section, ...], branches: Mapping[Path, tuple[str, ...]], choose: Callable[[Opening], None]
 ) -> Div:
-    picking, set_picking = use_state(lambda: ChoosingClone(search=EMPTY_SEARCH))
-    send_control = use_controls()
+    def start() -> Picking:
+        return ChoosingClone(search=EMPTY_SEARCH)
 
-    async def finish() -> None:
-        if not isinstance(picking, Finished):
-            return
-        if picking.opening is not None:
-            choose(picking.opening)
-        send_control(Quit())
+    picking, set_picking = use_state(start)
+    row_handle, _ = use_state(ElementHandle)
+    field = use_text_input(
+        query_of(picking), lambda edit: query_of(set_picking(lambda latest: queried(latest, edit))), auto_focus=True
+    )
 
-    use_effect(finish, deps=(picking,))
-
-    def on_input(event: InputEvent, _: Receiver) -> InputResponse:
-        if not isinstance(event, KeyPressed | Pasted):
-            return None
-        set_picking(lambda latest: step(latest, event, sections, branches))
-        return ()
+    def on_input(event: InputEvent, receiver: Receiver) -> InputResponse:
+        now = get_state(set_picking)
+        # Keys typed ahead of the Quit, after the choice, choose nothing more.
+        if isinstance(now, Finished):
+            return ()
+        scroll = ScrollIntoView(row_handle, block="nearest")
+        match step(now, event, sections, branches):
+            case None:
+                if (controls := response_controls(field.on_input(trimmed(event), receiver))) is None:
+                    return None
+                return (*controls, scroll)
+            case Finished(opening=opening) as finished:
+                set_picking(finished)
+                if opening is not None:
+                    choose(opening)
+                return Quit()
+            case ChoosingClone() | ChoosingBranch() as moved:
+                set_picking(moved)
+                return scroll
+            case _ as unreachable:
+                assert_never(unreachable)
 
     if isinstance(picking, Finished):
         return Div(style=full)
     title, search, rows = view(picking, sections, branches)
     choices = options(rows)
-    highlighted = choices[search.highlighted] if choices else None
+    highlighted = choices[index] if (index := search.highlight.index_in(choices)) is not None else None
 
     def row_text(row: Row[object]) -> Text:
         match row:
             case Heading(title=heading):
                 return Text(content=heading, style=text_wrap_none | text_bold | text_color("slate", 400))
             case Option(label=label) if row is highlighted:
-                return Text(content=f"  {label}", style=text_wrap_none | text_bold | text_color("amber", 300))
+                return Text(
+                    content=f"  {label}", handle=row_handle, style=text_wrap_none | text_bold | text_color("amber", 300)
+                )
             case Option(label=label):
                 return Text(content=f"  {label}", style=text_wrap_none | text_color("slate", 300))
             case _ as unreachable:
@@ -602,14 +655,7 @@ def chooser(
         on_input=on_input,
         children=(
             Text(content=title, style=text_wrap_none | text_color("slate", 400)),
-            Div(
-                style=row | overflow_x_scroll | stick_to_end_x,
-                children=(
-                    Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
-                    Text(content=search.query, style=text_wrap_none),
-                    Text(content=" ", style=text_wrap_none | text_bg("sky", 300)),
-                ),
-            ),
+            query_row(field),
             Div(
                 style=col | fill(1) | overflow_y_scroll,
                 children=tuple(row_text(row) for row in rows)
@@ -630,9 +676,9 @@ async def choose_opening(
 
 def _selftest() -> int:
     import tempfile
-    from functools import reduce
-
     from counterweight.autopilot import typed
+    from counterweight.controls import Screenshot
+    from counterweight.paint import Frame
 
     projects, work = Path("/p"), Path("/w")
     sections = (
@@ -660,11 +706,18 @@ def _selftest() -> int:
     enter = KeyPressed(key=Key.Enter)
     escape = KeyPressed(key=Key.Escape)
     down = KeyPressed(key=Key.Down)
-    backspace = KeyPressed(key=Key.Backspace)
 
-    def stepped(*events: InputEvent) -> Picking:
-        start: Picking = ChoosingClone(search=EMPTY_SEARCH)
-        return reduce(lambda picking, event: step(picking, event, sections, branches), events, start)
+    def stepped(*inputs: InputEvent | str) -> Picking:
+        """The picker after each input, a string standing for the query typed onto."""
+        picking: Picking = ChoosingClone(search=EMPTY_SEARCH)
+        for given in inputs:
+            if isinstance(picking, Finished):
+                break
+            if isinstance(given, str):
+                picking = queried(picking, lambda query: query + given)
+            else:
+                picking = step(picking, given, sections, branches) or picking
+        return picking
 
     def opened(clone: Path, branch: str) -> Finished:
         return Finished(opening=Opening(clone=clone, branch=branch))
@@ -693,23 +746,20 @@ def _selftest() -> int:
         ("Up from the first clone wraps to the last", stepped(KeyPressed(key=Key.Up), enter, enter) == opened(work / "service", "Feature")),
         (
             "typing a new name opens it as a new branch",
-            stepped(*typed("ray"), enter, *typed("spike"), enter) == opened(projects / "ray", "spike"),
+            stepped("ray", enter, "spike", enter) == opened(projects / "ray", "spike"),
         ),
         (
             "keys typed ahead of a step land in it, as if each had been seen",
-            stepped(*typed("serv"), enter, *typed("fea"), enter) == opened(work / "service", "Feature"),
+            stepped("serv", enter, "fea", enter) == opened(work / "service", "Feature"),
         ),
         (
             "Escape from the branches goes back to the clones, query kept",
-            stepped(*typed("serv"), enter, escape, KeyPressed(key="i"), enter, enter) == opened(work / "service", "Feature"),
+            stepped("serv", enter, escape, "i", enter, enter) == opened(work / "service", "Feature"),
         ),
         ("Escape from the clones leaves", stepped(escape) == Finished(opening=None)),
         ("Ctrl+C leaves from the branches", stepped(enter, KeyPressed(key=Key.ControlC)) == Finished(opening=None)),
         ("keys after finishing change nothing", stepped(escape, enter, enter) == Finished(opening=None)),
-        ("Backspace deletes the last character", stepped(*typed("rayx"), backspace, enter, *typed("b"), enter) == opened(projects / "ray", "b")),
-        ("Ctrl+U clears the query", stepped(*typed("zz"), KeyPressed(key=Key.ControlU), enter, enter) == opened(projects / "dotfiles", "fix-tabs")),
-        ("a paste adds its printable text", stepped(Pasted(text="ray\n"), enter, Pasted(text="a-b"), enter) == opened(projects / "ray", "a-b")),
-        ("Enter with nothing matched stays put", stepped(*typed("zz"), enter) == ChoosingClone(search=Search("zz", 0))),
+        ("Enter with nothing matched is left to the field", step(ChoosingClone(search=Search("zz", Highlight())), enter, sections, branches) is None),
     ]
 
     tabs = [
@@ -730,17 +780,32 @@ def _selftest() -> int:
         ("a tab already closed is skipped", closing_order(tabs, ["dotfiles:b", "dotfiles:gone"]) == [9]),
     ]
 
-    def picked(*steps: object) -> Opening | None:
+    def picked(
+        *steps: object,
+        picked_from: tuple[Section, ...] = sections,
+        branches_of: Mapping[Path, tuple[str, ...]] = branches,
+    ) -> Opening | None:
         return asyncio.run(
             asyncio.wait_for(
-                choose_opening(sections, branches, headless=True, dimensions=(50, 12), autopilot=[*steps, Quit()]),
+                choose_opening(picked_from, branches_of, headless=True, dimensions=(50, 12), autopilot=[*steps, Quit()]),
                 timeout=timedelta(seconds=30).total_seconds(),
             )
         )
 
+    many = (Section(title="~/projects", clones=tuple(projects / f"clone-{index:02}" for index in range(30))),)
+    frames: list[Frame] = []
+    picked(*(down for _ in range(20)), Screenshot(frames.append), picked_from=many, branches_of={})
+    screen = frames[0].text(ansi=False) if frames else ""
+
     cases += [
         ("the app hands back what was chosen", picked(*typed("ray"), enter, *typed("x"), enter) == Opening(projects / "ray", "x")),
+        (
+            "each step's query edits at the cursor",
+            picked(*typed("ra"), KeyPressed(key=Key.Home), *typed("x"), KeyPressed(key=Key.Backspace), enter, *typed("ab"), KeyPressed(key=Key.Left), *typed("-"), enter)
+            == Opening(projects / "ray", "a-b"),
+        ),
         ("the app hands back nothing when left", picked(escape) is None),
+        ("moving past the rows shown scrolls the highlight into view", "clone-20" in screen and "clone-00" not in screen),
     ]
 
     failures = [name for name, passed in cases if not passed]

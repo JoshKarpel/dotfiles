@@ -1,7 +1,11 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.15"
-# dependencies = ["counterweight>=0.1.1"]
+# dependencies = ["counterweight==0.2.0"]
+#
+# [tool.uv]
+# exclude-newer = "7 days"
+# exclude-newer-package = { counterweight = false, evp = false, waxy = false, without-cli = false, without-logging = false, without-streams = false }
 # ///
 """
 See this account's own systemd user services and their timers, watch their journals, and start, restart or stop them.
@@ -11,7 +15,8 @@ converges write theirs, folded together with the timer that triggers it: its sta
 the timer fires next. Below the rows are the highlighted service's latest journal lines.
 
 Type to narrow the rows to those whose name or description contains the text, ignoring case. Up, Down, Tab,
-Shift+Tab, Ctrl+N, Ctrl+P and Ctrl+K move the highlight, Backspace deletes a character and Ctrl+U the whole query.
+Shift+Tab, Ctrl+N, Ctrl+P and Ctrl+K move the highlight, and the query edits as a shell's line does (Left, Right,
+Ctrl+A, Ctrl+E, Ctrl+W, Ctrl+U and the rest).
 Ctrl+S starts the highlighted service, which for one a timer triggers means running it now, Ctrl+R restarts it, and
 Ctrl+X stops it, each queued with --no-block, so a long run shows as activating rather than freezing the screen.
 Enter opens the service's whole journal in a pager, and quitting the pager comes back here. Escape or Ctrl+C
@@ -29,7 +34,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -47,6 +51,7 @@ from typing import Any, assert_never
 from counterweight import app
 from counterweight.components import component
 from counterweight.controls import Quit
+from counterweight.controls import ScrollIntoView
 from counterweight.controls import Suspend
 from counterweight.elements import Div
 from counterweight.elements import Text
@@ -55,7 +60,13 @@ from counterweight.events import InputResponse
 from counterweight.events import KeyPressed
 from counterweight.events import Pasted
 from counterweight.events import Receiver
-from counterweight.hooks import use_controls
+from counterweight.events import response_controls
+from counterweight.focus import ElementHandle
+from counterweight.headless import Highlight
+from counterweight.headless import TextInput
+from counterweight.headless import substring_matches
+from counterweight.headless import use_text_input
+from counterweight.hooks import get_state
 from counterweight.hooks import use_effect
 from counterweight.hooks import use_state
 from counterweight.keys import Key
@@ -114,9 +125,15 @@ class Unit:
     def short_name(self) -> str:
         return self.name.removesuffix(".service")
 
-    @property
-    def searchable(self) -> str:
-        return f"{self.name} {self.description}"
+
+def unit_name(unit: Unit) -> str:
+    """What identifies a row across listings."""
+    return unit.name
+
+
+def searchable(unit: Unit) -> str:
+    """The text a query matches a row by."""
+    return f"{unit.name} {unit.description}"
 
 
 def unit_names(filenames: Iterable[str]) -> tuple[str, ...]:
@@ -265,8 +282,7 @@ def next_text(unit: Unit, now: datetime) -> str:
 
 def matching(query: str, units: tuple[Unit, ...]) -> tuple[Unit, ...]:
     """The units whose name or description contains QUERY, ignoring case."""
-    folded = query.casefold()
-    return tuple(unit for unit in units if folded in unit.searchable.casefold())
+    return substring_matches(query, units, key=searchable)
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,7 +300,12 @@ class Page:
     unit: str
 
 
-type Action = Control | Page
+@dataclass(frozen=True, slots=True)
+class Leave:
+    """Leave the manager."""
+
+
+type Action = Control | Page | Leave
 
 
 def pager_argv(unit: str) -> tuple[str, ...]:
@@ -303,7 +324,7 @@ class Journal:
 @dataclass(frozen=True, slots=True)
 class Managing:
     """
-    The rows, the query, the highlight, the highlighted unit's journal, and the actions yet to be carried out.
+    The rows, the query, the highlight, the highlighted unit's journal, and what the last action came to.
 
     The highlight is held both by its unit's name and by its position. The name keeps it on its unit while the rows
     above come and go; the position is where it lands when its own row goes.
@@ -311,10 +332,8 @@ class Managing:
 
     units: tuple[Unit, ...]
     query: str
-    highlighted_name: str | None
-    highlighted_index: int
+    highlight: Highlight
     journal: Journal | None
-    pending: tuple[Action, ...]
     notice: str
 
     @property
@@ -324,10 +343,8 @@ class Managing:
     @property
     def highlighted(self) -> Unit | None:
         shown = self.shown
-        if not shown:
-            return None
-        by_name = next((unit for unit in shown if unit.name == self.highlighted_name), None)
-        return by_name or shown[min(self.highlighted_index, len(shown) - 1)]
+        index = self.highlight.index_in(shown, unit_name)
+        return None if index is None else shown[index]
 
     @property
     def journal_lines(self) -> tuple[str, ...]:
@@ -338,30 +355,12 @@ class Managing:
         return self.journal.lines
 
     def landed(self) -> Managing:
-        """The highlight's name and position made to agree with the row it is on now."""
-        highlighted = self.highlighted
-        if highlighted is None:
-            return replace(self, highlighted_name=None, highlighted_index=0)
-        return replace(self, highlighted_name=highlighted.name, highlighted_index=self.shown.index(highlighted))
-
-    def moved(self, by: int) -> Managing:
-        """The highlight moved BY rows, wrapping at either end."""
-        shown, highlighted = self.shown, self.highlighted
-        if highlighted is None:
-            return self
-        index = (shown.index(highlighted) + by) % len(shown)
-        return replace(self, highlighted_name=shown[index].name, highlighted_index=index)
+        """The highlight on the row it is on now, so it follows that row from here."""
+        return replace(self, highlight=self.highlight.landed(self.shown, unit_name))
 
     def edited(self, query: str) -> Managing:
         """A changed query highlights its first match, as the other pickers' does."""
-        if query == self.query:
-            return self
-        return replace(self, query=query, highlighted_name=None, highlighted_index=0).landed()
-
-
-@dataclass(frozen=True, slots=True)
-class Finished:
-    """The manager was left."""
+        return self if query == self.query else replace(self, query=query, highlight=Highlight()).landed()
 
 
 @dataclass(frozen=True, slots=True)
@@ -372,74 +371,77 @@ class Refreshed:
 
 
 @dataclass(frozen=True, slots=True)
-class Carried:
-    """The component carried out the first COUNT pending actions, saying NOTICE about how they went."""
-
-    count: int
-    notice: str
-
-
-@dataclass(frozen=True, slots=True)
 class Paged:
     """The pager handed the terminal back, having ended with OUTCOME."""
 
     outcome: ProgramOutcome
 
 
-type Manager = Managing | Finished
-
-
 def opening(units: tuple[Unit, ...]) -> Managing:
     """An empty query highlighting the first unit."""
-    return Managing(
-        units=units, query="", highlighted_name=None, highlighted_index=0, journal=None, pending=(), notice=""
-    ).landed()
+    return Managing(units=units, query="", highlight=Highlight(), journal=None, notice="").landed()
 
 
-def step(manager: Manager, event: InputEvent | Refreshed | Journal | Carried | Paged) -> Manager:
-    """
-    The manager after one more key press, paste, listing, journal, or report of actions carried out.
-
-    Every one goes through here, applied to the latest state, so keys typed while a listing is being read land as if
-    each had been seen. Actions are queued in `pending` rather than carried out here, keeping this pure.
-    """
-    if isinstance(manager, Finished):
-        return manager
+def received(manager: Managing, event: Refreshed | Journal | Paged) -> Managing:
+    """The manager after a listing, a journal, or the pager's exit arrives."""
     match event:
         case Refreshed(units=units):
             return replace(manager, units=units).landed()
         case Journal() as journal:
             return replace(manager, journal=journal)
-        case Carried(count=count, notice=notice):
-            return replace(manager, pending=manager.pending[count:], notice=notice)
         case Paged(outcome=Exited(status=0)):
             return manager
         case Paged(outcome=Exited(status=status)):
             return replace(manager, notice=f"the pager exited {status}")
         case Paged(outcome=FailedToStart(reason=reason)):
             return replace(manager, notice=f"the pager didn't start: {reason}")
-        case KeyPressed(key=key) if key in LEAVE_KEYS:
-            return Finished()
-        # Enter typed ahead, before the terminal goes raw, has had its \r turned into \n (Ctrl+J) by the tty.
-        case KeyPressed(key=Key.Enter | Key.ControlJ) if (unit := manager.highlighted) is not None:
-            return replace(manager, pending=(*manager.pending, Page(unit=unit.name)))
-        case KeyPressed(key=key) if key in VERBS and (unit := manager.highlighted) is not None:
-            return replace(manager, pending=(*manager.pending, Control(verb=VERBS[key], unit=unit.name)))
-        case KeyPressed(key=key) if key in DOWN_KEYS:
-            return manager.moved(1)
-        case KeyPressed(key=key) if key in UP_KEYS:
-            return manager.moved(-1)
-        case KeyPressed(key=Key.Backspace):
-            return manager.edited(manager.query[:-1])
-        case KeyPressed(key=Key.ControlU):
-            return manager.edited("")
-        # Text is one character; every named key is longer ("enter", "alt+b"), so length tells them apart.
-        case KeyPressed(key=key) if len(key) == 1 and key.isprintable():
-            return manager.edited(manager.query + key)
-        case Pasted(text=text):
-            return manager.edited(manager.query + "".join(c for c in text if c.isprintable()))
         case _:
             return manager
+
+
+def step(manager: Managing, event: InputEvent) -> tuple[Managing, Action | None] | None:
+    """
+    The manager after a key that acts rather than edits, and what it asks to be done, or `None` for an event the
+    query's field handles.
+
+    The component carries the action out, keeping this pure.
+    """
+    match event:
+        case KeyPressed(key=key) if key in LEAVE_KEYS:
+            return manager, Leave()
+        # Enter typed ahead, before the terminal goes raw, has had its \r turned into \n (Ctrl+J) by the tty.
+        case KeyPressed(key=Key.Enter | Key.ControlJ) if (unit := manager.highlighted) is not None:
+            return manager, Page(unit=unit.name)
+        case KeyPressed(key=key) if key in VERBS and (unit := manager.highlighted) is not None:
+            return manager, Control(verb=VERBS[key], unit=unit.name)
+        case KeyPressed(key=key) if key in DOWN_KEYS:
+            return replace(manager, highlight=manager.highlight.moved(manager.shown, 1, unit_name)), None
+        case KeyPressed(key=key) if key in UP_KEYS:
+            return replace(manager, highlight=manager.highlight.moved(manager.shown, -1, unit_name)), None
+        case _:
+            return None
+
+
+def trimmed(event: InputEvent) -> InputEvent:
+    """A paste without the line break a copied line ends with, which the field would make a trailing space."""
+    return Pasted(text=event.text.rstrip("\r\n")) if isinstance(event, Pasted) else event
+
+
+def query_row(field: TextInput) -> Div:
+    """The query after its prompt, with the cursor drawn over the cell it's in."""
+    return Div(
+        style=row | overflow_x_scroll | stick_to_end_x,
+        children=(
+            Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
+            Text(content=field.before_cursor, style=text_wrap_none),
+            Text(
+                content=field.at_cursor,
+                handle=field.cursor_cell,
+                style=text_wrap_none | text_color("slate", 900) | text_bg("sky", 300),
+            ),
+            Text(content=field.after_cursor, style=text_wrap_none),
+        ),
+    )
 
 
 def send(control: Control) -> str | None:
@@ -464,17 +466,19 @@ def manager_view(
     pager: Callable[[str], Sequence[str]],
 ) -> Div:
     manager, set_manager = use_state(lambda: opening(units))
-    send_app_control = use_controls()
+    row_handle, _ = use_state(ElementHandle)
+
+    def apply(event: Refreshed | Journal | Paged) -> None:
+        set_manager(lambda latest: received(latest, event))
 
     async def refresh() -> None:
         while True:
             await asyncio.sleep(POLL_INTERVAL.total_seconds())
-            listing = await asyncio.to_thread(poll)
-            set_manager(lambda latest: step(latest, Refreshed(units=listing)))
+            apply(Refreshed(units=await asyncio.to_thread(poll)))
 
     use_effect(refresh, deps=())
 
-    highlighted_name = manager.highlighted.name if isinstance(manager, Managing) and manager.highlighted else None
+    highlighted_name = manager.highlighted.name if manager.highlighted else None
 
     # Restarted, and the old one cancelled, whenever the highlight moves to another unit.
     async def follow_journal() -> None:
@@ -482,50 +486,38 @@ def manager_view(
             return
         while True:
             lines = await asyncio.to_thread(journal_of, highlighted_name)
-            set_manager(lambda latest: step(latest, Journal(unit=highlighted_name, lines=lines)))
+            apply(Journal(unit=highlighted_name, lines=lines))
             await asyncio.sleep(POLL_INTERVAL.total_seconds())
 
     use_effect(follow_journal, deps=(highlighted_name,))
 
-    pending = manager.pending if isinstance(manager, Managing) else ()
+    field = use_text_input(
+        manager.query, lambda edit: set_manager(lambda latest: latest.edited(edit(latest.query))).query, auto_focus=True
+    )
 
-    # Synchronous to the end: an effect is cancelled when its deps change, and they change as soon as this reports.
-    async def carry_out() -> None:
-        if isinstance(manager, Finished):
-            send_app_control(Quit())
-            return
-        if not pending:
-            return
-        failures, queued = [], []
-        for action in pending:
-            match action:
-                case Control() as control:
-                    if (failure := send_control(control)) is None:
-                        queued.append(f"queued {control.verb} of {control.unit}")
-                    else:
-                        failures.append(failure)
-                case Page(unit=unit):
-                    # The app suspends at its next render, after this effect reports, and resumes when the pager exits.
-                    send_app_control(
-                        Suspend.to_program(
-                            pager(unit), on_exit=lambda outcome: set_manager(lambda latest: step(latest, Paged(outcome)))
-                        )
-                    )
-                case _ as unreachable:
-                    assert_never(unreachable)
-        notice = "; ".join(failures) or (queued[-1] if queued else "")
-        set_manager(lambda latest: step(latest, Carried(count=len(pending), notice=notice)))
+    def on_input(event: InputEvent, receiver: Receiver) -> InputResponse:
+        scroll = ScrollIntoView(row_handle, block="nearest")
+        if (handled := step(get_state(set_manager), event)) is None:
+            if (controls := response_controls(field.on_input(trimmed(event), receiver))) is None:
+                return None
+            return (*controls, scroll)
+        stepped, action = handled
+        match action:
+            case Leave():
+                return Quit()
+            case Page(unit=unit):
+                set_manager(stepped)
+                return Suspend.to_program(pager(unit), on_exit=lambda outcome: apply(Paged(outcome))), scroll
+            case Control() as control:
+                failure = send_control(control)
+                set_manager(replace(stepped, notice=failure or f"queued {control.verb} of {control.unit}"))
+                return scroll
+            case None:
+                set_manager(stepped)
+                return scroll
+            case _ as unreachable:
+                assert_never(unreachable)
 
-    use_effect(carry_out, deps=(isinstance(manager, Finished), pending))
-
-    def on_input(event: InputEvent, _: Receiver) -> InputResponse:
-        if not isinstance(event, KeyPressed | Pasted):
-            return None
-        set_manager(lambda latest: step(latest, event))
-        return ()
-
-    if isinstance(manager, Finished):
-        return Div(style=full)
     shown, highlighted = manager.shown, manager.highlighted
     now = datetime.now(UTC)
     name_width = max((len(unit.short_name) for unit in manager.units), default=0)
@@ -536,6 +528,7 @@ def manager_view(
         color, shade = STATE_COLORS.get(unit.active_state, ("slate", 400))
         return Div(
             style=row,
+            handle=row_handle if is_highlighted else None,
             children=(
                 Text(content=f"{unit.short_name.ljust(name_width)}  ", style=text_wrap_none | name_color | (text_bold if is_highlighted else Style())),
                 Text(content=f"{state_text(unit):<20}", style=text_wrap_none | text_color(color, shade)),
@@ -554,14 +547,7 @@ def manager_view(
                 content="Ctrl+S starts, Ctrl+R restarts, Ctrl+X stops, Enter pages the journal, Esc leaves",
                 style=text_wrap_none | text_color("slate", 400),
             ),
-            Div(
-                style=row | overflow_x_scroll | stick_to_end_x,
-                children=(
-                    Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
-                    Text(content=manager.query, style=text_wrap_none),
-                    Text(content=" ", style=text_wrap_none | text_bg("sky", 300)),
-                ),
-            ),
+            query_row(field),
             Div(
                 style=col | fill(1) | overflow_y_scroll,
                 children=tuple(unit_row(unit) for unit in shown)
@@ -578,14 +564,10 @@ def manager_view(
                 style=text_wrap_none | text_bold | text_color("slate", 400),
             ),
             Div(
-                style=col | height(JOURNAL_LINES),
-                # Cut to the box's inner width by hand: a line Text wider than the box overruns its padding and right
-                # border, though the rows above, the same width, are clipped. The box is the terminal, as
-                # counterweight measures it, less a border and a pad each side.
-                children=tuple(
-                    Text(content=line[: shutil.get_terminal_size().columns - 4], style=text_wrap_none | text_color("slate", 300))
-                    for line in journal
-                ),
+                # Clipped, since a line wider than the box would otherwise overrun its padding and right border;
+                # the rows above are clipped by their own scroll container.
+                style=col | height(JOURNAL_LINES) | overflow_x_clip,
+                children=tuple(Text(content=line, style=text_wrap_none | text_color("slate", 300)) for line in journal),
             ),
         ),
     )
@@ -608,6 +590,8 @@ def _selftest() -> int:
     from functools import reduce
 
     from counterweight.autopilot import typed
+    from counterweight.controls import Screenshot
+    from counterweight.paint import Frame
 
     show_output = (
         "Id=tidy.service\nDescription=Reclaim disk\nLoadState=loaded\nActiveState=inactive\nSubState=dead\n"
@@ -632,13 +616,30 @@ def _selftest() -> int:
 
     enter, escape, down, up = (KeyPressed(key=key) for key in (Key.Enter, Key.Escape, Key.Down, Key.Up))
 
-    def stepped(*events: InputEvent | Refreshed | Journal | Carried | Paged) -> Manager:
-        return reduce(step, events, opening(units))
+    type Given = InputEvent | Refreshed | Journal | Paged | str
 
-    def managing(*events: InputEvent | Refreshed | Journal | Carried | Paged) -> Managing:
-        result = stepped(*events)
-        assert isinstance(result, Managing)
-        return result
+    def stepped(*inputs: Given) -> tuple[Managing, tuple[Action, ...]]:
+        """The manager after each input, and the actions they asked for, a string standing for the query typed onto."""
+        manager = opening(units)
+        actions: tuple[Action, ...] = ()
+        for given in inputs:
+            match given:
+                case str():
+                    manager = manager.edited(manager.query + given)
+                case Refreshed() | Journal() | Paged():
+                    manager = received(manager, given)
+                case _ if (handled := step(manager, given)) is not None:
+                    manager, action = handled
+                    actions += (action,) if action is not None else ()
+                case _:
+                    pass
+        return manager, actions
+
+    def managing(*inputs: Given) -> Managing:
+        return stepped(*inputs)[0]
+
+    def acted(*inputs: Given) -> tuple[Action, ...]:
+        return stepped(*inputs)[1]
 
     failed = replace(web, active_state="failed", sub_state="failed", result="exit-code", exit_status=2) if web else None
 
@@ -664,20 +665,15 @@ def _selftest() -> int:
         ("a unit that failed to load says why", tidy is not None and state_text(replace(tidy, load_state="bad-setting")) == "bad-setting"),
         ("a timer's next firing is shown", tidy is not None and next_text(tidy, now) == "next in 23h"),
         ("a service with no timer has no next firing", web is not None and next_text(web, now) == ""),
-        ("typing narrows by description too, ignoring case", managing(*typed("DISK")).shown == (tidy,)),
-        ("Ctrl+S queues a start of the highlighted unit", managing(down, KeyPressed(key=Key.ControlS)).pending == (Control("start", "tidy.service"),)),
-        ("Ctrl+R queues a restart", managing(KeyPressed(key=Key.ControlR)).pending == (Control("restart", "lonely.timer"),)),
-        ("Ctrl+X queues a stop", managing(up, KeyPressed(key=Key.ControlX)).pending == (Control("stop", "zellij-web.service"),)),
-        (
-            "sent controls leave the queue, and one queued meanwhile stays",
-            managing(KeyPressed(key=Key.ControlS), KeyPressed(key=Key.ControlX), Carried(count=1, notice="")).pending
-            == (Control("stop", "lonely.timer"),),
-        ),
-        ("Enter queues paging the highlighted unit's journal", managing(down, enter).pending == (Page("tidy.service"),)),
+        ("typing narrows by description too, ignoring case", managing("DISK").shown == (tidy,)),
+        ("Ctrl+S starts the highlighted unit", acted(down, KeyPressed(key=Key.ControlS)) == (Control("start", "tidy.service"),)),
+        ("Ctrl+R restarts it", acted(KeyPressed(key=Key.ControlR)) == (Control("restart", "lonely.timer"),)),
+        ("Ctrl+X stops it", acted(up, KeyPressed(key=Key.ControlX)) == (Control("stop", "zellij-web.service"),)),
+        ("Enter pages the highlighted unit's journal", acted(down, enter) == (Page("tidy.service"),)),
         ("a pager that exits cleanly says nothing", managing(Paged(Exited(status=0))).notice == ""),
         ("a pager that fails says how it exited", managing(Paged(Exited(status=3))).notice == "the pager exited 3"),
         ("a pager that can't start says why", managing(Paged(FailedToStart(reason="gone"))).notice == "the pager didn't start: gone"),
-        ("Escape leaves", stepped(escape) == Finished()),
+        ("Escape leaves", acted(escape) == (Leave(),)),
         ("the highlighted unit's journal is shown", managing(Journal("lonely.timer", ("a",))).journal_lines == ("a",)),
         ("another unit's journal is not", managing(Journal("lonely.timer", ("a",)), down).journal_lines == ()),
         (
@@ -691,24 +687,50 @@ def _selftest() -> int:
     ]
 
     sent: list[Control] = []
+    frames: list[Frame] = []
     with tempfile.TemporaryDirectory() as scratch:
         # The pager leaves a file named for its unit, so the suspension is seen to have run it.
         asyncio.run(
             asyncio.wait_for(
                 manage(
-                    units, lambda: units, lambda name: (f"{name} says hi",), lambda control: sent.append(control),
+                    units, lambda: units, lambda name: (f"{name} says hi {'x' * 200}",), lambda control: sent.append(control),
                     pager=lambda name: ("touch", str(Path(scratch) / name)),
                     headless=True, dimensions=(100, 20),
-                    autopilot=[down, KeyPressed(key=Key.ControlS), down, enter, KeyPressed(key=Key.ControlX), Quit()],
+                    autopilot=[
+                        down, KeyPressed(key=Key.ControlS), down, enter, KeyPressed(key=Key.ControlX), Screenshot(frames.append),
+                        *typed("wb"), KeyPressed(key=Key.Left), *typed("e"), KeyPressed(key=Key.ControlR), Quit(),
+                    ],
                 ),
                 timeout=timedelta(seconds=30).total_seconds(),
             )
         )
         paged = sorted(path.name for path in Path(scratch).iterdir())
     cases += [
-        ("the app sends the controls queued, before and after paging", sent == [Control("start", "tidy.service"), Control("stop", "zellij-web.service")]),
+        (
+            "the app sends the controls asked for, before and after paging, the query edited at the cursor",
+            sent == [Control("start", "tidy.service"), Control("stop", "zellij-web.service"), Control("restart", "zellij-web.service")],
+        ),
         ("the app runs the pager on the highlighted unit", paged == ["zellij-web.service"]),
+        ("the app says what it queued", bool(frames) and "queued stop of zellij-web.service" in frames[-1].text(ansi=False)),
+        (
+            "a journal line wider than the box stops at its border",
+            bool(frames) and all(line.endswith("│") for line in frames[-1].text(ansi=False).splitlines()[1:-1]),
+        ),
     ]
+
+    many = tuple(replace(web, name=f"server-{index:02}.service") for index in range(30)) if web else ()
+    frames.clear()
+    asyncio.run(
+        asyncio.wait_for(
+            manage(
+                many, lambda: many, lambda name: (), lambda control: None, headless=True, dimensions=(100, 30),
+                autopilot=[*(down for _ in range(20)), Screenshot(frames.append), Quit()],
+            ),
+            timeout=timedelta(seconds=30).total_seconds(),
+        )
+    )
+    screen = frames[0].text(ansi=False) if frames else ""
+    cases += [("moving past the rows shown scrolls the highlight into view", "server-20" in screen and "server-00" not in screen)]
 
     failures = [name for name, passed in cases if not passed]
     for name in failures:

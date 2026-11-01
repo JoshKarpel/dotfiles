@@ -1,7 +1,11 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.15"
-# dependencies = ["counterweight>=0.1.1", "typer"]
+# dependencies = ["counterweight==0.2.0", "typer==0.27.3"]
+#
+# [tool.uv]
+# exclude-newer = "7 days"
+# exclude-newer-package = { counterweight = false, evp = false, waxy = false, without-cli = false, without-logging = false, without-streams = false }
 # ///
 """
 Pick a recipe from the justfile here and run it, with any arguments typed after its name.
@@ -9,12 +13,15 @@ Pick a recipe from the justfile here and run it, with any arguments typed after 
 Backs `jp` (sources/aliases.sh) and Alt+j in zellij. The recipes are the ones `just --list` shows, private ones left
 out, under the same group headings, with a module's recipes listed by their `module::recipe` path.
 
+The picker draws below the prompt, as fzf does, and erases itself when it stops.
+
 The query is the command line. Its first word narrows the recipes to those whose name contains it, ignoring case, and
 highlights the one it names exactly, if any; whatever follows the first space is passed to the recipe as arguments,
-split as the shell would split them. Enter runs `just <recipe> <arguments>` in this terminal once the picker has left
-the screen, so the output stays and a `[confirm]` recipe asks as it would anywhere. A recipe missing a required
+split as the shell would split them. Enter runs `just <recipe> <arguments>` in this terminal, where the picker was,
+so the output stays and a `[confirm]` recipe asks as it would anywhere. A recipe missing a required
 argument says which instead of running. Up, Down, Tab, Shift+Tab, Ctrl+N, Ctrl+P and Ctrl+K move the highlight,
-Backspace deletes a character and Ctrl+U the whole query, and Escape or Ctrl+C leaves without running anything.
+the query edits as a shell's line does (Left, Right, Ctrl+A, Ctrl+E, Ctrl+W, Ctrl+U and the rest), and Escape or
+Ctrl+C leaves without running anything.
 
 Exits with the recipe's status, or 0 when left.
 """
@@ -40,9 +47,11 @@ from datetime import timedelta
 from typing import Annotated, Any, assert_never
 
 import typer
+from counterweight import Inline
 from counterweight import app as counterweight_app
 from counterweight.components import component
 from counterweight.controls import Quit
+from counterweight.controls import ScrollIntoView
 from counterweight.elements import Div
 from counterweight.elements import Text
 from counterweight.events import InputEvent
@@ -50,8 +59,13 @@ from counterweight.events import InputResponse
 from counterweight.events import KeyPressed
 from counterweight.events import Pasted
 from counterweight.events import Receiver
-from counterweight.hooks import use_controls
-from counterweight.hooks import use_effect
+from counterweight.events import response_controls
+from counterweight.focus import ElementHandle
+from counterweight.headless import Highlight
+from counterweight.headless import TextInput
+from counterweight.headless import substring_matches
+from counterweight.headless import use_text_input
+from counterweight.hooks import get_state
 from counterweight.hooks import use_state
 from counterweight.keys import Key
 from counterweight.styles import Style
@@ -62,6 +76,8 @@ UP_KEYS = frozenset({Key.Up, Key.BackTab, Key.ControlP, Key.ControlK})
 LEAVE_KEYS = frozenset({Key.Escape, Key.ControlC})
 
 KIND_PREFIXES = {"singular": "", "plus": "+", "star": "*"}
+# The most rows shown at once; the list scrolls past them, and shrinks to fit a shorter terminal.
+SHOWN_ROWS = 16
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,7 +165,15 @@ class Heading:
     title: str
 
 
-type Row = Heading | Recipe
+@dataclass(frozen=True, slots=True)
+class Listed:
+    """A recipe as one row, under GROUP's heading, or under none; a recipe in two groups is two of these."""
+
+    recipe: Recipe
+    group: str | None
+
+
+type Row = Heading | Listed
 
 
 def command_line(query: str) -> tuple[str, str]:
@@ -163,19 +187,18 @@ def recipe_rows(recipes: tuple[Recipe, ...], word: str) -> tuple[Row, ...]:
     The recipes whose path contains WORD, ignoring case, laid out as `just --list` does.
 
     Ungrouped recipes come first with no heading, then each group under its own, so a recipe in two groups is listed
-    under both.
+    under both. Within each, one WORD names exactly comes first.
     """
-    folded = word.casefold()
-    matched = [recipe for recipe in recipes if folded in recipe.path.casefold()]
-    rows: list[Row] = [recipe for recipe in matched if not recipe.groups]
+    matched = substring_matches(word, recipes, key=lambda recipe: recipe.path)
+    rows: list[Row] = [Listed(recipe, None) for recipe in matched if not recipe.groups]
     for group in sorted({group for recipe in matched for group in recipe.groups}):
-        rows += [Heading(f"[{group}]"), *(recipe for recipe in matched if group in recipe.groups)]
+        rows += [Heading(f"[{group}]"), *(Listed(recipe, group) for recipe in matched if group in recipe.groups)]
     return tuple(rows)
 
 
-def options(rows: tuple[Row, ...]) -> tuple[Recipe, ...]:
+def options(rows: tuple[Row, ...]) -> tuple[Listed, ...]:
     """The rows the highlight can land on."""
-    return tuple(row for row in rows if isinstance(row, Recipe))
+    return tuple(row for row in rows if isinstance(row, Listed))
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,7 +206,7 @@ class Search:
     """The query, which of the recipes it matches is highlighted, and why Enter last refused to run one."""
 
     query: str
-    highlighted: int
+    highlight: Highlight
     notice: str
 
     def edited(self, query: str, recipes: tuple[Recipe, ...]) -> Search:
@@ -191,21 +214,16 @@ class Search:
         The query changed to QUERY.
 
         Only a changed first word moves the highlight, to the recipe it names exactly or else the first match, since
-        the old index points into a different list. Typing arguments leaves it where it is.
+        the old highlight is on a different list. Typing arguments leaves it where it is.
         """
         word = command_line(query)[0]
         if word == command_line(self.query)[0]:
             return replace(self, query=query, notice="")
-        shown = options(recipe_rows(recipes, word))
-        exact = next((index for index, recipe in enumerate(shown) if recipe.path == word), 0)
-        return Search(query=query, highlighted=exact, notice="")
-
-    def moved(self, by: int, match_count: int) -> Search:
-        """The highlight moved BY rows, wrapping at either end."""
-        return replace(self, highlighted=(self.highlighted + by) % match_count) if match_count else self
+        exact = next((listed for listed in options(recipe_rows(recipes, word)) if listed.recipe.path == word), None)
+        return Search(query=query, highlight=Highlight(key=exact), notice="")
 
 
-EMPTY_SEARCH = Search(query="", highlighted=0, notice="")
+EMPTY_SEARCH = Search(query="", highlight=Highlight(), notice="")
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,81 +247,111 @@ def chosen(search: Search, recipe: Recipe) -> Picking:
     return Finished(command=(recipe.path, *arguments))
 
 
-def step(picking: Picking, event: InputEvent, recipes: tuple[Recipe, ...]) -> Picking:
+def step(search: Search, event: InputEvent, recipes: tuple[Recipe, ...]) -> Picking | None:
     """
-    The picker after one more key press or paste.
+    The picker after a key that picks rather than edits, or `None` for an event the query's field handles.
 
-    Every input goes through here, applied to the latest state, so keys typed faster than the screen redraws
-    (type-ahead while just dumps the justfile, say) land as if each had been seen.
+    The component steps from the latest state, so keys typed faster than the screen redraws (type-ahead while just
+    dumps the justfile, say) land as if each had been seen.
     """
-    if isinstance(picking, Finished):
-        return picking
-    shown = options(recipe_rows(recipes, command_line(picking.query)[0]))
+    shown = options(recipe_rows(recipes, command_line(search.query)[0]))
     match event:
         case KeyPressed(key=key) if key in LEAVE_KEYS:
             return Finished(command=None)
         # Enter typed ahead, before the terminal goes raw, has had its \r turned into \n (Ctrl+J) by the tty.
-        case KeyPressed(key=Key.Enter | Key.ControlJ) if shown:
-            return chosen(picking, shown[picking.highlighted])
+        case KeyPressed(key=Key.Enter | Key.ControlJ) if (index := search.highlight.index_in(shown)) is not None:
+            return chosen(search, shown[index].recipe)
         case KeyPressed(key=key) if key in DOWN_KEYS:
-            return picking.moved(1, len(shown))
+            return replace(search, highlight=search.highlight.moved(shown, 1))
         case KeyPressed(key=key) if key in UP_KEYS:
-            return picking.moved(-1, len(shown))
-        case KeyPressed(key=Key.Backspace):
-            return picking.edited(picking.query[:-1], recipes)
-        case KeyPressed(key=Key.ControlU):
-            return picking.edited("", recipes)
-        # Text is one character; every named key is longer ("enter", "alt+b"), so length tells them apart.
-        case KeyPressed(key=key) if len(key) == 1 and key.isprintable():
-            return picking.edited(picking.query + key, recipes)
-        case Pasted(text=text):
-            return picking.edited(picking.query + "".join(c for c in text if c.isprintable()), recipes)
+            return replace(search, highlight=search.highlight.moved(shown, -1))
         case _:
-            return picking
+            return None
+
+
+def trimmed(event: InputEvent) -> InputEvent:
+    """A paste without the line break a copied line ends with, which the field would make a trailing space."""
+    return Pasted(text=event.text.rstrip("\r\n")) if isinstance(event, Pasted) else event
+
+
+def query_row(field: TextInput) -> Div:
+    """The query after its prompt, with the cursor drawn over the cell it's in."""
+    return Div(
+        style=row_style | overflow_x_scroll | stick_to_end_x,
+        children=(
+            Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
+            Text(content=field.before_cursor, style=text_wrap_none),
+            Text(
+                content=field.at_cursor,
+                handle=field.cursor_cell,
+                style=text_wrap_none | text_color("slate", 900) | text_bg("sky", 300),
+            ),
+            Text(content=field.after_cursor, style=text_wrap_none),
+        ),
+    )
 
 
 @component
 def recipe_picker(recipes: tuple[Recipe, ...], choose: Callable[[tuple[str, ...]], None]) -> Div:
-    picking, set_picking = use_state(EMPTY_SEARCH)
-    send_control = use_controls()
+    def start() -> Picking:
+        return EMPTY_SEARCH
 
-    async def finish() -> None:
-        if not isinstance(picking, Finished):
-            return
-        if picking.command is not None:
-            choose(picking.command)
-        send_control(Quit())
+    picking, set_picking = use_state(start)
+    row_handle, _ = use_state(ElementHandle)
 
-    use_effect(finish, deps=(picking,))
+    def edit_query(edit: Callable[[str], str]) -> str:
+        settled = set_picking(
+            lambda latest: latest.edited(edit(latest.query), recipes) if isinstance(latest, Search) else latest
+        )
+        return settled.query if isinstance(settled, Search) else ""
 
-    def on_input(event: InputEvent, _: Receiver) -> InputResponse:
-        if not isinstance(event, KeyPressed | Pasted):
-            return None
-        set_picking(lambda latest: step(latest, event, recipes))
-        return ()
+    field = use_text_input(picking.query if isinstance(picking, Search) else "", edit_query, auto_focus=True)
+
+    def on_input(event: InputEvent, receiver: Receiver) -> InputResponse:
+        now = get_state(set_picking)
+        # Keys typed ahead of the Quit, after the choice, choose nothing more.
+        if isinstance(now, Finished):
+            return ()
+        scroll = ScrollIntoView(row_handle, block="nearest")
+        match step(now, event, recipes):
+            case None:
+                if (controls := response_controls(field.on_input(trimmed(event), receiver))) is None:
+                    return None
+                return (*controls, scroll)
+            case Finished(command=command) as finished:
+                set_picking(finished)
+                if command is not None:
+                    choose(command)
+                return Quit()
+            case Search() as moved:
+                set_picking(moved)
+                return scroll
+            case _ as unreachable:
+                assert_never(unreachable)
 
     match picking:
         case Finished():
-            return Div(style=full)
-        case Search(query=query, highlighted=highlighted, notice=notice):
+            return Div()
+        case Search(query=query, highlight=highlight, notice=notice):
             word, arguments = command_line(query)
             rows = recipe_rows(recipes, word)
         case _ as unreachable:
             assert_never(unreachable)
+    shown = options(rows)
+    highlighted = shown[index] if (index := highlight.index_in(shown)) is not None else None
 
     # Aligned across every recipe rather than the ones shown, so the docs hold still as the query narrows.
     width = max(len(recipe.signature) for recipe in recipes)
-    # A recipe in two groups is two rows, so the highlight is found by counting, not by identity.
-    option_indexes = iter(range(len(rows)))
 
     def row_line(row: Row) -> Text | Div:
         match row:
             case Heading(title=title):
                 return Text(content=title, style=text_wrap_none | text_bold | text_color("slate", 400))
-            case Recipe(signature=signature, doc=doc):
-                is_highlighted = next(option_indexes) == highlighted
+            case Listed(recipe=Recipe(signature=signature, doc=doc)):
+                is_highlighted = row == highlighted
                 return Div(
                     style=row_style,
+                    handle=row_handle if is_highlighted else None,
                     children=(
                         Text(
                             content=f"  {signature.ljust(width)}",
@@ -316,23 +364,15 @@ def recipe_picker(recipes: tuple[Recipe, ...], choose: Callable[[tuple[str, ...]
             case _ as unreachable:
                 assert_never(unreachable)
 
-    shown = options(rows)
-    preview = shlex.join(["just", shown[highlighted].path]) + (f" {arguments}" if arguments else "") if shown else ""
+    preview = shlex.join(["just", highlighted.recipe.path]) + (f" {arguments}" if arguments else "") if highlighted else ""
     return Div(
-        style=full | col | border | border_lightrounded | border_color("slate", 500) | pad_x(1),
+        style=col | min_height(0) | border | border_lightrounded | border_color("slate", 500) | pad_x(1),
         on_input=on_input,
         children=(
             Text(content="a recipe, then any arguments after a space", style=text_wrap_none | text_color("slate", 400)),
+            query_row(field),
             Div(
-                style=row_style | overflow_x_scroll | stick_to_end_x,
-                children=(
-                    Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
-                    Text(content=query, style=text_wrap_none),
-                    Text(content=" ", style=text_wrap_none | text_bg("sky", 300)),
-                ),
-            ),
-            Div(
-                style=col | fill(1) | overflow_y_scroll,
+                style=col | min_height(0) | max_height(SHOWN_ROWS) | overflow_y_scroll,
                 children=tuple(row_line(row) for row in rows)
                 or (Text(content="nothing matches", style=text_color("slate", 400)),),
             ),
@@ -397,7 +437,7 @@ def run_picked() -> tuple[int, bool]:
         print("pick-just: the justfile has no public recipes", file=sys.stderr)
         return 1, True
 
-    command = asyncio.run(pick(recipes, title="just"))
+    command = asyncio.run(pick(recipes, title="just", viewport=Inline(keep_last_frame=False)))
     if command is None:
         return 0, False
     print(f"$ {shlex.join(['just', *command])}", flush=True)
@@ -416,9 +456,9 @@ def main(
 
 
 def _selftest() -> int:
-    from functools import reduce
-
     from counterweight.autopilot import typed
+    from counterweight.controls import Screenshot
+    from counterweight.paint import Frame
 
     def parameter(name: str, kind: str = "singular", default: object = None, long: str | None = None) -> dict[str, Any]:
         return {"name": name, "kind": kind, "default": default, "long": long, "short": None}
@@ -444,12 +484,20 @@ def _selftest() -> int:
     by_path = {recipe.path: recipe for recipe in recipes}
     enter, escape, down = KeyPressed(key=Key.Enter), KeyPressed(key=Key.Escape), KeyPressed(key=Key.Down)
 
-    def stepped(*events: InputEvent) -> Picking:
-        start: Picking = EMPTY_SEARCH
-        return reduce(lambda picking, event: step(picking, event, recipes), events, start)
+    def stepped(*inputs: InputEvent | str) -> Picking:
+        """The picker after each input, a string standing for the query typed onto."""
+        picking: Picking = EMPTY_SEARCH
+        for given in inputs:
+            if isinstance(picking, Finished):
+                break
+            if isinstance(given, str):
+                picking = picking.edited(picking.query + given, recipes)
+            else:
+                picking = step(picking, given, recipes) or picking
+        return picking
 
     def shown_paths(word: str) -> tuple[str, ...]:
-        return tuple(row.title if isinstance(row, Heading) else row.path for row in recipe_rows(recipes, word))
+        return tuple(row.title if isinstance(row, Heading) else row.recipe.path for row in recipe_rows(recipes, word))
 
     cases: list[tuple[str, bool]] = [
         ("private recipes are left out, and a module's are listed by path", tuple(by_path) == ("bump", "lint", "lint-all", "sub::inner", "test")),
@@ -466,34 +514,56 @@ def _selftest() -> int:
         ("defaulted and option parameters are never missing", by_path["test"].missing(1) == ()),
         ("a + parameter needs one argument", by_path["sub::inner"].missing(0) == ("x",)),
         ("Enter runs a recipe needing nothing", stepped(enter) == Finished(command=("bump",))),
-        ("a first word naming a recipe exactly highlights it over earlier matches", stepped(*typed("lint"), enter) == Finished(command=("lint",))),
+        ("a first word naming a recipe exactly highlights it over earlier matches", stepped("lint", enter) == Finished(command=("lint",))),
         (
             "the words after the first are the recipe's arguments, split as the shell would",
-            stepped(*typed("test 'a b' -k"), enter) == Finished(command=("test", "a b", "-k")),
+            stepped("test 'a b' -k", enter) == Finished(command=("test", "a b", "-k")),
         ),
-        ("typing arguments leaves the highlight where it was", stepped(*typed("lin"), down, *typed(" x"), enter) == Finished(command=("lint", "x"))),
-        ("a module's recipe runs by its path", stepped(*typed("inner x"), enter) == Finished(command=("sub::inner", "x"))),
-        ("Enter on a recipe missing an argument says so and stays", stepped(*typed("test"), enter) == Search("test", 0, "test needs target")),
-        ("arguments that don't split say so", isinstance(stepped(*typed("test 'a"), enter), Search)),
-        ("typing clears the notice", stepped(*typed("test"), enter, *typed(" a")) == Search("test a", 0, "")),
-        ("Down from the last wraps to the first", stepped(*typed("lint"), down, enter) == Finished(command=("lint-all",))),
+        ("typing arguments leaves the highlight where it was", stepped("lin", down, " x", enter) == Finished(command=("lint", "x"))),
+        ("a module's recipe runs by its path", stepped("inner x", enter) == Finished(command=("sub::inner", "x"))),
+        (
+            "Enter on a recipe missing an argument says so and stays",
+            isinstance(missing := stepped("test", enter), Search) and missing.notice == "test needs target",
+        ),
+        (
+            "Down moves from a recipe in two groups to its second listing",
+            stepped("test", down, " a", enter) == Finished(command=("test", "a"))
+            and isinstance(second := stepped("test", down), Search)
+            and second.highlight.index_in(options(recipe_rows(recipes, "test"))) == 1,
+        ),
+        ("arguments that don't split say so", isinstance(stepped("test 'a", enter), Search)),
+        ("typing clears the notice", isinstance(cleared := stepped("test", enter, " a"), Search) and cleared.notice == ""),
+        ("Down from the last wraps to the first", stepped("lint", down, enter) == Finished(command=("lint-all",))),
         ("Escape leaves without running anything", stepped(escape, enter) == Finished(command=None)),
-        ("Enter with nothing matched stays put", stepped(*typed("zz"), enter) == Search("zz", 0, "")),
-        ("Ctrl+U clears the query", stepped(*typed("zz"), KeyPressed(key=Key.ControlU), enter) == Finished(command=("bump",))),
-        ("a paste adds its printable text", stepped(Pasted(text="sub y\n"), enter) == Finished(command=("sub::inner", "y"))),
+        ("Enter with nothing matched is left to the field", step(Search("zz", Highlight(), ""), enter, recipes) is None),
     ]
 
-    def picked(*steps: object) -> tuple[str, ...] | None:
+    def picked(*steps: object, picked_from: tuple[Recipe, ...] = recipes, dimensions: tuple[int, int] = (60, 14)) -> tuple[str, ...] | None:
         return asyncio.run(
             asyncio.wait_for(
-                pick(recipes, title="just", headless=True, dimensions=(60, 14), autopilot=[*steps, Quit()]),
+                pick(
+                    picked_from, title="just", headless=True, dimensions=dimensions,
+                    viewport=Inline(keep_last_frame=False), autopilot=[*steps, Quit()],
+                ),
                 timeout=timedelta(seconds=30).total_seconds(),
             )
         )
 
+    many = parse_recipes({"recipes": {f"r{index:02}": recipe(f"r{index:02}") for index in range(30)}, "modules": {}})
+    frames: list[Frame] = []
+    picked(*(down for _ in range(20)), Screenshot(frames.append), picked_from=many, dimensions=(40, 40))
+    screen = frames[0].text(ansi=False) if frames else ""
+
     cases += [
         ("the app hands back the command chosen", picked(*typed("test a"), enter) == ("test", "a")),
+        (
+            "the arguments edit at the cursor",
+            picked(*typed("test b"), KeyPressed(key=Key.Left), *typed("a "), enter) == ("test", "a", "b"),
+        ),
+        ("a paste reaches the field without its line break", picked(Pasted(text="sub y\n"), enter) == ("sub::inner", "y")),
         ("the app hands back nothing when left", picked(escape) is None),
+        ("the list stops growing at its most rows", len(screen.splitlines()) == SHOWN_ROWS + 5),
+        ("moving past the rows shown scrolls the highlight into view", "r20" in screen and "r00" not in screen),
     ]
 
     failures = [name for name, passed in cases if not passed]

@@ -1,15 +1,20 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.15"
-# dependencies = ["counterweight>=0.1.1"]
+# dependencies = ["counterweight==0.2.0"]
+#
+# [tool.uv]
+# exclude-newer = "7 days"
+# exclude-newer-package = { counterweight = false, evp = false, waxy = false, without-cli = false, without-logging = false, without-streams = false }
 # ///
 """
 See which processes are listening on TCP ports, copy a port's URL, and stop the process behind one.
 
 The interactive counterpart to `port-user` and `port-kill`. Each row is a port, the command listening on it, and its
 working directory. Type to narrow the rows to those containing the text, ignoring case; digits narrow too, since
-ports are what you'd type. Up, Down, Tab, Shift+Tab, Ctrl+N, Ctrl+P and Ctrl+K move the highlight, Backspace deletes
-a character and Ctrl+U the whole query. Enter copies the highlighted port's URL with OSC 52, Ctrl+X sends its process
+ports are what you'd type, and a port typed whole comes first. Up, Down, Tab, Shift+Tab, Ctrl+N, Ctrl+P and Ctrl+K
+move the highlight, and the query edits as a shell's line does (Left, Right, Ctrl+A, Ctrl+E, Ctrl+W, Ctrl+U and the
+rest). Enter copies the highlighted port's URL with OSC 52, Ctrl+X sends its process
 SIGTERM and a second Ctrl+X on the same row SIGKILL, and Escape or Ctrl+C leaves.
 
 The URL is the one `exe-dev url` prints on an exe.dev VM, and http://localhost:<port>/ anywhere else.
@@ -40,6 +45,7 @@ from counterweight import app
 from counterweight.components import component
 from counterweight.controls import CopyToClipboard
 from counterweight.controls import Quit
+from counterweight.controls import ScrollIntoView
 from counterweight.elements import Div
 from counterweight.elements import Text
 from counterweight.events import InputEvent
@@ -47,7 +53,13 @@ from counterweight.events import InputResponse
 from counterweight.events import KeyPressed
 from counterweight.events import Pasted
 from counterweight.events import Receiver
-from counterweight.hooks import use_controls
+from counterweight.events import response_controls
+from counterweight.focus import ElementHandle
+from counterweight.headless import Highlight
+from counterweight.headless import TextInput
+from counterweight.headless import substring_matches
+from counterweight.headless import use_text_input
+from counterweight.hooks import get_state
 from counterweight.hooks import use_effect
 from counterweight.hooks import use_state
 from counterweight.keys import Key
@@ -72,15 +84,17 @@ class Listener:
     cwd: str
     url: str | None
 
-    @property
-    def key(self) -> ListenerKey:
-        """What identifies the row across listings: one process can listen on several ports, and a port can be
-        reused by a new process, which is a different row."""
-        return (self.pid, self.port)
 
-    @property
-    def searchable(self) -> str:
-        return f"{self.port} {self.command} {self.cwd}"
+
+def listener_key(listener: Listener) -> ListenerKey:
+    """What identifies a row across listings: one process can listen on several ports, and a port can be reused by a
+    new process, which is a different row."""
+    return (listener.pid, listener.port)
+
+
+def searchable(listener: Listener) -> str:
+    """The text a query matches a row by."""
+    return f"{listener.port} {listener.command} {listener.cwd}"
 
 
 def parse_lsof(fields: str) -> dict[int, list[str]]:
@@ -175,8 +189,7 @@ def url_finder() -> Callable[[int], str | None]:
 
 def matching(query: str, listeners: tuple[Listener, ...]) -> tuple[Listener, ...]:
     """The listeners whose port, command or working directory contains `query`, ignoring case."""
-    folded = query.casefold()
-    return tuple(listener for listener in listeners if folded in listener.searchable.casefold())
+    return substring_matches(query, listeners, key=searchable)
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,67 +207,12 @@ class Signal:
     signum: signal.Signals
 
 
-type Action = Copy | Signal
-
-
 @dataclass(frozen=True, slots=True)
-class Managing:
-    """
-    The listing, the query, the highlight, and the actions the component has yet to carry out.
-
-    The highlight is held both by its row's key and by its position. The key keeps it on its port while the rows above
-    come and go; the position is where it lands when its own row goes, so stopping a process leaves the highlight on
-    its neighbour rather than at the top.
-    """
-
-    listeners: tuple[Listener, ...]
-    query: str
-    highlighted_key: ListenerKey | None
-    highlighted_index: int
-    terminated: frozenset[ListenerKey]
-    pending: tuple[Action, ...]
-    notice: str
-
-    @property
-    def shown(self) -> tuple[Listener, ...]:
-        return matching(self.query, self.listeners)
-
-    @property
-    def highlighted(self) -> Listener | None:
-        shown = self.shown
-        if not shown:
-            return None
-        by_key = next((listener for listener in shown if listener.key == self.highlighted_key), None)
-        return by_key or shown[min(self.highlighted_index, len(shown) - 1)]
-
-    def landed(self) -> Managing:
-        """The highlight's key and position made to agree with the row it is on now."""
-        highlighted = self.highlighted
-        if highlighted is None:
-            return replace(self, highlighted_key=None, highlighted_index=0)
-        return replace(self, highlighted_key=highlighted.key, highlighted_index=self.shown.index(highlighted))
-
-    def moved(self, by: int) -> Managing:
-        """The highlight moved `by` rows, wrapping at either end."""
-        shown, highlighted = self.shown, self.highlighted
-        if highlighted is None:
-            return self
-        index = (shown.index(highlighted) + by) % len(shown)
-        return replace(self, highlighted_key=shown[index].key, highlighted_index=index)
-
-    def edited(self, query: str) -> Managing:
-        """A changed query highlights its first match, as the other pickers' does."""
-        if query == self.query:
-            return self
-        return replace(self, query=query, highlighted_key=None, highlighted_index=0).landed()
-
-    def acting(self, action: Action, notice: str) -> Managing:
-        return replace(self, pending=(*self.pending, action), notice=notice)
+class Leave:
+    """Leave the manager."""
 
 
-@dataclass(frozen=True, slots=True)
-class Finished:
-    """The manager was left."""
+type Action = Copy | Signal | Leave
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,71 +223,102 @@ class Refreshed:
 
 
 @dataclass(frozen=True, slots=True)
-class Carried:
-    """The component carried out the first `count` pending actions, saying `notice` if any of them failed."""
+class Managing:
+    """
+    The listing, the query, the highlight, and the rows sent TERM.
 
-    count: int
-    notice: str | None
+    The highlight is held both by its row's key and by its position. The key keeps it on its port while the rows above
+    come and go; the position is where it lands when its own row goes, so stopping a process leaves the highlight on
+    its neighbour rather than at the top.
+    """
 
+    listeners: tuple[Listener, ...]
+    query: str
+    highlight: Highlight
+    terminated: frozenset[ListenerKey]
+    notice: str
 
-type Manager = Managing | Finished
+    @property
+    def shown(self) -> tuple[Listener, ...]:
+        return matching(self.query, self.listeners)
+
+    @property
+    def highlighted(self) -> Listener | None:
+        shown = self.shown
+        index = self.highlight.index_in(shown, listener_key)
+        return None if index is None else shown[index]
+
+    def landed(self) -> Managing:
+        """The highlight on the row it is on now, so it follows that row from here."""
+        return replace(self, highlight=self.highlight.landed(self.shown, listener_key))
+
+    def edited(self, query: str) -> Managing:
+        """A changed query highlights its first match, as the other pickers' does."""
+        return self if query == self.query else replace(self, query=query, highlight=Highlight()).landed()
+
+    def acting(self, action: Action, notice: str) -> tuple[Managing, Action]:
+        return replace(self, notice=notice), action
 
 
 def opening(listeners: tuple[Listener, ...]) -> Managing:
     """An empty query highlighting the first port."""
-    return Managing(
-        listeners=listeners,
-        query="",
-        highlighted_key=None,
-        highlighted_index=0,
-        terminated=frozenset(),
-        pending=(),
-        notice="",
-    ).landed()
+    return Managing(listeners=listeners, query="", highlight=Highlight(), terminated=frozenset(), notice="").landed()
 
 
-def step(manager: Manager, event: InputEvent | Refreshed | Carried) -> Manager:
+def received(manager: Managing, refreshed: Refreshed) -> Managing:
+    """The manager showing a new listing, forgetting the TERMs sent to rows that are gone."""
+    alive = {listener_key(listener) for listener in refreshed.listeners}
+    return replace(manager, listeners=refreshed.listeners, terminated=manager.terminated & alive).landed()
+
+
+def step(manager: Managing, event: InputEvent) -> tuple[Managing, Action | None] | None:
     """
-    The manager after one more key press, paste, listing, or report of actions carried out.
+    The manager after a key that acts rather than edits, and what it asks to be done, or `None` for an event the
+    query's field handles.
 
-    Every one goes through here, applied to the latest state, so keys typed while a listing is being read land as if
-    each had been seen. Actions are queued in `pending` rather than carried out here, keeping this pure.
+    The component carries the action out, keeping this pure.
     """
-    if isinstance(manager, Finished):
-        return manager
     match event:
-        case Refreshed(listeners=listeners):
-            alive = {listener.key for listener in listeners}
-            return replace(manager, listeners=listeners, terminated=manager.terminated & alive).landed()
-        case Carried(count=count, notice=notice):
-            return replace(manager, pending=manager.pending[count:], notice=notice or manager.notice)
         case KeyPressed(key=key) if key in LEAVE_KEYS:
-            return Finished()
+            return manager, Leave()
         # Enter typed ahead, before the terminal goes raw, has had its \r turned into \n (Ctrl+J) by the tty.
         case KeyPressed(key=Key.Enter | Key.ControlJ) if (listener := manager.highlighted) is not None:
             if listener.url is None:
-                return replace(manager, notice=f"nothing outside this machine reaches port {listener.port}")
+                return replace(manager, notice=f"nothing outside this machine reaches port {listener.port}"), None
             return manager.acting(Copy(text=listener.url), f"copied {listener.url}")
         case KeyPressed(key=Key.ControlX) if (listener := manager.highlighted) is not None:
-            if listener.key in manager.terminated:
+            if listener_key(listener) in manager.terminated:
                 return manager.acting(Signal(pid=listener.pid, signum=signal.SIGKILL), f"sent KILL to {listener.pid}")
-            terminated = replace(manager, terminated=manager.terminated | {listener.key})
+            terminated = replace(manager, terminated=manager.terminated | {listener_key(listener)})
             return terminated.acting(Signal(pid=listener.pid, signum=signal.SIGTERM), f"sent TERM to {listener.pid}")
         case KeyPressed(key=key) if key in DOWN_KEYS:
-            return manager.moved(1)
+            return replace(manager, highlight=manager.highlight.moved(manager.shown, 1, listener_key)), None
         case KeyPressed(key=key) if key in UP_KEYS:
-            return manager.moved(-1)
-        case KeyPressed(key=Key.Backspace):
-            return manager.edited(manager.query[:-1])
-        case KeyPressed(key=Key.ControlU):
-            return manager.edited("")
-        # Text is one character; every named key is longer ("enter", "alt+b"), so length tells them apart.
-        case KeyPressed(key=key) if len(key) == 1 and key.isprintable():
-            return manager.edited(manager.query + key)
-        case Pasted(text=text):
-            return manager.edited(manager.query + "".join(c for c in text if c.isprintable()))
+            return replace(manager, highlight=manager.highlight.moved(manager.shown, -1, listener_key)), None
         case _:
-            return manager
+            return None
+
+
+def trimmed(event: InputEvent) -> InputEvent:
+    """A paste without the line break a copied line ends with, which the field would make a trailing space."""
+    return Pasted(text=event.text.rstrip("\r\n")) if isinstance(event, Pasted) else event
+
+
+def query_row(field: TextInput) -> Div:
+    """The query after its prompt, with the cursor drawn over the cell it's in."""
+    return Div(
+        style=row | overflow_x_scroll | stick_to_end_x,
+        children=(
+            Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
+            Text(content=field.before_cursor, style=text_wrap_none),
+            Text(
+                content=field.at_cursor,
+                handle=field.cursor_cell,
+                style=text_wrap_none | text_color("slate", 900) | text_bg("sky", 300),
+            ),
+            Text(content=field.after_cursor, style=text_wrap_none),
+        ),
+    )
 
 
 def send(action: Signal) -> str | None:
@@ -350,48 +339,43 @@ def manager_view(
     signal_process: Callable[[Signal], str | None],
 ) -> Div:
     manager, set_manager = use_state(lambda: opening(listeners))
-    send_control = use_controls()
+    row_handle, _ = use_state(ElementHandle)
 
     async def refresh() -> None:
         while True:
             await asyncio.sleep(POLL_INTERVAL.total_seconds())
             listing = await asyncio.to_thread(poll)
-            set_manager(lambda latest: step(latest, Refreshed(listeners=listing)))
+            set_manager(lambda latest: received(latest, Refreshed(listeners=listing)))
 
     use_effect(refresh, deps=())
 
-    pending = manager.pending if isinstance(manager, Managing) else ()
+    field = use_text_input(
+        manager.query, lambda edit: set_manager(lambda latest: latest.edited(edit(latest.query))).query, auto_focus=True
+    )
 
-    # Synchronous to the end: an effect is cancelled when its deps change, and they change as soon as this reports.
-    async def carry_out() -> None:
-        if isinstance(manager, Finished):
-            send_control(Quit())
-            return
-        if not pending:
-            return
-        failures = []
-        for action in pending:
-            match action:
-                case Copy(text=text):
-                    send_control(CopyToClipboard(text=text))
-                case Signal() as sent:
-                    if (failure := signal_process(sent)) is not None:
-                        failures.append(failure)
-                case _ as unreachable:
-                    assert_never(unreachable)
-        notice = "; ".join(failures) or None
-        set_manager(lambda latest: step(latest, Carried(count=len(pending), notice=notice)))
+    def on_input(event: InputEvent, receiver: Receiver) -> InputResponse:
+        scroll = ScrollIntoView(row_handle, block="nearest")
+        if (handled := step(get_state(set_manager), event)) is None:
+            if (controls := response_controls(field.on_input(trimmed(event), receiver))) is None:
+                return None
+            return (*controls, scroll)
+        stepped, action = handled
+        match action:
+            case Leave():
+                return Quit()
+            case Copy(text=text):
+                set_manager(stepped)
+                return CopyToClipboard(text=text), scroll
+            case Signal() as sent:
+                failure = signal_process(sent)
+                set_manager(stepped if failure is None else replace(stepped, notice=failure))
+                return scroll
+            case None:
+                set_manager(stepped)
+                return scroll
+            case _ as unreachable:
+                assert_never(unreachable)
 
-    use_effect(carry_out, deps=(isinstance(manager, Finished), pending))
-
-    def on_input(event: InputEvent, _: Receiver) -> InputResponse:
-        if not isinstance(event, KeyPressed | Pasted):
-            return None
-        set_manager(lambda latest: step(latest, event))
-        return ()
-
-    if isinstance(manager, Finished):
-        return Div(style=full)
     shown, highlighted = manager.shown, manager.highlighted
 
     def listener_row(listener: Listener) -> Div:
@@ -400,9 +384,13 @@ def manager_view(
         weight = text_bold if is_highlighted else Style()
         return Div(
             style=row,
+            handle=row_handle if is_highlighted else None,
             children=(
                 Text(content=f"{listener.port:>5}  ", style=text_wrap_none | command_color | weight),
-                Text(content="TERM sent  " if listener.key in manager.terminated else "", style=text_wrap_none | text_color("red", 400)),
+                Text(
+                    content="TERM sent  " if listener_key(listener) in manager.terminated else "",
+                    style=text_wrap_none | text_color("red", 400),
+                ),
                 Text(content=listener.command, style=text_wrap_none | command_color),
                 Text(content=f"  {listener.cwd}", style=text_wrap_none | text_color("slate", 500)),
             ),
@@ -417,14 +405,7 @@ def manager_view(
                 content="Enter copies the URL, Ctrl+X stops the process (again to kill it), Esc leaves",
                 style=text_wrap_none | text_color("slate", 400),
             ),
-            Div(
-                style=row | overflow_x_scroll | stick_to_end_x,
-                children=(
-                    Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
-                    Text(content=manager.query, style=text_wrap_none),
-                    Text(content=" ", style=text_wrap_none | text_bg("sky", 300)),
-                ),
-            ),
+            query_row(field),
             Div(
                 style=col | fill(1) | overflow_y_scroll,
                 children=tuple(listener_row(listener) for listener in shown)
@@ -454,6 +435,8 @@ def _selftest() -> int:
     from functools import reduce
 
     from counterweight.autopilot import typed
+    from counterweight.controls import Screenshot
+    from counterweight.paint import Frame
 
     fields = "p10\nfcwd\nn127.0.0.1:8000\nn[::1]:8000\np20\nccode\nn*:3001\np10\nn127.0.0.1:3000\n"
     web = Listener(port=3000, pid=10, command="zellij web", cwd="~", url="https://vm.exe.xyz:3000/")
@@ -463,13 +446,28 @@ def _selftest() -> int:
     enter, ctrl_x = KeyPressed(key=Key.Enter), KeyPressed(key=Key.ControlX)
     down, up = KeyPressed(key=Key.Down), KeyPressed(key=Key.Up)
 
-    def stepped(*events: InputEvent | Refreshed | Carried) -> Manager:
-        return reduce(step, events, opening(listeners))
+    def stepped(*inputs: InputEvent | Refreshed | str) -> tuple[Managing, tuple[Action, ...]]:
+        """The manager after each input, and the actions they asked for, a string standing for the query typed onto."""
+        manager = opening(listeners)
+        actions: tuple[Action, ...] = ()
+        for given in inputs:
+            match given:
+                case str():
+                    manager = manager.edited(manager.query + given)
+                case Refreshed():
+                    manager = received(manager, given)
+                case _ if (handled := step(manager, given)) is not None:
+                    manager, action = handled
+                    actions += (action,) if action is not None else ()
+                case _:
+                    pass
+        return manager, actions
 
-    def managing(*events: InputEvent | Refreshed | Carried) -> Managing:
-        result = stepped(*events)
-        assert isinstance(result, Managing)
-        return result
+    def managing(*inputs: InputEvent | Refreshed | str) -> Managing:
+        return stepped(*inputs)[0]
+
+    def acted(*inputs: InputEvent | Refreshed | str) -> tuple[Action, ...]:
+        return stepped(*inputs)[1]
 
     cases: list[tuple[str, bool]] = [
         (
@@ -480,21 +478,18 @@ def _selftest() -> int:
         ("ps output parses each pid's whole command line", parse_ps("   10 zellij  web --port 3000\n 2001 ps -o\n") == {10: "zellij  web --port 3000", 2001: "ps -o"}),
         ("the home directory is written as ~", tilde(str(Path.home() / "x")) == "~/x"),
         ("a sibling of the home directory is not", tilde(str(Path.home()) + "-other") == str(Path.home()) + "-other"),
-        ("digits narrow, matching the port", managing(*typed("3001")).shown == (code,)),
-        ("matching reaches the working directory, ignoring case", managing(*typed("PROJ")).shown == (code,)),
-        ("Enter queues the highlighted URL's copy", managing(down, enter).pending == (Copy(text=code.url),)),
-        ("Enter on a port nothing outside reaches queues nothing", managing(up, enter).pending == ()),
-        ("Ctrl+X queues a TERM", managing(ctrl_x).pending == (Signal(pid=10, signum=signal.SIGTERM),)),
+        ("digits narrow, matching the port", managing("3001").shown == (code,)),
+        ("matching reaches the working directory, ignoring case", managing("PROJ").shown == (code,)),
+        ("a port typed whole comes first", managing("8000").shown == (atlas,)),
+        ("Enter copies the highlighted URL", acted(down, enter) == (Copy(text=code.url),)),
+        ("Enter on a port nothing outside reaches copies nothing", acted(up, enter) == ()),
+        ("Ctrl+X sends a TERM", acted(ctrl_x) == (Signal(pid=10, signum=signal.SIGTERM),)),
         (
-            "a second Ctrl+X on the same row queues a KILL",
-            managing(ctrl_x, ctrl_x).pending == (Signal(pid=10, signum=signal.SIGTERM), Signal(pid=10, signum=signal.SIGKILL)),
+            "a second Ctrl+X on the same row sends a KILL",
+            acted(ctrl_x, ctrl_x) == (Signal(pid=10, signum=signal.SIGTERM), Signal(pid=10, signum=signal.SIGKILL)),
         ),
-        ("Ctrl+X on another row sends that one TERM", managing(ctrl_x, down, ctrl_x).pending[-1] == Signal(pid=20, signum=signal.SIGTERM)),
-        (
-            "carried-out actions leave the queue, and one queued meanwhile stays",
-            managing(ctrl_x, down, enter, Carried(count=1, notice=None)).pending == (Copy(text=code.url),),
-        ),
-        ("a failure carrying out an action is the notice", managing(ctrl_x, Carried(count=1, notice="gone")).notice == "gone"),
+        ("Ctrl+X on another row sends that one TERM", acted(ctrl_x, down, ctrl_x)[-1] == Signal(pid=20, signum=signal.SIGTERM)),
+        ("an action says what it did", managing(ctrl_x).notice == "sent TERM to 10"),
         ("the highlight stays on its port as a row above it goes", managing(down, down, Refreshed(listeners=(code, atlas))).highlighted == atlas),
         ("the highlight stays on its port as a row above it appears", managing(down, Refreshed(listeners=(atlas, web, code))).highlighted == code),
         ("when its own row goes, the highlight lands on the row that took its place", managing(down, Refreshed(listeners=(web, atlas))).highlighted == atlas),
@@ -505,26 +500,41 @@ def _selftest() -> int:
             managing(ctrl_x, Refreshed(listeners=(replace(web, pid=11), code))).terminated == frozenset(),
         ),
         ("Up from the top wraps to the last", managing(up).highlighted == atlas),
-        ("Escape leaves", stepped(KeyPressed(key=Key.Escape)) == Finished()),
-        ("keys after leaving change nothing", stepped(KeyPressed(key=Key.Escape), ctrl_x) == Finished()),
+        ("Escape leaves", acted(KeyPressed(key=Key.Escape)) == (Leave(),)),
     ]
 
     sent: list[Signal] = []
+    copied: list[str] = []
+    frames: list[Frame] = []
 
-    def run_headless(*steps: object, polled: tuple[Listener, ...] = listeners) -> None:
+    def run_headless(*steps: object, shown: tuple[Listener, ...] = listeners, failure: str | None = None) -> None:
         def signal_process(action: Signal) -> str | None:
             sent.append(action)
-            return None
+            return failure
 
         asyncio.run(
             asyncio.wait_for(
-                manage(listeners, lambda: polled, signal_process, headless=True, dimensions=(80, 10), autopilot=[*steps, Quit()]),
+                manage(
+                    shown, lambda: shown, signal_process, headless=True, dimensions=(80, 10),
+                    clipboard_handler=copied.append, autopilot=[*steps, Quit()],
+                ),
                 timeout=timedelta(seconds=30).total_seconds(),
             )
         )
 
-    run_headless(down, ctrl_x, KeyPressed(key=Key.Escape))
-    cases += [("the app sends the signals queued", sent == [Signal(pid=20, signum=signal.SIGTERM)])]
+    run_headless(*typed("301"), KeyPressed(key=Key.Left), *typed("0"), ctrl_x, enter, KeyPressed(key=Key.Escape))
+    cases += [
+        ("the app sends the signals asked for, the query edited at the cursor", sent == [Signal(pid=20, signum=signal.SIGTERM)]),
+        ("the app copies the URL asked for", copied == [code.url]),
+    ]
+    run_headless(ctrl_x, Screenshot(frames.append), failure="not allowed to signal 10")
+    cases += [("a signal that fails says why", bool(frames) and "not allowed to signal 10" in frames[-1].text(ansi=False))]
+
+    many = tuple(Listener(port=4000 + index, pid=100 + index, command=f"server-{index:02}", cwd="~", url=None) for index in range(30))
+    frames.clear()
+    run_headless(*(down for _ in range(20)), Screenshot(frames.append), shown=many)
+    screen = frames[0].text(ansi=False) if frames else ""
+    cases += [("moving past the rows shown scrolls the highlight into view", "server-20" in screen and "server-00" not in screen)]
 
     failures = [name for name, passed in cases if not passed]
     for name in failures:

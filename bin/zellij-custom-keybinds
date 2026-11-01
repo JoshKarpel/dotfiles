@@ -1,7 +1,10 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["kdl-py>=1.2"]
+# dependencies = ["kdl-py==1.2.0"]
+#
+# [tool.uv]
+# exclude-newer = "7 days"
 # ///
 """
 Print the keybindings ~/.config/zellij/config.kdl adds or removes, one per line: the key, the modes it applies in, and

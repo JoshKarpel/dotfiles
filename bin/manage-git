@@ -1,7 +1,11 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.15"
-# dependencies = ["counterweight>=0.1.1"]
+# dependencies = ["counterweight==0.2.0"]
+#
+# [tool.uv]
+# exclude-newer = "7 days"
+# exclude-newer-package = { counterweight = false, evp = false, waxy = false, without-cli = false, without-logging = false, without-streams = false }
 # ///
 """
 Pick local branches across every clone to delete, tearing down any worktree one has checked out.
@@ -41,6 +45,7 @@ from typing import assert_never
 from counterweight import app
 from counterweight.components import component
 from counterweight.controls import Quit
+from counterweight.controls import ScrollIntoView
 from counterweight.elements import Div
 from counterweight.elements import Text
 from counterweight.events import InputEvent
@@ -48,8 +53,13 @@ from counterweight.events import InputResponse
 from counterweight.events import KeyPressed
 from counterweight.events import Pasted
 from counterweight.events import Receiver
-from counterweight.hooks import use_controls
-from counterweight.hooks import use_effect
+from counterweight.events import response_controls
+from counterweight.focus import ElementHandle
+from counterweight.headless import Highlight
+from counterweight.headless import TextInput
+from counterweight.headless import substring_matches
+from counterweight.headless import use_text_input
+from counterweight.hooks import get_state
 from counterweight.hooks import use_state
 from counterweight.keys import Key
 from counterweight.styles.utilities import *
@@ -278,11 +288,6 @@ def standing(clone: Path) -> tuple[Branch, ...]:
     )
 
 
-def contains(query: str, name: str) -> bool:
-    """Whether NAME contains QUERY, ignoring case."""
-    return query.casefold() in name.casefold()
-
-
 @dataclass(frozen=True, slots=True)
 class Heading:
     """A row naming the clone below it, which the highlight skips."""
@@ -297,7 +302,7 @@ def rows_for(groups: tuple[Group, ...], query: str) -> tuple[Row, ...]:
     """The branches whose name contains QUERY, under the heading of each clone that has any."""
     rows: list[Row] = []
     for group in groups:
-        if matched := [branch for branch in group.branches if contains(query, branch.name)]:
+        if matched := substring_matches(query, group.branches, key=lambda branch: branch.name):
             rows += [Heading(group.title), *matched]
     return tuple(rows)
 
@@ -309,19 +314,15 @@ def choices(rows: tuple[Row, ...]) -> tuple[Branch, ...]:
 
 @dataclass(frozen=True, slots=True)
 class Marking:
-    """The query, the highlighted branch counting branches only, and the branches marked for deleting."""
+    """The query, the highlighted branch, and the branches marked for deleting."""
 
     query: str
-    highlighted: int
+    highlight: Highlight
     marked: frozenset[Branch]
 
     def edited(self, query: str) -> Marking:
-        """A changed query highlights its first match, since the old index points into a different list."""
-        return self if query == self.query else replace(self, query=query, highlighted=0)
-
-    def moved(self, by: int, choice_count: int) -> Marking:
-        """The highlight moved BY branches, wrapping at either end."""
-        return replace(self, highlighted=(self.highlighted + by) % choice_count) if choice_count else self
+        """A changed query highlights its first match, since the old highlight is on a different list."""
+        return self if query == self.query else replace(self, query=query, highlight=Highlight())
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,76 +338,105 @@ type Picking = Marking | Finished
 def opening(groups: tuple[Group, ...]) -> Marking:
     """An empty query, with every merged and every squash-merged branch marked."""
     marked = frozenset(branch for group in groups for branch in group.branches if branch.status in PREMARKED)
-    return Marking(query="", highlighted=0, marked=marked)
+    return Marking(query="", highlight=Highlight(), marked=marked)
 
 
-def step(picking: Picking, event: InputEvent, groups: tuple[Group, ...]) -> Picking:
+def step(marking: Marking, event: InputEvent, groups: tuple[Group, ...]) -> Picking | None:
     """
-    The picker after one more key press or paste.
+    The picker after a key that marks or picks rather than edits, or `None` for an event the query's field handles.
 
-    Every input goes through here, applied to the latest state, so keys typed faster than the screen redraws
-    (type-ahead while the clones are read, say) land as if each had been seen.
+    The component steps from the latest state, so keys typed faster than the screen redraws (type-ahead while the
+    clones are read, say) land as if each had been seen.
     """
-    if isinstance(picking, Finished):
-        return picking
-    shown = choices(rows_for(groups, picking.query))
+    shown = choices(rows_for(groups, marking.query))
     match event:
         case KeyPressed(key=key) if key in LEAVE_KEYS:
             return Finished(chosen=())
-        case KeyPressed(key=Key.Space) if shown:
-            branch = shown[picking.highlighted]
-            return replace(picking, marked=picking.marked ^ {branch}) if branch.is_markable else picking
+        # Claimed even with nothing to mark, so it never reaches the query, where no branch name could match it.
+        case KeyPressed(key=Key.Space):
+            if (index := marking.highlight.index_in(shown)) is None or not shown[index].is_markable:
+                return marking
+            return replace(marking, marked=marking.marked ^ {shown[index]})
         # Enter typed ahead, before the terminal goes raw, has had its \r turned into \n (Ctrl+J) by the tty.
         case KeyPressed(key=Key.Enter | Key.ControlJ):
-            if not picking.marked:
-                return picking
+            if not marking.marked:
+                return marking
             listed = (branch for group in groups for branch in group.branches)
-            return Finished(chosen=tuple(branch for branch in listed if branch in picking.marked))
+            return Finished(chosen=tuple(branch for branch in listed if branch in marking.marked))
         case KeyPressed(key=key) if key in DOWN_KEYS:
-            return picking.moved(1, len(shown))
+            return replace(marking, highlight=marking.highlight.moved(shown, 1))
         case KeyPressed(key=key) if key in UP_KEYS:
-            return picking.moved(-1, len(shown))
-        case KeyPressed(key=Key.Backspace):
-            return picking.edited(picking.query[:-1])
-        case KeyPressed(key=Key.ControlU):
-            return picking.edited("")
-        # Text is one character; every named key is longer ("enter", "alt+b"), so length tells them apart.
-        case KeyPressed(key=key) if len(key) == 1 and key.isprintable():
-            return picking.edited(picking.query + key)
-        case Pasted(text=text):
-            return picking.edited(picking.query + "".join(c for c in text if c.isprintable()))
+            return replace(marking, highlight=marking.highlight.moved(shown, -1))
         case _:
-            return picking
+            return None
+
+
+def trimmed(event: InputEvent) -> InputEvent:
+    """A paste without the line break a copied line ends with, which the field would make a trailing space."""
+    return Pasted(text=event.text.rstrip("\r\n")) if isinstance(event, Pasted) else event
+
+
+def query_row(field: TextInput) -> Div:
+    """The query after its prompt, with the cursor drawn over the cell it's in."""
+    return Div(
+        style=row | overflow_x_scroll | stick_to_end_x,
+        children=(
+            Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
+            Text(content=field.before_cursor, style=text_wrap_none),
+            Text(
+                content=field.at_cursor,
+                handle=field.cursor_cell,
+                style=text_wrap_none | text_color("slate", 900) | text_bg("sky", 300),
+            ),
+            Text(content=field.after_cursor, style=text_wrap_none),
+        ),
+    )
 
 
 @component
 def branch_picker(groups: tuple[Group, ...], choose: Callable[[tuple[Branch, ...]], None]) -> Div:
-    picking, set_picking = use_state(lambda: opening(groups))
-    send_control = use_controls()
+    def start() -> Picking:
+        return opening(groups)
 
-    async def finish() -> None:
-        if not isinstance(picking, Finished):
-            return
-        choose(picking.chosen)
-        send_control(Quit())
+    picking, set_picking = use_state(start)
+    row_handle, _ = use_state(ElementHandle)
 
-    use_effect(finish, deps=(picking,))
+    def edit_query(edit: Callable[[str], str]) -> str:
+        settled = set_picking(lambda latest: latest.edited(edit(latest.query)) if isinstance(latest, Marking) else latest)
+        return settled.query if isinstance(settled, Marking) else ""
 
-    def on_input(event: InputEvent, _: Receiver) -> InputResponse:
-        if not isinstance(event, KeyPressed | Pasted):
-            return None
-        set_picking(lambda latest: step(latest, event, groups))
-        return ()
+    field = use_text_input(picking.query if isinstance(picking, Marking) else "", edit_query, auto_focus=True)
+
+    def on_input(event: InputEvent, receiver: Receiver) -> InputResponse:
+        now = get_state(set_picking)
+        # Keys typed ahead of the Quit, after the choice, choose nothing more.
+        if isinstance(now, Finished):
+            return ()
+        scroll = ScrollIntoView(row_handle, block="nearest")
+        match step(now, event, groups):
+            case None:
+                if (controls := response_controls(field.on_input(trimmed(event), receiver))) is None:
+                    return None
+                return (*controls, scroll)
+            case Finished(chosen=chosen) as finished:
+                set_picking(finished)
+                choose(chosen)
+                return Quit()
+            case Marking() as moved:
+                set_picking(moved)
+                return scroll
+            case _ as unreachable:
+                assert_never(unreachable)
 
     match picking:
         case Finished():
             return Div(style=full)
-        case Marking(query=query, highlighted=index, marked=marked):
+        case Marking(query=query, highlight=highlight, marked=marked):
             rows = rows_for(groups, query)
         case _ as unreachable:
             assert_never(unreachable)
     shown = choices(rows)
-    highlighted = shown[index] if shown else None
+    highlighted = shown[index] if (index := highlight.index_in(shown)) is not None else None
 
     def row_text(row: Row) -> Text:
         match row:
@@ -420,7 +450,11 @@ def branch_picker(groups: tuple[Group, ...], choose: Callable[[tuple[Branch, ...
                 if branch is highlighted:
                     color = text_bold | text_color("amber", 300)
                 where = ", worktree" if branch.worktree is not None and branch.status is not Status.CHANGED else ""
-                return Text(content=f"  {box} {branch.name}  ({branch.status}{where})", style=text_wrap_none | color)
+                return Text(
+                    content=f"  {box} {branch.name}  ({branch.status}{where})",
+                    handle=row_handle if branch is highlighted else None,
+                    style=text_wrap_none | color,
+                )
             case _ as unreachable:
                 assert_never(unreachable)
 
@@ -432,14 +466,7 @@ def branch_picker(groups: tuple[Group, ...], choose: Callable[[tuple[Branch, ...
                 content=f"branches to delete: {len(marked)} marked; Space marks, Enter deletes",
                 style=text_wrap_none | text_color("slate", 400),
             ),
-            Div(
-                style=row | overflow_x_scroll | stick_to_end_x,
-                children=(
-                    Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
-                    Text(content=query, style=text_wrap_none),
-                    Text(content=" ", style=text_wrap_none | text_bg("sky", 300)),
-                ),
-            ),
+            query_row(field),
             Div(
                 style=col | fill(1) | overflow_y_scroll,
                 children=tuple(row_text(row) for row in rows)
@@ -476,9 +503,9 @@ def delete(chosen: tuple[Branch, ...]) -> int:
 
 
 def _selftest() -> int:
-    from functools import reduce
-
     from counterweight.autopilot import typed
+    from counterweight.controls import Screenshot
+    from counterweight.paint import Frame
 
     dotfiles, service = Path("/p/dotfiles"), Path("/w/service")
     squashed = Branch(clone=dotfiles, name="landed", status=Status.SQUASHED, worktree=Path("/p/dotfiles.worktrees/landed"))
@@ -499,8 +526,14 @@ def _selftest() -> int:
         "worktree /p/dotfiles.worktrees/detached\nHEAD 3\ndetached\n"
     )
 
-    def marked(*events: InputEvent) -> Picking:
-        return reduce(lambda picking, event: step(picking, event, groups), events, opening(groups))
+    def marked(*inputs: InputEvent | str) -> Picking:
+        """The picker after each input, a string standing for the query typed onto."""
+        picking: Picking = opening(groups)
+        for given in inputs:
+            if isinstance(picking, Finished):
+                break
+            picking = picking.edited(picking.query + given) if isinstance(given, str) else step(picking, given, groups) or picking
+        return picking
 
     def standing_of(**overrides: object) -> Status:
         facts = {"has_changes": False, "upstream": "u", "track": "", "is_merged": False, "is_squashed": False}
@@ -541,22 +574,34 @@ def _selftest() -> int:
         ("Space never narrows the query", marked(space).query == ""),
         ("Down skips the heading between clones", marked(down, down, down, space, enter) == Finished(chosen=(squashed,))),
         ("Up from the top wraps to the last", marked(KeyPressed(key=Key.Up), space, enter) == Finished(chosen=(squashed, merged, closed))),
-        ("marks the query hides are still deleted", marked(*typed("old"), space, enter) == Finished(chosen=(squashed,))),
-        ("Enter with nothing marked stays put", isinstance(marked(space, *typed("old"), space, enter), Marking)),
+        ("marks the query hides are still deleted", marked("old", space, enter) == Finished(chosen=(squashed,))),
+        ("Enter with nothing marked stays put", isinstance(marked(space, "old", space, enter), Marking)),
         ("Escape leaves with nothing chosen", marked(escape, enter) == Finished(chosen=())),
     ]
 
-    def picked(*steps: object) -> tuple[Branch, ...]:
+    def picked(*steps: object, picked_from: tuple[Group, ...] = groups) -> tuple[Branch, ...]:
         return asyncio.run(
             asyncio.wait_for(
-                pick(groups, title="manage-git", headless=True, dimensions=(70, 12), autopilot=[*steps, Quit()]),
+                pick(picked_from, title="manage-git", headless=True, dimensions=(70, 12), autopilot=[*steps, Quit()]),
                 timeout=timedelta(seconds=30).total_seconds(),
             )
         )
 
+    many = (
+        Group(
+            title="~/projects/dotfiles",
+            branches=tuple(Branch(clone=dotfiles, name=f"b-{index:02}", status=Status.UNMERGED, worktree=None) for index in range(30)),
+        ),
+    )
+    frames: list[Frame] = []
+    picked(*(down for _ in range(20)), Screenshot(frames.append), picked_from=many)
+    screen = frames[0].text(ansi=False) if frames else ""
+
     cases += [
         ("the app hands back what was marked", picked(space, enter) == (merged,)),
+        ("the query edits at the cursor", picked(*typed("od"), KeyPressed(key=Key.Left), *typed("l"), space, enter) == (squashed,)),
         ("the app hands back nothing when left", picked(escape) == ()),
+        ("moving past the rows shown scrolls the highlight into view", "b-20" in screen and "b-00" not in screen),
     ]
 
     failures = [name for name, passed in cases if not passed]

@@ -1,7 +1,11 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
-# requires-python = ">=3.13"
-# dependencies = ["without-html>=0.0.10", "markdown-it-py>=4.0", "mdit-py-plugins>=0.6"]
+# requires-python = ">=3.14"
+# dependencies = ["without-html==0.0.10", "markdown-it-py==4.2.0", "mdit-py-plugins==0.6.1"]
+#
+# [tool.uv]
+# exclude-newer = "7 days"
+# exclude-newer-package = { without-html = false }
 # ///
 """
 Render a plan's markdown into the HTML page published as its Artifact.

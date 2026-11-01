@@ -51,6 +51,25 @@ application's committed lockfile is the exact resolution it deploys. Caps narrow
 the space for everyone downstream to buy a guarantee the lockfile already gives
 you.
 
+A PEP 723 inline script is an application too, so lock it:
+`uv lock --script <script>` writes a `<script>.lock` beside it, which
+`uv run --script` uses, and commit the lock. Without one, a run resolves afresh
+every time, so even exact pins leave transitive dependencies floating to
+whatever published last. Pin the direct dependencies exactly
+(`counterweight==0.2.0`) as well, so an upgrade is a deliberate edit to the pin;
+running the script after that edit relocks it. Set the cooldown in the script's
+own metadata, since it has no project config to inherit one from:
+
+```python
+# /// script
+# dependencies = ["counterweight==0.2.0"]
+#
+# [tool.uv]
+# exclude-newer = "7 days"
+# exclude-newer-package = { counterweight = false }
+# ///
+```
+
 Cap only what you can point at: exclude a known-broken release (`!=1.4.2`), or
 pin the single framework you extend (a pytest plugin, a Sphinx extension). Write
 both as temporary, and remove them when the reason expires.
@@ -68,8 +87,12 @@ habit from one model into the other.
 Delay adopting a release until it has aged, as a defense against compromised or
 malicious publishes. Use a relative duration (a sliding "last N days" window):
 7 days is a reasonable default, with a longer window (e.g. 30 days) for major
-version bumps. Pin a specific version to bypass the cooldown when you need a
-fresh release. Configure it with each ecosystem's own knob.
+version bumps. Configure it with each ecosystem's own knob. How you take a fresh
+release anyway depends on what the knob filters. mise's `minimum_release_age`
+applies only to fuzzy resolution, so pinning a specific version bypasses it.
+uv's `exclude-newer` hides every release inside the window, so a pin on one is
+unsatisfiable, and the bypass is a per-package exemption
+(`exclude-newer-package = { <package> = false }`).
 
 ## References
 

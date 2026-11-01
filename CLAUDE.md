@@ -443,14 +443,25 @@ would apply a style to every session on every machine. The `harry` alias in
   name, since the alias does not exist there.
 - The `pick-*` and `manage-*` TUIs are [counterweight](https://www.counterweight.dev/)
   apps sharing one key scheme and a pure `step` function that their self-tests
-  drive. Start a new one from the closest: `pick-kube` for a one-shot pick,
-  `manage-ports` for a live list.
+  drive. The query is counterweight's `use_text_input` field, so it edits as a shell
+  line does; `step` takes the keys that pick or act and returns `None` for the rest,
+  which go to the field, so a picking key shadows any edit the field binds to it
+  (Ctrl+K moves up rather than killing to the end). Start a new one from the
+  closest: `pick-kube` for a one-shot pick, `manage-ports` for a live list. A
+  picker run at a shell prompt (`pick-kube`, `pick-just`) draws `Inline` and erases
+  itself, so what it hands on lands where it was; one that runs in a pane of its
+  own, or a live list, draws full screen.
 - Python scripts in `bin/` run under `uv`, not the system interpreter. Use the
   [PEP 723](https://peps.python.org/pep-0723/) inline-script shebang
   `#!/usr/bin/env -S uv run --quiet --script` followed by a `# /// script` metadata
   block declaring `requires-python` (and `dependencies` if any), so the script is
-  self-contained and reproducible. `count-claude-tokens` is the exemplar with
-  third-party dependencies; the Python hooks (`claude-rm-scope-check`,
+  self-contained and reproducible. A script with dependencies pins each exactly
+  (`==`), sets the cooldown under `[tool.uv]` with my own packages exempted (as
+  `config/mise/config.toml` exempts my tools), and commits the `<script>.lock` that
+  `uv lock --script` writes beside it, per the supply-chain rule. Running a script
+  whose pins changed relocks it, and the `uv-script-locks` pre-commit hook fails on a
+  lock that is missing or stale. `count-claude-tokens` is
+  the exemplar with third-party dependencies; the Python hooks (`claude-rm-scope-check`,
   `claude-gh-api-check`) use the same shebang with an empty dependency set. `--quiet`
   keeps `uv`'s own output off stdout, which matters for hooks whose stdout must stay
   clean (parseable JSON or empty). Every one of them is a short-lived command, which
@@ -461,7 +472,7 @@ would apply a style to every session on every machine. The `harry` alias in
 - Target files in `targets/` are auto-sorted by the `file-contents-sorter` pre-commit hook
 - Pre-commit hooks run via [pre-commit.ci](https://pre-commit.ci) on push; see
   `.pre-commit-config.yaml` for the set. pre-commit.ci skips `claude-hook-selftests`
-  (it needs a real dev environment), so the `.github/workflows/pre-commit.yml`
-  workflow runs the full suite (self-tests included) on push and PRs. Dependabot
-  keeps the workflow's actions updated.
+  (it needs a real dev environment) and `uv-script-locks` (it needs uv), so the
+  `.github/workflows/pre-commit.yml` workflow runs the full suite (both included) on
+  push and PRs. Dependabot keeps the workflow's actions updated.
 - The `exists` helper function (from `sources/exists.sh`) is used throughout to check command availability before use

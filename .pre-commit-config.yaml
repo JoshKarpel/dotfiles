@@ -44,9 +44,23 @@ repos:
         language: script
         pass_filenames: false
         files: ^bin/
+      # Every inline script with dependencies has a <script>.lock beside it
+      # matching its metadata. Running a script whose pins changed relocks it,
+      # so this catches a pin edited and committed without a run.
+      - id: uv-script-locks
+        name: uv script locks
+        entry: >-
+          bash -c 'status=0; for script in bin/*; do
+          [[ -f "$script" ]] && grep -q "^# dependencies = \[.\+\]" "$script" || continue;
+          uv lock --check --quiet --script "$script" 2>/dev/null
+          || { echo "$script.lock is missing or stale; run: uv lock --script $script"; status=1; };
+          done; exit "$status"'
+        language: unsupported
+        pass_filenames: false
+        files: ^bin/
 
 ci:
   # The self-tests shell out to hooks that expect a real dev environment
-  # (jq, python3, git state); skip them on pre-commit.ci and rely on the
-  # local pre-commit run instead.
-  skip: [claude-hook-selftests]
+  # (jq, python3, git state), and the lock check needs uv; skip them on
+  # pre-commit.ci and rely on the GitHub workflow, which has both.
+  skip: [claude-hook-selftests, uv-script-locks]

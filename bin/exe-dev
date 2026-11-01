@@ -1,7 +1,10 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["typer"]
+# dependencies = ["typer==0.27.3"]
+#
+# [tool.uv]
+# exclude-newer = "7 days"
 # ///
 """Reach exe.dev and its VMs over checked host keys, with dev boxes built from this repo."""
 

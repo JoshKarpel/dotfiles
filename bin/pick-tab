@@ -1,16 +1,21 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.15"
-# dependencies = ["counterweight>=0.1.1"]
+# dependencies = ["counterweight==0.2.0"]
+#
+# [tool.uv]
+# exclude-newer = "7 days"
+# exclude-newer-package = { counterweight = false, evp = false, waxy = false, without-cli = false, without-logging = false, without-streams = false }
 # ///
 """
 Pick a tab of the current zellij session by name and go to it.
 
 Bound to a key in `config/zellij/config.kdl`, which runs it in place of the focused pane.
-Type to narrow the tabs to those whose name contains the text, ignoring case, then Enter to go to the highlighted one.
-Up, Down, Tab, Shift+Tab, Ctrl+N, Ctrl+P and Ctrl+K move the highlight, Backspace deletes a character and Ctrl+U
-the whole query, a digit goes straight to that tab number, so digits never narrow, and Escape or Ctrl+C leaves
-without moving.
+Type to narrow the tabs to those whose name contains the text, ignoring case, with one the text names exactly first,
+then Enter to go to the highlighted one.
+Up, Down, Tab, Shift+Tab, Ctrl+N, Ctrl+P and Ctrl+K move the highlight, the query edits as a shell's line does
+(Left, Right, Ctrl+A, Ctrl+E, Ctrl+W, Ctrl+U and the rest), a digit goes straight to that tab number, so digits
+never narrow, and Escape or Ctrl+C leaves without moving.
 
 The tabs are read once, when it starts, rather than followed as they change:
 following them is what made room reset the highlight whenever any tab updated (rvcas/room#28).
@@ -35,6 +40,7 @@ from typing import assert_never
 from counterweight import app
 from counterweight.components import component
 from counterweight.controls import Quit
+from counterweight.controls import ScrollIntoView
 from counterweight.elements import Div
 from counterweight.elements import Text
 from counterweight.events import InputEvent
@@ -42,8 +48,13 @@ from counterweight.events import InputResponse
 from counterweight.events import KeyPressed
 from counterweight.events import Pasted
 from counterweight.events import Receiver
-from counterweight.hooks import use_controls
-from counterweight.hooks import use_effect
+from counterweight.events import response_controls
+from counterweight.focus import ElementHandle
+from counterweight.headless import Highlight
+from counterweight.headless import TextInput
+from counterweight.headless import substring_matches
+from counterweight.headless import use_text_input
+from counterweight.hooks import get_state
 from counterweight.hooks import use_state
 from counterweight.keys import Key
 from counterweight.styles import Style
@@ -79,9 +90,8 @@ def parse_tabs(listing: str) -> tuple[Tab, ...]:
 
 
 def matching(query: str, tabs: tuple[Tab, ...]) -> tuple[Tab, ...]:
-    """The tabs whose name contains `query`, ignoring case, in tab bar order."""
-    folded = query.casefold()
-    return tuple(tab for tab in tabs if folded in tab.name.casefold())
+    """The tabs whose name contains `query`, ignoring case, in tab bar order but for one it names exactly, first."""
+    return substring_matches(query, tabs, key=lambda tab: tab.name)
 
 
 def numbered(key: str, tabs: tuple[Tab, ...]) -> Tab | None:
@@ -94,15 +104,11 @@ class Search:
     """The query and which of the tabs it matches is highlighted."""
 
     query: str
-    highlighted: int
+    highlight: Highlight
 
     def edited(self, query: str) -> Search:
-        """A changed query highlights its first match, since the old index points into a different list."""
-        return self if query == self.query else Search(query=query, highlighted=0)
-
-    def moved(self, by: int, match_count: int) -> Search:
-        """The highlight moved `by` rows, wrapping at either end."""
-        return replace(self, highlighted=(self.highlighted + by) % match_count) if match_count else self
+        """A changed query highlights its first match, since the old highlight is on a different list."""
+        return self if query == self.query else Search(query=query, highlight=Highlight())
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,75 +123,106 @@ type Picking = Search | Finished
 
 def opening(tabs: tuple[Tab, ...]) -> Search:
     """An empty query, highlighting the active tab, so Enter straight away stays put."""
-    return Search(query="", highlighted=next((index for index, tab in enumerate(tabs) if tab.is_active), 0))
+    return Search(query="", highlight=Highlight(key=next((tab for tab in tabs if tab.is_active), None)))
 
 
-def step(picking: Picking, event: InputEvent, tabs: tuple[Tab, ...]) -> Picking:
+def step(search: Search, event: InputEvent, tabs: tuple[Tab, ...]) -> Picking | None:
     """
-    The picker after one more key press or paste.
+    The picker after a key that picks rather than edits, or `None` for an event the query's field handles.
 
-    Every input goes through here, applied to the latest state, so keys typed faster than the screen redraws
-    (type-ahead while the picker starts, say) land as if each had been seen.
+    The component steps from the latest state, so keys typed faster than the screen redraws (type-ahead while the
+    picker starts, say) land as if each had been seen.
     """
-    if isinstance(picking, Finished):
-        return picking
-    shown = matching(picking.query, tabs)
+    shown = matching(search.query, tabs)
     match event:
         case KeyPressed(key=key) if key in LEAVE_KEYS:
             return Finished(tab=None)
         # Enter typed ahead, before the terminal goes raw, has had its \r turned into \n (Ctrl+J) by the tty.
-        case KeyPressed(key=Key.Enter | Key.ControlJ) if shown:
-            return Finished(tab=shown[picking.highlighted])
+        case KeyPressed(key=Key.Enter | Key.ControlJ) if (index := search.highlight.index_in(shown)) is not None:
+            return Finished(tab=shown[index])
         case KeyPressed(key=key) if key in DOWN_KEYS:
-            return picking.moved(1, len(shown))
+            return replace(search, highlight=search.highlight.moved(shown, 1))
         case KeyPressed(key=key) if key in UP_KEYS:
-            return picking.moved(-1, len(shown))
+            return replace(search, highlight=search.highlight.moved(shown, -1))
         case KeyPressed(key=key) if key.isdigit():
-            return Finished(tab=tab) if (tab := numbered(key, tabs)) else picking
-        case KeyPressed(key=Key.Backspace):
-            return picking.edited(picking.query[:-1])
-        case KeyPressed(key=Key.ControlU):
-            return picking.edited("")
-        # Text is one character; every named key is longer ("enter", "alt+b"), so length tells them apart.
-        case KeyPressed(key=key) if len(key) == 1 and key.isprintable():
-            return picking.edited(picking.query + key)
-        case Pasted(text=text):
-            return picking.edited(picking.query + "".join(c for c in text if c.isprintable() and not c.isdigit()))
+            return Finished(tab=tab) if (tab := numbered(key, tabs)) else search
         case _:
-            return picking
+            return None
+
+
+def for_field(event: InputEvent) -> InputEvent:
+    """A paste without its digits, which never narrow, or the line break a copied line ends with."""
+    if not isinstance(event, Pasted):
+        return event
+    return Pasted(text="".join(c for c in event.text.rstrip("\r\n") if not c.isdigit()))
+
+
+def query_row(field: TextInput) -> Div:
+    """The query after its prompt, with the cursor drawn over the cell it's in."""
+    return Div(
+        style=row | overflow_x_scroll | stick_to_end_x,
+        children=(
+            Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
+            Text(content=field.before_cursor, style=text_wrap_none),
+            Text(
+                content=field.at_cursor,
+                handle=field.cursor_cell,
+                style=text_wrap_none | text_color("slate", 900) | text_bg("sky", 300),
+            ),
+            Text(content=field.after_cursor, style=text_wrap_none),
+        ),
+    )
 
 
 @component
 def tab_picker(tabs: tuple[Tab, ...], choose: Callable[[Tab], None]) -> Div:
-    picking, set_picking = use_state(lambda: opening(tabs))
-    send_control = use_controls()
+    def start() -> Picking:
+        return opening(tabs)
 
-    async def finish() -> None:
-        if not isinstance(picking, Finished):
-            return
-        if picking.tab is not None:
-            choose(picking.tab)
-        send_control(Quit())
+    picking, set_picking = use_state(start)
+    row_handle, _ = use_state(ElementHandle)
 
-    use_effect(finish, deps=(picking,))
+    def edit_query(edit: Callable[[str], str]) -> str:
+        settled = set_picking(lambda latest: latest.edited(edit(latest.query)) if isinstance(latest, Search) else latest)
+        return settled.query if isinstance(settled, Search) else ""
 
-    def on_input(event: InputEvent, _: Receiver) -> InputResponse:
-        if not isinstance(event, KeyPressed | Pasted):
-            return None
-        set_picking(lambda latest: step(latest, event, tabs))
-        return ()
+    field = use_text_input(picking.query if isinstance(picking, Search) else "", edit_query, auto_focus=True)
+
+    def on_input(event: InputEvent, receiver: Receiver) -> InputResponse:
+        now = get_state(set_picking)
+        # Keys typed ahead of the Quit, after the choice, choose nothing more.
+        if isinstance(now, Finished):
+            return ()
+        scroll = ScrollIntoView(row_handle, block="nearest")
+        match step(now, event, tabs):
+            case None:
+                if (controls := response_controls(field.on_input(for_field(event), receiver))) is None:
+                    return None
+                return (*controls, scroll)
+            case Finished(tab=tab) as finished:
+                set_picking(finished)
+                if tab is not None:
+                    choose(tab)
+                return Quit()
+            case Search() as moved:
+                set_picking(moved)
+                return scroll
+            case _ as unreachable:
+                assert_never(unreachable)
 
     match picking:
         case Finished():
             return Div(style=full)
-        case Search(query=query, highlighted=highlighted):
+        case Search(query=query, highlight=highlight):
             shown = matching(query, tabs)
+            highlighted = highlight.index_in(shown)
         case _ as unreachable:
             assert_never(unreachable)
 
     def tab_row(index: int, tab: Tab) -> Text:
         return Text(
             content=f"{tab.number:>2}  {tab.name}",
+            handle=row_handle if index == highlighted else None,
             style=text_wrap_none
             | (text_bold if tab.is_active else Style())
             | (text_color("amber", 300) if index == highlighted else text_color("slate", 300)),
@@ -195,14 +232,7 @@ def tab_picker(tabs: tuple[Tab, ...], choose: Callable[[Tab], None]) -> Div:
         style=full | col | border | border_lightrounded | border_color("slate", 500) | pad_x(1),
         on_input=on_input,
         children=(
-            Div(
-                style=row | overflow_x_scroll | stick_to_end_x,
-                children=(
-                    Text(content="> ", style=text_wrap_none | text_color("slate", 400)),
-                    Text(content=query, style=text_wrap_none),
-                    Text(content=" ", style=text_wrap_none | text_bg("sky", 300)),
-                ),
-            ),
+            query_row(field),
             Div(
                 style=col | fill(1) | overflow_y_scroll,
                 children=tuple(tab_row(index, tab) for index, tab in enumerate(shown))
@@ -220,9 +250,9 @@ async def pick(tabs: tuple[Tab, ...], **app_options: object) -> Tab | None:
 
 
 def _selftest() -> int:
-    from functools import reduce
-
     from counterweight.autopilot import typed
+    from counterweight.controls import Screenshot
+    from counterweight.paint import Frame
 
     tabs = (
         Tab(id=7, position=0, name="● dotfiles", is_active=False),
@@ -231,8 +261,14 @@ def _selftest() -> int:
     )
     enter = KeyPressed(key=Key.Enter)
 
-    def stepped(*events: InputEvent) -> Picking:
-        return reduce(lambda picking, event: step(picking, event, tabs), events, opening(tabs))
+    def stepped(*inputs: InputEvent | str) -> Picking:
+        """The picker after each input, a string standing for the query typed onto."""
+        picking: Picking = opening(tabs)
+        for given in inputs:
+            if isinstance(picking, Finished):
+                break
+            picking = picking.edited(picking.query + given) if isinstance(given, str) else step(picking, given, tabs) or picking
+        return picking
 
     cases: list[tuple[str, bool]] = [
         (
@@ -247,36 +283,40 @@ def _selftest() -> int:
         ("matching is a substring, not a subsequence", matching("dw", tabs) == ()),
         ("an empty query matches every tab", matching("", tabs) == tabs),
         ("a digit past the last tab names none", numbered("9", tabs) is None),
-        ("opening highlights the active tab", opening(tabs).highlighted == 1),
-        ("an unchanged query keeps its highlight", Search("d", 2).edited("d") == Search("d", 2)),
-        ("moving with nothing matched stays put", Search("zz", 0).moved(1, 0) == Search("zz", 0)),
+        ("opening highlights the active tab", opening(tabs).highlight.index_in(tabs) == 1),
+        ("an unchanged query keeps its highlight", Search("d", Highlight(index=2)).edited("d") == Search("d", Highlight(index=2))),
         ("Enter straight away chooses the active tab", stepped(enter) == Finished(tab=tabs[1])),
-        ("typing narrows, then Enter chooses the first match", stepped(*typed("wt"), enter) == Finished(tab=tabs[2])),
+        ("typing narrows, then Enter chooses the first match", stepped("wt", enter) == Finished(tab=tabs[2])),
         ("Down then Enter chooses the next tab", stepped(KeyPressed(key=Key.Down), enter) == Finished(tab=tabs[2])),
         (
             "Up from the top wraps to the last tab",
-            stepped(*typed("dot"), KeyPressed(key=Key.Up), enter) == Finished(tab=tabs[2]),
+            stepped("dot", KeyPressed(key=Key.Up), enter) == Finished(tab=tabs[2]),
         ),
         ("a digit jumps without Enter", stepped(KeyPressed(key="1")) == Finished(tab=tabs[0])),
         ("a digit past the last tab does not narrow the query", stepped(KeyPressed(key="9"), enter) == Finished(tab=tabs[1])),
         ("Escape leaves without choosing", stepped(KeyPressed(key=Key.Escape), enter) == Finished(tab=None)),
-        ("Enter with nothing matched stays put", stepped(*typed("zz"), enter) == Search("zz", 0)),
-        ("Backspace deletes the last character", stepped(*typed("wtx"), KeyPressed(key=Key.Backspace), enter) == Finished(tab=tabs[2])),
-        ("Ctrl+U clears the query", stepped(*typed("zz"), KeyPressed(key=Key.ControlU), enter) == Finished(tab=tabs[0])),
-        ("a paste narrows by its text", stepped(Pasted(text=":wt\n"), enter) == Finished(tab=tabs[2])),
+        ("Enter with nothing matched is left to the field", step(Search("zz", Highlight()), enter, tabs) is None),
+        ("a paste reaches the field without its digits or its line break", for_field(Pasted(text=":wt2\n")) == Pasted(text=":wt")),
     ]
 
-    def picked(*steps: object) -> Tab | None:
+    def picked(*steps: object, picked_from: tuple[Tab, ...] = tabs) -> Tab | None:
         return asyncio.run(
             asyncio.wait_for(
-                pick(tabs, headless=True, dimensions=(40, 10), autopilot=[*steps, Quit()]),
+                pick(picked_from, headless=True, dimensions=(40, 10), autopilot=[*steps, Quit()]),
                 timeout=timedelta(seconds=30).total_seconds(),
             )
         )
 
+    many = tuple(Tab(id=index, position=index, name=f"tab-{index:02}", is_active=index == 0) for index in range(30))
+    frames: list[Frame] = []
+    picked(*(KeyPressed(key=Key.Down) for _ in range(20)), Screenshot(frames.append), picked_from=many)
+    screen = frames[0].text(ansi=False) if frames else ""
+
     cases += [
         ("the app hands back the tab chosen", picked(*typed("wt"), enter) == tabs[2]),
+        ("the query edits at the cursor", picked(*typed("w"), KeyPressed(key=Key.Home), *typed(":"), enter) == tabs[2]),
         ("the app hands back nothing when left", picked(KeyPressed(key=Key.Escape)) is None),
+        ("moving past the rows shown scrolls the highlight into view", "tab-20" in screen and "tab-00" not in screen),
     ]
 
     failures = [name for name, passed in cases if not passed]
