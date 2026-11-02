@@ -51,14 +51,11 @@ application's committed lockfile is the exact resolution it deploys. Caps narrow
 the space for everyone downstream to buy a guarantee the lockfile already gives
 you.
 
-A PEP 723 inline script is an application too, so lock it:
-`uv lock --script <script>` writes a `<script>.lock` beside it, which
-`uv run --script` uses, and commit the lock. Without one, a run resolves afresh
-every time, so even exact pins leave transitive dependencies floating to
-whatever published last. Pin the direct dependencies exactly
-(`counterweight==0.2.0`) as well, so an upgrade is a deliberate edit to the pin;
-running the script after that edit relocks it. Set the cooldown in the script's
-own metadata, since it has no project config to inherit one from:
+A PEP 723 inline script carries no lockfile, so pin its direct dependencies
+exactly (`counterweight==0.2.0`), making an upgrade a deliberate edit to the
+pin. Transitive dependencies still resolve afresh on each run, so the cooldown
+is what keeps them from floating to whatever published last. Set it in the
+script's own metadata, since it has no project config to inherit one from:
 
 ```python
 # /// script

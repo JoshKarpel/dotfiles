@@ -456,11 +456,9 @@ would apply a style to every session on every machine. The `harry` alias in
   `#!/usr/bin/env -S uv run --quiet --script` followed by a `# /// script` metadata
   block declaring `requires-python` (and `dependencies` if any), so the script is
   self-contained and reproducible. A script with dependencies pins each exactly
-  (`==`), sets the cooldown under `[tool.uv]` with my own packages exempted (as
-  `config/mise/config.toml` exempts my tools), and commits the `<script>.lock` that
-  `uv lock --script` writes beside it, per the supply-chain rule. Running a script
-  whose pins changed relocks it, and the `uv-script-locks` pre-commit hook fails on a
-  lock that is missing or stale. `count-claude-tokens` is
+  (`==`) and sets the cooldown under `[tool.uv]` with my own packages exempted (as
+  `config/mise/config.toml` exempts my tools), per the supply-chain rule.
+  `count-claude-tokens` is
   the exemplar with third-party dependencies; the Python hooks (`claude-rm-scope-check`,
   `claude-gh-api-check`) use the same shebang with an empty dependency set. `--quiet`
   keeps `uv`'s own output off stdout, which matters for hooks whose stdout must stay
@@ -472,7 +470,6 @@ would apply a style to every session on every machine. The `harry` alias in
 - Target files in `targets/` are auto-sorted by the `file-contents-sorter` pre-commit hook
 - Pre-commit hooks run via [pre-commit.ci](https://pre-commit.ci) on push; see
   `.pre-commit-config.yaml` for the set. pre-commit.ci skips `claude-hook-selftests`
-  (it needs a real dev environment) and `uv-script-locks` (it needs uv), so the
-  `.github/workflows/pre-commit.yml` workflow runs the full suite (both included) on
-  push and PRs. Dependabot keeps the workflow's actions updated.
+  (it needs a real dev environment), so the `.github/workflows/pre-commit.yml`
+  workflow runs the full suite (that included) on push and PRs. Dependabot keeps the workflow's actions updated.
 - The `exists` helper function (from `sources/exists.sh`) is used throughout to check command availability before use
