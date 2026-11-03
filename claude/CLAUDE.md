@@ -59,6 +59,12 @@
   `$TMPDIR/x` lands at `/x`, and Claude Code refuses an `rm` whose target is a variable.
   Don't silence a backup copy with `2>/dev/null || true`: a backup that never happened
   turns the restore into a lie.
+- A `for`/`while` loop or a `$(...)` substitution makes Claude Code ask me to approve a
+  Bash call even when every command in it is read-only. Reach for the tool's own
+  multi-file form instead when it has one: `head -n 40 a b c` prints a `==> a <==`
+  header per file, `grep -n pat a b c` (or `grep -rn pat dir`) prefixes each match with
+  its file, and `wc -l a b c` counts each. For a substitution, run the inner command in a
+  call of its own and use its output literally in the next.
 - When you start a server just to check something, assume I may already be running the app on
   the default port; pick a non-default port and clean it up when done.
 - Every markdown plan (plan mode's, or a plan doc in a repo) has a published HTML Artifact,

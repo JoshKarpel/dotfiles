@@ -1,0 +1,216 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""PreToolUse hook: block command shapes that make Claude Code ask for approval.
+
+Claude Code asks the user to approve any compound command that contains a ``cd``
+(``cd dir; grep x f``) or a shell variable assignment (``S=/path; cp a $S/b``),
+even when every command in it is read-only and would run unprompted on its own.
+Without auto mode, those two shapes are most of the prompts a session raises, and
+neither is ever necessary: absolute paths replace the ``cd``, and a literal value
+replaces the variable.
+
+Blocking costs one retry turn that nobody has to watch; the prompt it replaces
+costs the user's attention. The block message says how to rewrite the command.
+
+Only the compound form is blocked. A lone ``cd dir`` is auto-approved and moves
+the shell for the next call, so it stays the escape hatch for a tool with no
+directory flag. An env prefix (``FOO=1 cmd``) is not an assignment statement and
+passes. In a permission mode that never prompts for Bash there is nothing to spare,
+so the hook does nothing; ``dontAsk`` is not one of them, since it denies what it
+would have asked about and the rewrite guidance still helps. It fails open (exit 0)
+on anything it can't tokenize.
+"""
+
+from __future__ import annotations
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests (`_selftest`).
+# This marker line is how `claude-hook-selftests` discovers participating hooks.
+
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+
+# Permission modes that never ask the user to approve a Bash call.
+AUTO_APPROVE_MODES = {"auto", "bypassPermissions"}
+
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# A here-doc operator and its delimiter; `<<<` (a here-string) has no body.
+_HEREDOC = re.compile(r"(?<!<)<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1(?!<)")
+# Reserved words that can precede a command word in the same segment.
+_KEYWORDS = {"do", "then", "else", "elif", "if", "while", "until", "!", "{", "time"}
+_OPERATOR_CHARS = set(";&|()<>\n")
+_SEPARATOR_CHARS = set(";|()\n")
+
+CD_MESSAGE = """\
+Claude Code asks the user to approve every compound command containing `cd`, even \
+when the rest is read-only, so this one was blocked to spare them the prompt. Nothing \
+ran. Drop the `cd` and pass absolute paths instead: `grep -n x /abs/dir/file`, \
+`git -C /other/repo log` (plain `git` for the repo you're in), `uv --directory /abs/dir`. \
+For a tool with no directory flag, run `cd /abs/dir` as a Bash call of its own first: a \
+lone `cd` needs no approval and the next call starts there (in the main session; a \
+subagent has to use absolute paths).
+"""
+
+ASSIGNMENT_MESSAGE = """\
+Claude Code asks the user to approve every compound command that assigns a shell \
+variable (`S=/path; cp a $S/b`), even when the rest is read-only, so this one was \
+blocked to spare them the prompt. Nothing ran. Write the value out literally at each \
+use. For a value a command computes (`x=$(...)`), run that command in a call of its own \
+and use its output literally in the next one.
+"""
+
+
+def _strip_heredoc_bodies(command: str) -> str:
+    """Drop here-doc bodies, whose lines are data and would otherwise read as commands."""
+    kept: list[str] = []
+    pending: list[str] = []
+    for line in command.split("\n"):
+        if pending:
+            if line.strip() == pending[0]:
+                pending.pop(0)
+            continue
+        kept.append(line)
+        pending = [match.group(2) for match in _HEREDOC.finditer(line)]
+    return "\n".join(kept)
+
+
+def _segments(command: str) -> list[list[str]]:
+    lexer = shlex.shlex(_strip_heredoc_bodies(command), posix=True, punctuation_chars="".join(_OPERATOR_CHARS))
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in lexer:
+        # Only an all-punctuation token is an operator; a quoted word like "a;b" is data.
+        is_operator = bool(token) and set(token) <= _OPERATOR_CHARS
+        if token in {"&", "&&"} or (is_operator and set(token) & _SEPARATOR_CHARS):
+            if current:
+                segments.append(current)
+                current = []
+            continue
+        current.append(token)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def prompt_triggers(command: str) -> list[str]:
+    """The messages for each prompt-forcing shape in COMMAND, empty when it has none."""
+    segments = _segments(command)
+    if len(segments) < 2:
+        return []
+    has_cd = has_assignment = False
+    for segment in segments:
+        words = segment
+        while words and words[0] in _KEYWORDS:
+            words = words[1:]
+        if not words:
+            continue
+        if words[0] in {"cd", "pushd"}:
+            has_cd = True
+        if all(_ASSIGNMENT.match(word) for word in words):
+            has_assignment = True
+    return [message for flag, message in ((has_cd, CD_MESSAGE), (has_assignment, ASSIGNMENT_MESSAGE)) if flag]
+
+
+_SELFTEST_CASES: list[tuple[str, bool]] = [
+    # --- BLOCK: cd in a compound command, the shapes sessions actually used ---
+    ("cd /repo/services/core; sed -n 1,60p pyproject.toml; ls src", True),
+    ("cd /repo && git ls-files | head", True),
+    ("cd services/x && find . -name '*.md' | sort | head -300", True),
+    ("cd /repo; for f in a b; do echo $f; head $f; done", True),
+    ("(cd /repo && make)", True),
+    ("echo $(cd /repo; ls)", True),
+    ("sed -n 1,5p /a/f; cd /repo && git status --short", True),
+    ("cd /repo\ngrep -n x f", True),
+    ("pushd /repo && ls", True),
+    # --- BLOCK: a variable assignment statement in a compound command ---
+    ("S=/tmp/claude-1/scratch; cp a $S/b", True),
+    ("S=/tmp/claude-1/scratch && cp a $S/b && uv run x", True),
+    ('F=plans/a.md; grep -c x "$F"', True),
+    ('start=$(date +%s); pre-commit run; echo "$(( $(date +%s) - start ))s"', True),
+    ('py="$(uv python find)"; echo "using $py"', True),
+    ("S=/a T=/b; ls $S $T", True),
+    ("S=/a\nls $S", True),
+    # --- ALLOW: a lone cd, which is auto-approved ---
+    ("cd /repo", False),
+    ("cd /repo 2>/dev/null", False),
+    # --- ALLOW: env prefixes, which are not assignment statements ---
+    ("CLAUDE_HOOK_SELFTEST=1 bin/x; echo exit=$?", False),
+    ("UV_NATIVE_TLS=1 FOO=x uv run python -c 'print(1)' | tail -3", False),
+    # --- ALLOW: cd or an assignment only as data ---
+    ("grep -rn 'cd /repo; ls' bin/", False),
+    ('echo "S=/x; cd y"', False),
+    ('echo "a; cd y"', False),
+    ("grep -n 'x (cd y)' f", False),
+    ("git log --format='%h %s' | head; ls", False),
+    ("find . -name x=1 | head", False),
+    ("python3 - <<'EOF'\nx=1\ncd = 2\nprint(f(a=1))\nEOF\necho done", False),
+    ("cat <<EOF > out\ncd /x\nEOF\nls", False),
+    # --- ALLOW: ordinary compounds ---
+    ("grep -n x /a/f | head -40; ls /a/b", False),
+    ("pre-commit-autofix 2>&1 | tail; git status --short", False),
+    ("for f in /a/x /a/y; do head -5 $f; done", False),
+]
+
+
+# End to end through stdin, since the permission mode is decided outside `prompt_triggers`.
+_SELFTEST_MODE_CASES: list[tuple[str, int]] = [
+    ("default", 2),
+    ("acceptEdits", 2),
+    ("plan", 2),
+    ("dontAsk", 2),
+    ("", 2),
+    ("auto", 0),
+    ("bypassPermissions", 0),
+]
+
+
+def _selftest() -> int:
+    failures = 0
+    for command, should_block in _SELFTEST_CASES:
+        blocked = bool(prompt_triggers(command))
+        if blocked != should_block:
+            failures += 1
+            print(f"FAIL want_block={should_block} got_block={blocked} :: {command!r}")
+    for mode, want_exit in _SELFTEST_MODE_CASES:
+        payload = json.dumps({"permission_mode": mode, "tool_input": {"command": "cd /repo && ls"}})
+        got_exit = subprocess.run(
+            [sys.executable, __file__],
+            input=payload,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "CLAUDE_HOOK_SELFTEST": ""},
+        ).returncode
+        if got_exit != want_exit:
+            failures += 1
+            print(f"FAIL want_exit={want_exit} got_exit={got_exit} :: mode={mode!r}")
+    if not failures:
+        total = len(_SELFTEST_CASES) + len(_SELFTEST_MODE_CASES)
+        print(f"claude-avoid-approval-prompts: all {total} self-tests passed")
+    return 1 if failures else 0
+
+
+def main() -> int:
+    if os.environ.get("CLAUDE_HOOK_SELFTEST"):
+        return _selftest()
+    try:
+        data = json.load(sys.stdin)
+        if data.get("permission_mode") in AUTO_APPROVE_MODES:
+            return 0
+        messages = prompt_triggers((data.get("tool_input") or {}).get("command") or "")
+    except Exception:
+        return 0
+    if not messages:
+        return 0
+    sys.stderr.write("\n".join(messages))
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
