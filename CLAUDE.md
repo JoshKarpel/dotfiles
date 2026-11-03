@@ -243,7 +243,8 @@ zellij-custom-keybinds
 # `wt new` opens a branch in <repo>.worktrees/<branch> beside the clone, in a
 # tab of its own, and `wt done` removes the worktree and closes its tab. `wt`
 # alone (Alt+Shift+e in zellij) picks the clone, from ~/projects and ~/work, and
-# the worktree or new branch instead of taking them as arguments. The
+# the worktree, local branch, or new branch instead of taking them as
+# arguments. The
 # claude-tab-status hook marks each tab working (●), waiting on you (?), paused
 # on background work or a scheduled job that will wake it (◌), or finished (✓).
 # Run with --help for subcommands and flags.

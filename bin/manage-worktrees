@@ -314,7 +314,9 @@ def list_tabs(attempts: int = 3) -> list[dict[str, Any]] | None:
 
 @app.callback(invoke_without_command=True)
 def pick(context: typer.Context) -> None:
-    """With no command, pick a clone, then one of its worktrees or a new branch, and open it as `new` does.
+    """With no command, pick a clone, then one of its worktrees, a local branch, or a new branch, and open it as `new` does.
+
+    The local branches listed are those checked out nowhere, most recent first; picking one gives it a worktree.
 
     Typing narrows each list to the names containing the text, ignoring case, with one the text names
     exactly first, and Enter takes the highlighted one. Up, Down, Tab, Shift+Tab, Ctrl+N, Ctrl+P and
@@ -329,7 +331,7 @@ def pick(context: typer.Context) -> None:
 
     sections = tuple(Section(title=f"~/{root.name}", clones=discover_clones(root)) for root in CLONE_ROOTS)
     # Read up front, all of them, so stepping the picker never waits on git; it takes milliseconds.
-    branches = {clone: worktree_branches(clone) for section in sections for clone in section.clones}
+    branches = {clone: read_branches(clone) for section in sections for clone in section.clones}
     opening = asyncio.run(choose_opening(sections, branches, title="worktrees"))
     if opening is None:
         return
@@ -348,26 +350,47 @@ def discover_clones(root: Path) -> tuple[Path, ...]:
     return tuple(sorted(path for path in root.iterdir() if (path / ".git").is_dir()))
 
 
-def parse_worktree_branches(porcelain: str, clone: Path) -> tuple[str, ...]:
-    """The branches of the worktrees `new` made for CLONE, from `git worktree list --porcelain`.
+@dataclass(frozen=True, slots=True)
+class Branches:
+    """The branches of one clone that `new` can open, in the two lists the picker shows."""
+
+    worktrees: tuple[str, ...]
+    without_worktree: tuple[str, ...]
+
+
+def parse_branches(porcelain: str, heads: str, clone: Path) -> Branches:
+    """CLONE's branches, from `git worktree list --porcelain` and its local branch names one per line.
 
     Only a worktree at <repo>.worktrees/<branch> counts, since `new` would put the branch anywhere
-    else and fail. CLONE has to be the path git reports, symlinks resolved, for that to match.
+    else and fail. CLONE has to be the path git reports, symlinks resolved, for that to match. A
+    branch checked out anywhere else, the clone itself included, is in neither list, since git
+    refuses a second worktree on it. HEADS keeps its order, which is most recent first.
     """
     root = worktrees_root(clone)
-    branches = []
+    worktrees = []
+    checked_out = set()
     for record in porcelain.strip().split("\n\n"):
         fields = dict(line.partition(" ")[::2] for line in record.splitlines())
         # A detached worktree has no branch line, and is nothing `new` can open by name.
-        branch = fields.get("branch", "").removeprefix("refs/heads/")
-        if branch and Path(fields["worktree"]) == root / branch:
-            branches.append(branch)
-    return tuple(sorted(branches))
+        if not (branch := fields.get("branch", "").removeprefix("refs/heads/")):
+            continue
+        checked_out.add(branch)
+        if Path(fields["worktree"]) == root / branch:
+            worktrees.append(branch)
+    return Branches(
+        worktrees=tuple(sorted(worktrees)),
+        without_worktree=tuple(head for head in heads.splitlines() if head and head not in checked_out),
+    )
 
 
-def worktree_branches(clone: Path) -> tuple[str, ...]:
-    """The branches of CLONE's worktrees that `new` can reopen."""
-    return parse_worktree_branches(git(clone, "worktree", "list", "--porcelain"), clone.resolve())
+def read_branches(clone: Path) -> Branches:
+    """The branches of CLONE that `new` can open: its worktrees' to reopen, and the local ones checked out nowhere."""
+    return parse_branches(
+        git(clone, "worktree", "list", "--porcelain"),
+        # lstrip rather than :short, which disambiguates a branch sharing a tag's name as heads/<name>.
+        git(clone, "for-each-ref", "--sort=-committerdate", "--format=%(refname:lstrip=2)", "refs/heads/"),
+        clone.resolve(),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,10 +436,13 @@ def clone_rows(sections: tuple[Section, ...], query: str) -> tuple[Row[Path], ..
     return tuple(rows)
 
 
-def branch_rows(branches: tuple[str, ...], query: str) -> tuple[Row[str], ...]:
-    """The worktree branches containing QUERY, then QUERY as a new branch unless it names one of them."""
-    rows: list[Row[str]] = [Option(branch, branch) for branch in substring_matches(query, branches)]
-    if (name := query.strip()) and name not in branches:
+def branch_rows(branches: Branches, query: str) -> tuple[Row[str], ...]:
+    """The branches containing QUERY under the heading of each list that has any, then QUERY as a new branch unless it names one."""
+    rows: list[Row[str]] = []
+    for title, names in (("worktrees", branches.worktrees), ("branches", branches.without_worktree)):
+        if matched := substring_matches(query, names):
+            rows += [Heading(title), *(Option(branch, branch) for branch in matched)]
+    if (name := query.strip()) and name not in branches.worktrees and name not in branches.without_worktree:
         rows.append(Option(f"+ new branch {name}", name))
     return tuple(rows)
 
@@ -504,7 +530,7 @@ def step(
     picking: ChoosingClone | ChoosingBranch,
     event: InputEvent,
     sections: tuple[Section, ...],
-    branches: Mapping[Path, tuple[str, ...]],
+    branches: Mapping[Path, Branches],
 ) -> Picking | None:
     """The picker after a key that picks rather than edits, or `None` for an event the query's field handles.
 
@@ -584,21 +610,21 @@ def query_row(field: TextInput) -> Div:
 
 
 def view(
-    picking: ChoosingClone | ChoosingBranch, sections: tuple[Section, ...], branches: Mapping[Path, tuple[str, ...]]
+    picking: ChoosingClone | ChoosingBranch, sections: tuple[Section, ...], branches: Mapping[Path, Branches]
 ) -> tuple[str, Search, tuple[Row[object], ...]]:
     """The title, search and rows the current step shows."""
     match picking:
         case ChoosingClone(search=search):
             return "a clone", search, clone_rows(sections, search.query)
         case ChoosingBranch(clone=clone, search=search):
-            return f"{clone.name}: a worktree, or type a new branch", search, branch_rows(branches[clone], search.query)
+            return f"{clone.name}: a worktree, a branch, or type a new one", search, branch_rows(branches[clone], search.query)
         case _ as unreachable:
             assert_never(unreachable)
 
 
 @component
 def chooser(
-    sections: tuple[Section, ...], branches: Mapping[Path, tuple[str, ...]], choose: Callable[[Opening], None]
+    sections: tuple[Section, ...], branches: Mapping[Path, Branches], choose: Callable[[Opening], None]
 ) -> Div:
     def start() -> Picking:
         return ChoosingClone(search=EMPTY_SEARCH)
@@ -666,7 +692,7 @@ def chooser(
 
 
 async def choose_opening(
-    sections: tuple[Section, ...], branches: Mapping[Path, tuple[str, ...]], **app_options: object
+    sections: tuple[Section, ...], branches: Mapping[Path, Branches], **app_options: object
 ) -> Opening | None:
     """Run the picker until it quits, and return what it chose, if anything."""
     chosen: list[Opening] = []
@@ -685,7 +711,11 @@ def _selftest() -> int:
         Section(title="~/projects", clones=(projects / "dotfiles", projects / "ray")),
         Section(title="~/work", clones=(work / "service",)),
     )
-    branches = {projects / "dotfiles": ("fix-tabs", "wt"), projects / "ray": (), work / "service": ("Feature",)}
+    branches = {
+        projects / "dotfiles": Branches(worktrees=("fix-tabs", "wt"), without_worktree=("spike",)),
+        projects / "ray": Branches(worktrees=(), without_worktree=()),
+        work / "service": Branches(worktrees=("Feature",), without_worktree=()),
+    }
     porcelain = (
         "worktree /p/dotfiles\nHEAD 1\nbranch refs/heads/master\n\n"
         "worktree /p/dotfiles.worktrees/feat/x\nHEAD 2\nbranch refs/heads/feat/x\n\n"
@@ -727,20 +757,47 @@ def _selftest() -> int:
         ("a missing root has no clones", discover_clones(Path("/nonexistent-wt-root")) == ()),
         (
             "only worktrees at <repo>.worktrees/<branch> are listed, nested branches included",
-            parse_worktree_branches(porcelain, projects / "dotfiles") == ("feat/x",),
+            parse_branches(porcelain, "", projects / "dotfiles").worktrees == ("feat/x",),
+        ),
+        (
+            "branches checked out anywhere are not offered for a worktree, and the rest keep git's order",
+            parse_branches(porcelain, "zeta\nmaster\nfeat/x\ny\nalpha\n", projects / "dotfiles").without_worktree
+            == ("zeta", "alpha"),
         ),
         (
             "a heading appears only over a section with matches",
             clone_rows(sections, "SERV") == (Heading("~/work"), Option("service", work / "service")),
         ),
         ("an empty query lists every section", len(clone_rows(sections, "")) == 5),
-        ("an empty query lists every worktree and no new branch", branch_rows(("wt",), "") == (Option("wt", "wt"),)),
-        ("a blank query offers no new branch", branch_rows((), "  ") == ()),
         (
-            "a query naming no worktree is offered as a new branch, after the matches",
-            branch_rows(("fix-tabs", "wt"), "fix") == (Option("fix-tabs", "fix-tabs"), Option("+ new branch fix", "fix")),
+            "an empty query lists every worktree and branch, each under its heading, and no new branch",
+            branch_rows(Branches(("wt",), ("old",)), "")
+            == (Heading("worktrees"), Option("wt", "wt"), Heading("branches"), Option("old", "old")),
         ),
-        ("a query naming a worktree exactly is not offered as new", branch_rows(("wt",), "wt") == (Option("wt", "wt"),)),
+        ("a blank query offers no new branch", branch_rows(Branches((), ()), "  ") == ()),
+        (
+            "a query naming no branch is offered as a new branch, after the matches",
+            branch_rows(Branches(("fix-tabs", "wt"), ("fixup",)), "fix")
+            == (
+                Heading("worktrees"),
+                Option("fix-tabs", "fix-tabs"),
+                Heading("branches"),
+                Option("fixup", "fixup"),
+                Option("+ new branch fix", "fix"),
+            ),
+        ),
+        (
+            "a query naming a worktree exactly is not offered as new",
+            branch_rows(Branches(("wt",), ()), "wt") == (Heading("worktrees"), Option("wt", "wt")),
+        ),
+        (
+            "a query naming a branch exactly is not offered as new",
+            branch_rows(Branches((), ("old",)), "old") == (Heading("branches"), Option("old", "old")),
+        ),
+        (
+            "Down past the worktrees skips the heading onto a branch",
+            stepped(enter, down, down, enter) == opened(projects / "dotfiles", "spike"),
+        ),
         ("Enter twice opens the first clone's first worktree", stepped(enter, enter) == opened(projects / "dotfiles", "fix-tabs")),
         ("Down skips the heading between sections", stepped(down, down, enter, enter) == opened(work / "service", "Feature")),
         ("Up from the first clone wraps to the last", stepped(KeyPressed(key=Key.Up), enter, enter) == opened(work / "service", "Feature")),
@@ -783,7 +840,7 @@ def _selftest() -> int:
     def picked(
         *steps: object,
         picked_from: tuple[Section, ...] = sections,
-        branches_of: Mapping[Path, tuple[str, ...]] = branches,
+        branches_of: Mapping[Path, Branches] = branches,
     ) -> Opening | None:
         return asyncio.run(
             asyncio.wait_for(
