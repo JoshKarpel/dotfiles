@@ -74,7 +74,8 @@
   plain markdown (GFM alerts and footnotes, mermaid, raw HTML and `<svg>`), and diagrams
   belong in the plan itself so it stays one self-contained file. Sessions don't remember
   artifacts, so the file carries the link: an `Artifact: <url>` line directly under the `# Title`. If the line is there, update that
-  artifact (`url`) rather than publishing a new one; if not, publish, then add the line.
+  artifact (`url`) rather than publishing a new one; if not, publish, add the line, and
+  republish, since the page takes its title link to itself from that line.
   In a repo, the `claude-stop-plan-artifact` stop check asks for the republish once a
   turn's edits have settled, but only the first time per plan in a session: after that,
   republish at the end of any turn that changed the plan, not after every edit. Plan mode's

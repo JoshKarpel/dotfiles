@@ -33,7 +33,8 @@ What a plan can use:
   `var(--muted)`, `var(--accent)`, `var(--rule)`, `var(--surface)`.
 
 An `Artifact: <url>` line directly under the title is bookkeeping for whoever republishes, so it is
-left out of the page.
+left out of the page as text. Its URL becomes the title's own `#` link and the outline's first entry,
+which link to the page with no section in it; a plan without the line has neither.
 
 The output must be an `.html` path, and an existing file there is overwritten only if it is a page
 this script wrote. That keeps a mistyped output path from clobbering an unrelated file, which is
@@ -57,7 +58,7 @@ from mdit_py_plugins.anchors import anchors_plugin
 from mdit_py_plugins.gfm import gfm_plugin
 from without_html import a, article, details, div, header, li, link, meta, nav, ol, p, render, span, style, summary, title
 
-ARTIFACT_LINE = re.compile(r"^Artifact:\s*\S+\s*$")
+ARTIFACT_LINE = re.compile(r"^Artifact:\s*(\S+)\s*$")
 
 # Marks a page as this script's, so a rerun may overwrite it and nothing else.
 GENERATOR = '<meta name="generator" content="plan-artifact">'
@@ -175,6 +176,8 @@ body {
 .outline .sub a { padding-left: 1.4rem; font-size: 0.85rem; }
 .outline code { font: 0.9em var(--mono); overflow-wrap: anywhere; }
 .plan { min-width: 0; }
+.masthead .header-anchor { margin-left: 0.5rem; color: var(--muted); font-weight: 400; text-decoration: none; opacity: 0.4; }
+.masthead h1:hover .header-anchor, .masthead .header-anchor:focus-visible { opacity: 1; }
 .plan > :first-child { margin-top: 0; }
 .plan :is(h2, h3, h4, h5, h6) { scroll-margin-top: 1.5rem; }
 .plan h2, .plan h3 { font-family: var(--display); text-wrap: balance; }
@@ -240,10 +243,15 @@ class Heading:
 
 @dataclass(frozen=True, slots=True)
 class Plan:
-    """What the page is built from: the title, the outline, the rendered body, and its task counts."""
+    """
+    What the page is built from: the title, the outline, the rendered body, and its task counts.
+
+    `url` is the published Artifact's, from the plan's `Artifact:` line; `None` before the first publish.
+    """
 
     title: str
     title_html: Markup
+    url: str | None
     headings: tuple[Heading, ...]
     body: Markup
     tasks_done: int
@@ -313,9 +321,12 @@ def parse_plan(source: str) -> Plan:
     A plan from its markdown.
 
     The first `#` heading is the page's title and is lifted out of the body into the masthead; the
-    `Artifact:` line is dropped wherever it sits. A plan with no `#` heading is titled "Plan".
+    `Artifact:` line is dropped wherever it sits, keeping the first one's URL. A plan with no `#`
+    heading is titled "Plan".
     """
-    lines = [line for line in source.splitlines() if not ARTIFACT_LINE.match(line)]
+    all_lines = source.splitlines()
+    url = next((match[1] for line in all_lines if (match := ARTIFACT_LINE.match(line))), None)
+    lines = [line for line in all_lines if not ARTIFACT_LINE.match(line)]
     md = markdown()
     tokens = md.parse("\n".join(lines))
     plan_title, plan_title_html = "Plan", Markup("Plan")
@@ -338,6 +349,7 @@ def parse_plan(source: str) -> Plan:
     return Plan(
         title=plan_title,
         title_html=plan_title_html,
+        url=url,
         headings=tuple(headings),
         body=Markup(body),
         tasks_done=done,
@@ -358,6 +370,12 @@ def page(plan: Plan, source_label: str) -> str:
                 span(cls="bar", attrs={"aria-hidden": "true"}, children=span(attrs={"style": f"width: {percent}%"})),
             ],
         )
+    # The page runs in a sandboxed frame, so a link to the bare URL has to replace the whole viewer
+    # (`_top`): loaded inside the frame, the claude.ai page would refuse to render.
+    top = li(children=a(attrs={"href": plan.url, "target": "_top"}, children=plan.title_html)) if plan.url else None
+    title_link = (
+        f'<a class="header-anchor" href="{escape(plan.url)}" target="_top" aria-label="Link to this plan">#</a>' if plan.url else ""
+    )
     outline = details(
         cls="outline",
         attrs={"open": True},
@@ -367,8 +385,11 @@ def page(plan: Plan, source_label: str) -> str:
                 attrs={"aria-label": "Contents"},
                 children=ol(
                     children=[
-                        li(cls="sub" if heading.level == 3 else None, children=a(attrs={"href": f"#{heading.anchor}"}, children=heading.label))
-                        for heading in plan.headings
+                        top,
+                        *(
+                            li(cls="sub" if heading.level == 3 else None, children=a(attrs={"href": f"#{heading.anchor}"}, children=heading.label))
+                            for heading in plan.headings
+                        ),
                     ]
                 ),
             ),
@@ -386,7 +407,7 @@ def page(plan: Plan, source_label: str) -> str:
                 children=[
                     header(
                         cls="masthead",
-                        children=[p(cls="eyebrow", children=f"Plan · {source_label}"), Markup(f"<h1>{plan.title_html}</h1>"), progress],
+                        children=[p(cls="eyebrow", children=f"Plan · {source_label}"), Markup(f"<h1>{plan.title_html}{title_link}</h1>"), progress],
                     ),
                     outline if plan.headings else div(),
                     article(cls="plan", children=plan.body),
@@ -456,9 +477,21 @@ x = "<b>"
         ("outline labels carry no permalink", "header-anchor" in html.partition("<nav")[2].partition("</nav>")[0], False),
         ("code in a heading is code in the outline", '<code>Query</code> and links</a>' in html, True),
         ("a heading's backticks never reach the page", "`" in html.partition("<article")[0], False),
-        ("code in the title is code in the masthead", "<h1>Ship the <code>thing</code></h1>" in html, True),
+        ("code in the title is code in the masthead", "<h1>Ship the <code>thing</code><a " in html, True),
         ("tasks counted, either x case", (plan.tasks_done, plan.tasks_total), (2, 3)),
-        ("the Artifact line is dropped", "claude.ai/code/artifact" in html, False),
+        ("the Artifact line is dropped as text", "Artifact:" in html, False),
+        (
+            "the title links to the bare artifact url",
+            '<h1>Ship the <code>thing</code><a class="header-anchor" href="https://claude.ai/code/artifact/abc" target="_top"' in html,
+            True,
+        ),
+        (
+            "the outline leads with the bare artifact url",
+            html.partition("<ol>")[2].startswith('<li><a href="https://claude.ai/code/artifact/abc" target="_top">Ship the <code>thing</code></a></li>'),
+            True,
+        ),
+        ("a plan not yet published has no title link", "<h1>T</h1>" in page(parse_plan("# T\n\n## S\n"), "t.md"), True),
+        ("a plan not yet published has no outline entry for it", "_top" in page(parse_plan("# T\n\n## S\n"), "t.md"), False),
         ("the title is not repeated in the body", plan.body.count("Ship the"), 0),
         ("mermaid becomes a pre the viewer draws", '<pre class="mermaid">graph TD; A--&gt;B\n</pre>' in plan.body, True),
         ("other code stays code, escaped", "&lt;b&gt;" in plan.body, True),
