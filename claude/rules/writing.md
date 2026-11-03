@@ -46,6 +46,10 @@ READMEs, PR and issue bodies, review comments, and commit messages.
   others can convert to money.
 - **Link every external reference.** A tool, library, issue, PR, commit, doc
   page, or spec gets a link where it's mentioned, so the reader needn't search.
+  A GitHub link into a repository's contents (a file, a line, a directory) pins
+  a commit SHA, never a floating ref like `main` or `master`: the branch moves,
+  so a line anchor drifts onto other code and a renamed file 404s.
+  `git ls-remote <repo-url> refs/heads/main` resolves the branch to its SHA.
 - **Credit prior work on the link.** Where an idea, algorithm, or approach came
   from somewhere else, name the source inline where you use it.
 - **Assertive prose raises the cost of being wrong.** Writing that states

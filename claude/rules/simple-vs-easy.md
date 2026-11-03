@@ -28,4 +28,4 @@ trap is a framework that inverts your control flow to present a uniform surface:
 a library that hands back plain values and leaves the control flow with you is
 the less symmetric and the simpler one. Simple means unentangled, not matching.
 
-Reference: [Simple Made Easy](https://github.com/matthiasn/talk-transcripts/blob/master/Hickey_Rich/SimpleMadeEasy.md) by Rich Hickey
+Reference: [Simple Made Easy](https://github.com/matthiasn/talk-transcripts/blob/773d2992d72d5b7e8c5d06264c498b7a3c8f604e/Hickey_Rich/SimpleMadeEasy.md) by Rich Hickey
