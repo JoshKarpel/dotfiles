@@ -49,6 +49,14 @@ When the change itself is worth communicating, it belongs in a changelog, a
 release announcement, or a prominent callout, not scattered through the prose
 as parentheticals and corrections.
 
+## Settle Decisions in the Text
+
+A comment thread or PR review that settles a question hasn't recorded it: the
+thread vanishes once resolved. Write the decision and its rationale into the
+document or code it was about, then resolve the thread. Once a question is
+decided, rewrite the exploratory language around it ("we could investigate",
+"one option is") into a statement of what was chosen.
+
 ## Volatile Metrics
 
 Don't bake volatile metrics into durable docs: an exact test count, file count,

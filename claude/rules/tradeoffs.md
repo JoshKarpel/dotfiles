@@ -15,7 +15,9 @@ the contextual inputs first, such as:
   that worked elsewhere as evidence, not an answer.
 - **The goals, ranked against each other.** Rank them, don't list them. Each
   end satisfies some of an unranked list, so only a ranking lets one end win.
-  Ask for the ranking when it's left implicit.
+  Ask for the ranking when it's left implicit, and in a design doc state it
+  outright: "without compromising cost, stability, or latency (prioritized in
+  that order)".
 
 Then pick an end and say what the design is now bad at. If you can't name what
 the choice costs, you haven't made it. Record the ranking with the decision so

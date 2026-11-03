@@ -36,6 +36,16 @@ READMEs, PR and issue bodies, review comments, and commit messages.
   numbers immediately after the abstract claim, then add one sentence directing
   attention at what to notice in it. An example the reader has to interpret
   unaided is doing half its job.
+- **Show the arithmetic, and grade it.** Put an estimate's derivation inline
+  and say what kind of number it is: an upper bound, a crude figure on list
+  prices, a saving that doesn't stack with the one above. Reach it from two
+  independent directions where you can. Prefer unit costs (per request, per
+  node-month) to a flat total that growth will invalidate, and multiply small
+  per-unit costs out (a tenth of a second across two thousand tests is over
+  three minutes). Give engineering effort in engineer-time per period, which
+  others can convert to money.
+- **Link every external reference.** A tool, library, issue, PR, commit, doc
+  page, or spec gets a link where it's mentioned, so the reader needn't search.
 - **Credit prior work on the link.** Where an idea, algorithm, or approach came
   from somewhere else, name the source inline where you use it.
 - **Assertive prose raises the cost of being wrong.** Writing that states
@@ -58,6 +68,22 @@ READMEs, PR and issue bodies, review comments, and commit messages.
   the first page as if it were the whole. Check the page or post count, or
   `--paginate`, before telling anyone a topic isn't discussed.
 
+## Every Paragraph Argues
+
+- **Cut framing that carries no claim.** "What is proposed, in one paragraph."
+  "This is the chapter that ties it together." Signposting like this reads as
+  machine-written and makes the document harder to read straight through. If a
+  reader can't say what a paragraph argues, delete it or give it a claim.
+- **Tie each motivation to the decision it justifies.** A reason that holds
+  equally for the rejected option isn't a reason for this one. If the link is
+  indirect, write it down.
+- **Make the document self-contained.** The readers it must convince weren't
+  in the meetings, so carry the meetings' conclusions into the text. Citing
+  your own other document as authority is circular; argue the point on its
+  merits.
+- **Label unreviewed analysis as unreviewed,** in the main text: generated
+  reports or unchecked numbers go out as a starting point for discussion.
+
 ## Diction
 
 - **Name the concrete thing.** Where a precise term exists, an evocative one is
@@ -77,6 +103,9 @@ READMEs, PR and issue bodies, review comments, and commit messages.
 - **Open with what the document covers, and what it doesn't.** An explicit
   scope line up front costs one sentence and saves the reader deciding whether
   the answer they want is further down.
+- **Declare your stake in a perspective piece.** Open an opinion document with
+  who is speaking, their vested interest, and what they don't know, so the
+  reader can discount accordingly.
 - **A review comment or issue leads with the finding.** State the plan or the
   root cause bare, in the first line, and close with the explicit ask. The
   reasoning goes between them, not in front.

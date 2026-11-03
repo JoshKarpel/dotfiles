@@ -191,6 +191,7 @@
       "Bash(zellij web --list-tokens*)",
       "Bash(brew list *)",
       "Bash(cp *)",
+      "Bash(count-claude-tokens *)",
       "Bash(sort *)",
       "Bash(uniq *)",
       "Bash(pre-commit run*)",

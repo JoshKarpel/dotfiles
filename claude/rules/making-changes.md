@@ -39,6 +39,11 @@ Bias toward waiting. A wrong abstraction costs more than the duplication it
 replaced, because every later change has to fight it, and backing it out is
 harder than never having added it.
 
+The same holds for a limit you can foresee but haven't hit. List the options
+now, ordered by complexity, and keep them all open, but don't act until the
+limit shows which constraint actually bites, since that decides the fix. An
+option that buys only a small constant factor is rarely worth its complexity.
+
 When a decision is forced before the evidence arrives, defer it with a knob:
 expose the value you're unsure of as one setting with a sensible default and
 settle it later. This works while it stays a value. One setting has a single
@@ -71,6 +76,22 @@ stays broken across many steps can't tell you which step broke it.
 
 Don't introduce new abstraction during a refactor. That's how a cleanup becomes
 a rewrite.
+
+## Slice Thin, End to End
+
+- **Prove it in one place first.** Get a thin vertical slice working end to end
+  for one consumer, then replicate it, rather than landing each layer across
+  everything at once.
+- **Phase 1 only builds what phase 2 keeps.** Spend nothing on polish that a
+  stepping-stone phase will throw away.
+- **Don't fix what's scheduled for deletion.** Check the roadmap before
+  investing in code about to be replaced.
+- **Fix the small problems that make the big ones hard.** Low-level debt is the
+  interest on everything else; paying some down is part of the large change,
+  not a distraction from it.
+- **Make small changes cheap.** When merging one change takes babysitting
+  (conflicts that dismiss approvals, versions bumped by hand), authors batch
+  unrelated changes. The cost of a small change sets PR size.
 
 ## Chesterton's Fence
 

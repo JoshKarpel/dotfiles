@@ -14,6 +14,24 @@
   something is _required_: the consumer that demands the value raises in its own
   terms when it's absent, instead of every consumer rejecting anything extra.
 
+## Choose the Failure Direction
+
+Some failure is unavoidable, so make the likely one harmless.
+
+- **Order steps so an interruption leaves the benign state.** Don't tell a
+  client its work is queued before it durably is, or a crash in between loses
+  work the client thinks is safe. Acknowledge a message only after its effect
+  has succeeded or exhausted its retries.
+- **Don't promise durability the store lacks.** If the store can lose data,
+  pick semantics where the loss errs harmlessly: a rate limit on a wipeable
+  cache can reset early, but can't honestly offer a lifetime cap.
+- **Silent and costly is the worst failure.** A loud error gets fixed; a
+  silent miscount that bills customers wrongly, or a fail-open that ignores a
+  control a customer configured, does damage until someone audits it. Design those out first, even at the price of more loud failures.
+- **State the delivery semantics and who owns each failure.** At-least-once
+  delivery makes idempotency the client's job; say so, and say which team
+  investigates which class of failure.
+
 ## Don't Handle What Can't Occur
 
 - **Don't add error handling, fallbacks, or validation for paths that can't

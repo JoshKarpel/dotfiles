@@ -24,6 +24,17 @@
 - **Property-based testing when the input space is large.** Generating many
   cases finds edge cases that example-based tests miss. Prefer it when
   invariants are clearer than specific examples.
+- **Pin join points with a round-trip test.** Where two independently
+  maintained libraries must agree on a format, a test sending real bytes
+  through both catches drift neither library's suite can see.
+- **Assert only what the system determines.** For nondeterministic output (a
+  model's text, a timing), assert the deterministic part: the status class,
+  the schema, the invariant. An exact-output assertion there is flaky by
+  construction.
+- **Keep the feedback loop fast and local.** Every CI check should run the
+  same way on a laptop, and the suite should be quick enough to run on every
+  change, more so when an agent is iterating and runs it far more often than
+  a person would.
 - **Test at the boundary the parser establishes.** Concentrate edge-case tests
   at the point where external input is parsed into internal types. Once data is
   internal, trust the types: don't re-test the parser in every downstream unit.

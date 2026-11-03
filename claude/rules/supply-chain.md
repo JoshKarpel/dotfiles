@@ -19,6 +19,14 @@ dependency there:
   otherwise reimplement (a coverage plugin, a test fixture library) is one
   dependency to vet once, against N private copies that drift apart.
 
+The case is strongest for problems that are someone else's whole product:
+durable workflow execution, saga compensation, a policy engine, a query or
+templating language. Your few lines grow into a system you own forever, where
+a battle-tested implementation of the hard part is cheaper. Adopt these
+deliberately, ideally one new foundational technology per project. Watch for
+configuration that keeps gaining conditionals and loops: it is becoming a
+programming language, and a home-grown one is the most expensive kind.
+
 ## Pin and Lock
 
 Commit a lockfile so resolution is reproducible and auditable: everyone, CI

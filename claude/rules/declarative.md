@@ -31,3 +31,11 @@ reconciliation loop).
   kept in parallel with the code it describes is denormalized state that drifts;
   derive it from the structure so it can't. This is the declarative move applied
   to a system describing itself: state the shape once, compute the rest.
+  One source needn't mean one representation: a pattern encoded once
+  (templated config values, say) can generate names, URLs, and counts across
+  several artifacts, none of them a copy.
+- **An imperative upstream wants a workflow, not a reconciler.** When upstream
+  sends commands (create this, copy that, delete it) rather than a desired
+  state, run each as a durable workflow: it retries and resumes from any
+  interruption, with less impedance mismatch than translating commands into
+  desired state for a reconciler.
