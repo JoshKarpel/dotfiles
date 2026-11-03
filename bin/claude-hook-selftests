@@ -3,6 +3,18 @@
 # carries a `# CLAUDE_HOOK_SELFTEST` marker line; this discovers the set from those
 # declarations so there is no separate list to drift. Runnable directly and wired
 # into pre-commit. Exits non-zero if any hook's self-tests fail.
+#
+# With no arguments every participating hook runs. Given paths (pre-commit passes the
+# changed files under bin/), only the hooks they affect run: a changed hook itself,
+# and any hook whose source names a changed script, directly or through a chain of
+# scripts naming each other, since a self-test that calls a sibling by name exercises
+# it too. Naming is matched textually outside comment lines, so a mention in a string
+# or docstring still selects a hook; running one extra is cheap, missing one is not.
+# A change to this runner runs everything.
+#
+# The selected hooks run in parallel, each building its own sandbox, and their output
+# is printed in name order once all have finished. Keep it bash 3.2 (macOS /bin/bash):
+# no associative arrays, no `wait -n`, no `mapfile`.
 
 set -uo pipefail
 
@@ -15,21 +27,82 @@ bin_dir="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 # branch. Nothing a self-test does should see the commit in progress.
 unset $(git rev-parse --local-env-vars)
 
-fails=0
-found=0
+participating=()
 for hook in "$bin_dir"/*; do
   [[ -f "$hook" && -x "$hook" ]] || continue
   grep -qE '^# CLAUDE_HOOK_SELFTEST' "$hook" || continue
-  found=$((found + 1))
-  CLAUDE_HOOK_SELFTEST=1 "$hook" || fails=$((fails + 1))
+  participating+=("$hook")
 done
 
-if [[ "$found" -eq 0 ]]; then
+if [[ "${#participating[@]}" -eq 0 ]]; then
   echo "claude-hook-selftests: no hooks declare self-tests" >&2
   exit 1
 fi
+
+runs_everything=$([[ "$#" -eq 0 ]] && echo yes)
+for path in "$@"; do
+  [[ "$(basename "$path")" == "$(basename "${BASH_SOURCE[0]}")" ]] && runs_everything=yes
+done
+
+selected=()
+if [[ -n "$runs_everything" ]]; then
+  selected=("${participating[@]}")
+else
+  # Affected scripts, one name per line, closed over mentions: a hook calling a script
+  # that calls a changed one is affected too, so keep adding every script in bin/ that
+  # names an affected one until a pass adds nothing. The chain can run through scripts
+  # with no self-tests of their own, so the closure is over all of bin/, not just the
+  # participating hooks.
+  affected=$(for path in "$@"; do basename "$path"; done | sort -u)
+  while true; do
+    # One alternation of the affected names, each bounded by characters a script name
+    # can't contain, so `claude-stop` doesn't match inside `claude-stop-finish`. Names
+    # here are [A-Za-z0-9._-], so `.` is the only character to escape.
+    names=$(sed 's/\./\\./g' <<<"$affected" | paste -sd '|' -)
+    mentions="(^|[^A-Za-z0-9_-])($names)(\$|[^A-Za-z0-9_-])"
+    # Comment lines don't count: every hook's marker comment names this runner and
+    # prose names neighbours freely, so counting them selects nearly everything. The
+    # runner itself is never a link, for the same reason. The pattern goes through
+    # ENVIRON because `awk -v` would eat the backslash escaping a `.`.
+    grown=$({
+        printf '%s\n' "$affected"
+        for file in "$bin_dir"/*; do
+          [[ -f "$file" && "$file" != "$(realpath "${BASH_SOURCE[0]}")" ]] || continue
+          MENTIONS="$mentions" awk '!/^[[:space:]]*#/ && $0 ~ ENVIRON["MENTIONS"] { found = 1; exit } END { exit !found }' "$file" &&
+          basename "$file"
+        done
+    } | sort -u)
+    [[ "$grown" == "$affected" ]] && break
+    affected="$grown"
+  done
+  for hook in "${participating[@]}"; do
+    grep -qxF "$(basename "$hook")" <<<"$affected" && selected+=("$hook")
+  done
+  if [[ "${#selected[@]}" -eq 0 ]]; then
+    echo "claude-hook-selftests: no self-tests affected by these changes"
+    exit 0
+  fi
+fi
+
+outdir=$(mktemp -d)
+trap 'rm -rf "$outdir"' EXIT
+
+pids=()
+for hook in "${selected[@]}"; do
+  CLAUDE_HOOK_SELFTEST=1 "$hook" >"$outdir/$(basename "$hook")" 2>&1 &
+  pids+=("$!")
+done
+
+fails=0
+for i in "${!selected[@]}"; do
+  wait "${pids[$i]}"
+  status=$?
+  cat "$outdir/$(basename "${selected[$i]}")"
+  [[ "$status" -eq 0 ]] || fails=$((fails + 1))
+done
+
 if [[ "$fails" -gt 0 ]]; then
-  echo "claude-hook-selftests: $fails of $found hook(s) failed self-tests" >&2
+  echo "claude-hook-selftests: $fails of ${#selected[@]} hook(s) failed self-tests" >&2
   exit 1
 fi
-echo "claude-hook-selftests: $found hook(s) passed"
+echo "claude-hook-selftests: ${#selected[@]} hook(s) passed"

@@ -86,6 +86,7 @@
       "Bash(rg *)",
       "Bash(tree *)",
       "Bash(ast-grep *)",
+      "Bash(plan-artifact *)",
       "Bash(strings *)",
       "Bash(md5 *)",
       "Bash(md5sum *)",

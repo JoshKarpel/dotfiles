@@ -12,22 +12,37 @@ Render a plan's markdown into the HTML page published as its Artifact.
 
 The `.md` is the plan; the page is derived from it every time, never edited by hand, so there is no
 second copy to drift and no page source to keep between sessions. Anything visual belongs in the
-markdown itself, which keeps a plan self-contained:
+markdown itself, which keeps a plan self-contained.
 
-- a ```` ```mermaid ```` fence becomes `<pre class="mermaid">`, which Artifacts draw natively;
-- a raw `<svg>` written into the markdown passes through as-is. Keep blank lines out of it (markdown
-  ends an HTML block at the first one), and color it from the page's tokens so it follows the theme:
-  `currentColor`, `var(--ink)`, `var(--muted)`, `var(--accent)`, `var(--rule)`, `var(--surface)`.
+What a plan can use:
 
-The `Artifact: <url>` line under the title is bookkeeping for whoever republishes, so it is left out
-of the page. Usage: `plan-artifact plans/thing.md <out.html>`.
+- GitHub-flavored markdown, so the plan reads the same on GitHub: tables, strikethrough, bare-URL
+  autolinks, footnotes (`[^1]`), and alerts (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`,
+  `[!CAUTION]`).
+- The first `#` heading is the page's title; `##` and `###` headings make the outline beside it.
+- Task items (`- [ ]`, `- [x]`) are counted into a progress bar under the title.
+- A table with five or more columns widens the page, so a catalogue or matrix isn't squeezed.
+- A ```` ```mermaid ```` fence is drawn as a diagram.
+- Raw HTML passes through: `<details>`/`<summary>` to fold away detail, `<kbd>`, `<sup>`/`<sub>`,
+  inline `<svg>`. An HTML block ends at the first blank line, so keep blank lines out of an `<svg>`;
+  to write markdown inside `<details>`, leave a blank line after `</summary>` and before
+  `</details>`.
+- Color an `<svg>` from the page's tokens so it follows the theme: `currentColor`, `var(--ink)`,
+  `var(--muted)`, `var(--accent)`, `var(--rule)`, `var(--surface)`.
+
+An `Artifact: <url>` line directly under the title is bookkeeping for whoever republishes, so it is
+left out of the page.
+
+The output must be an `.html` path, and an existing file there is overwritten only if it is a page
+this script wrote. That keeps a mistyped output path from clobbering an unrelated file, which is
+what makes it safe to run without a permission prompt.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,10 +50,13 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from markupsafe import Markup, escape
 from mdit_py_plugins.anchors import anchors_plugin
-from mdit_py_plugins.tasklists import tasklists_plugin
+from mdit_py_plugins.gfm import gfm_plugin
 from without_html import a, article, details, div, header, li, link, meta, nav, ol, p, render, span, style, summary, title
 
 ARTIFACT_LINE = re.compile(r"^Artifact:\s*\S+\s*$")
+
+# Marks a page as this script's, so a rerun may overwrite it and nothing else.
+GENERATOR = '<meta name="generator" content="plan-artifact">'
 
 # Drafting-table plan page: an outline rail beside one measured column of prose; collapses to a
 # disclosure above the article at phone width.
@@ -52,6 +70,9 @@ STYLESHEET = """
   --accent: #1d5b79;
   --accent-wash: #e3eef4;
   --done: #2f6b46;
+  --important: #6a4bb0;
+  --warn: #8a5a00;
+  --danger: #b23a3a;
   --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
   --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
@@ -67,6 +88,9 @@ STYLESHEET = """
     --accent: #7bbedd;
     --accent-wash: #1b3140;
     --done: #8fcfa4;
+    --important: #b9a3ec;
+    --warn: #e2b55c;
+    --danger: #f08c8c;
   }
 }
 :root[data-theme="dark"] {
@@ -79,6 +103,9 @@ STYLESHEET = """
   --accent: #7bbedd;
   --accent-wash: #1b3140;
   --done: #8fcfa4;
+  --important: #b9a3ec;
+  --warn: #e2b55c;
+  --danger: #f08c8c;
 }
 body {
   background: var(--paper);
@@ -165,6 +192,21 @@ body {
 .plan .contains-task-list { list-style: none; padding-left: 1.7rem; }
 .plan .task-list-item-checkbox { accent-color: var(--done); margin: 0 0.5rem 0 -1.7rem; width: 1.2rem; vertical-align: -0.1em; }
 .plan hr { border: none; border-top: 1px solid var(--rule); margin: 2rem 0; }
+.plan .markdown-alert { --tone: var(--accent); margin: 1rem 0; padding: 0.2rem 1rem; border-left: 3px solid var(--tone); background: var(--surface); border-radius: 0 6px 6px 0; max-width: 68ch; }
+.plan .markdown-alert-tip { --tone: var(--done); }
+.plan .markdown-alert-important { --tone: var(--important); }
+.plan .markdown-alert-warning { --tone: var(--warn); }
+.plan .markdown-alert-caution { --tone: var(--danger); }
+.plan .markdown-alert-title { font: 600 0.8rem/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--tone); margin-block: 0.7rem 0.4rem; }
+.plan details { margin: 1rem 0; padding: 0.4rem 1rem; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+.plan details[open] { padding-bottom: 0.8rem; }
+.plan summary { cursor: pointer; font-weight: 600; padding-block: 0.2rem; }
+.plan summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.plan kbd { font: 0.82em var(--mono); padding: 0.1em 0.4em; border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 4px; background: var(--surface); }
+.plan .footnote-ref a { text-decoration: none; font-size: 0.8em; }
+.plan .footnotes-sep { display: none; }
+.plan .footnotes { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); font-size: 0.88rem; color: var(--muted); }
+.plan .footnote-backref { text-decoration: none; }
 a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 52rem) {
   .page, .page.wide { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; padding-block: 1.5rem 3rem; }
@@ -220,13 +262,8 @@ def widest_table(tokens: list[Token]) -> int:
 
 
 def markdown() -> MarkdownIt:
-    """CommonMark plus tables, strikethrough, heading anchors, task lists, and mermaid fences."""
-    md = (
-        MarkdownIt("commonmark", {"html": True})
-        .enable(["table", "strikethrough"])
-        .use(anchors_plugin, min_level=2, max_level=3, permalink=False)
-        .use(tasklists_plugin)
-    )
+    """GitHub-flavored markdown with raw HTML, plus heading anchors and mermaid fences."""
+    md = MarkdownIt("commonmark", {"html": True}).use(gfm_plugin).use(anchors_plugin, min_level=2, max_level=3, permalink=False)
     default_fence = md.renderer.rules["fence"]
 
     # Bound as a method of the renderer, hence `renderer` first.
@@ -279,13 +316,9 @@ def parse_plan(source: str) -> Plan:
     body = md.renderer.render(tokens, md.options, {})
     # A wide table scrolls inside its own box rather than the page.
     body = body.replace("<table>", '<div class="table-wrap"><table>').replace("</table>", "</table></div>")
-    # The task-list plugin turns each `[ ]`/`[x]` into a checkbox as the first child of its line.
-    boxes = [
-        token.children[0].content
-        for token in tokens
-        if token.type == "inline" and token.children and "task-list-item-checkbox" in token.children[0].content
-    ]
-    done, total = sum('checked="checked"' in box for box in boxes), len(boxes)
+    # A task item is a list item whose meta carries `checked`; ordinary list items carry no such key.
+    tasks = [token.meta["checked"] for token in tokens if token.type == "list_item_open" and "checked" in token.meta]
+    done, total = sum(tasks), len(tasks)
     return Plan(
         title=plan_title,
         title_html=plan_title_html,
@@ -329,6 +362,7 @@ def page(plan: Plan, source_label: str) -> str:
         [
             title(children=plan.title),
             meta(attrs={"name": "claude:viewport-fit-sides", "content": "cover"}),
+            meta(attrs={"name": "generator", "content": "plan-artifact"}),
             link(attrs={"rel": "stylesheet", "href": FONTS}),
             style(children=Markup(STYLESHEET)),
             div(
@@ -344,6 +378,20 @@ def page(plan: Plan, source_label: str) -> str:
             ),
         ]
     )
+
+
+def overwrite_refusal(out: Path, existing: str | None) -> str | None:
+    """
+    Why writing a page to `out` is refused, or `None` when it may go ahead.
+
+    `existing` is the text already at `out`, `None` when nothing is there. Only an `.html` path is
+    written, and an existing file only when it carries the `GENERATOR` mark.
+    """
+    if out.suffix != ".html":
+        return f"{out} is not an .html path"
+    if existing is not None and GENERATOR not in existing:
+        return f"{out} exists and is not a page plan-artifact wrote, so it is not overwritten"
+    return None
 
 
 def selftest() -> int:
@@ -395,6 +443,32 @@ x = "<b>"
         ("a plan without wide tables keeps the narrow page", plan.wide, False),
         ("a five-column table widens the page", parse_plan("| a | b | c | d | e |\n|-|-|-|-|-|\n| 1 | 2 | 3 | 4 | 5 |\n").wide, True),
         ("a four-column table does not", parse_plan("| a | b | c | d |\n|-|-|-|-|\n| 1 | 2 | 3 | 4 |\n").wide, False),
+        ("a list without boxes counts no tasks", parse_plan("- one\n- two\n").tasks_total, 0),
+        ("a bare url becomes a link", '<a href="https://example.com/x">' in parse_plan("see https://example.com/x\n").body, True),
+        (
+            "an alert gets its tone class and title",
+            '<div class="markdown-alert markdown-alert-warning">\n<p class="markdown-alert-title">Warning</p>' in parse_plan("> [!WARNING]\n> careful\n").body,
+            True,
+        ),
+        (
+            "a footnote links to its note, which renders at the end",
+            ('href="#fn1"' in (footnoted := parse_plan("claim[^1]\n\n[^1]: the source\n").body), '<li id="fn1"' in footnoted, "the source" in footnoted),
+            (True, True, True),
+        ),
+        (
+            "markdown inside details renders",
+            "<strong>folded</strong>" in parse_plan("<details><summary>more</summary>\n\n**folded**\n\n</details>\n").body,
+            True,
+        ),
+        ("the page carries the generator mark", GENERATOR in html, True),
+        ("a new .html path is written", overwrite_refusal(Path("/tmp/new.html"), None), None),
+        ("a page this script wrote is overwritten", overwrite_refusal(Path("/tmp/old.html"), html), None),
+        ("a path that isn't .html is refused", overwrite_refusal(Path("/home/me/.zshrc"), None) is not None, True),
+        (
+            "an existing .html file from elsewhere is refused",
+            overwrite_refusal(Path("/tmp/index.html"), "<title>Someone else's page</title>") is not None,
+            True,
+        ),
     ]
     fails = 0
     for description, got, want in checks:
@@ -406,17 +480,24 @@ x = "<b>"
     return fails
 
 
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker line is how
+# `claude-hook-selftests` discovers participating scripts, so it has to start at column 0; run
+# these with `CLAUDE_HOOK_SELFTEST=1 plan-artifact`.
 def main() -> int:
     """Read the plan, write the page, print where it went."""
-    # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker line is how
-    # `claude-hook-selftests` discovers participating scripts; run these with
-    # `CLAUDE_HOOK_SELFTEST=1 plan-artifact`.
     if os.environ.get("CLAUDE_HOOK_SELFTEST"):
         return selftest()
-    if len(sys.argv) != 3:
-        print("usage: plan-artifact <plan.md> <out.html>", file=sys.stderr)
-        return 2
-    source, out = Path(sys.argv[1]), Path(sys.argv[2])
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("plan", type=Path, help="the plan's markdown file")
+    parser.add_argument("out", type=Path, help="where to write the page's HTML")
+    args = parser.parse_args()
+    source, out = args.plan, args.out
+    try:
+        existing: str | None = out.read_text(errors="replace")
+    except FileNotFoundError:
+        existing = None
+    if reason := overwrite_refusal(out, existing):
+        parser.error(reason)
     out.write_text(page(parse_plan(source.read_text()), source.name))
     print(out)
     return 0

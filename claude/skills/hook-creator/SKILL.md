@@ -210,10 +210,11 @@ Keep the harness **embedded in the hook**, not factored into a shared script: a
 hook should stay self-contained and copy-pasteable, and a small duplicated harness
 is a better trade than a hidden dependency.
 
-Declare participation with a `# CLAUDE_HOOK_SELFTEST` marker comment line. A runner
-(`claude-hook-selftests` in this repo) discovers every hook carrying that marker,
-runs each with the env var set, and fails if any do; wiring it into pre-commit
-(`files: ^bin/`, `pass_filenames: false`) turns a hook regression into a failed
+Declare participation with a `# CLAUDE_HOOK_SELFTEST` marker comment line, starting
+at column 0. A runner (`claude-hook-selftests` in this repo) discovers every hook
+carrying that marker, runs each with the env var set, and fails if any do; wiring it
+into pre-commit (`files: ^bin/`, `require_serial: true`, with the changed files
+passed so it runs only the hooks they affect) turns a hook regression into a failed
 commit. The marker is a deliberate declaration, so discovery recovers the set from
 the hooks themselves rather than from a hand-maintained list that drifts.
 

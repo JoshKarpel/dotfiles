@@ -319,10 +319,13 @@ factored into a shared script: a hook should stay self-contained and
 copy-pasteable, and a small duplicated harness is a better trade than a hidden
 dependency.
 
-Each participating hook carries a `# CLAUDE_HOOK_SELFTEST` marker comment line as an
-explicit declaration. The `claude-hook-selftests` runner discovers the set from those
-markers, so there's no separate list to drift. It's wired into pre-commit
-(`files: ^bin/`), so a hook regression fails the commit. A missing dependency (`jq`,
+Each participating hook carries a `# CLAUDE_HOOK_SELFTEST` marker comment line, at
+column 0, as an explicit declaration. The `claude-hook-selftests` runner discovers the
+set from those markers, so there's no separate list to drift. It's wired into
+pre-commit (`files: ^bin/`), so a hook regression fails the commit. Given the changed
+files, it runs only the hooks that name a changed script outside a comment, directly
+or through a chain of other scripts, all in parallel; with no arguments, as in CI's
+`--all-files` run, or when the runner itself changed, it runs every one. A missing dependency (`jq`,
 `python3`) surfaces as a failed run rather than a silent pass, since the hook whose
 tests can't run exits non-zero.
 

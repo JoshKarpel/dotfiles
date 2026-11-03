@@ -64,10 +64,10 @@
 - Every markdown plan (plan mode's, or a plan doc in a repo) has a published HTML Artifact,
   rendered by `plan-artifact <plan.md> <out.html>` and never written or edited by hand: the
   page is derived from the `.md` each time, so any later session just reruns the script.
-  Put diagrams in the plan itself, as ```` ```mermaid ```` fences or raw `<svg>` colored from
-  the page's tokens (the script's docstring lists them), so a plan stays one self-contained
-  file. Sessions don't remember artifacts, so the file carries the link: an
-  `Artifact: <url>` line directly under the `# Title`. If the line is there, update that
+  Read `plan-artifact --help` before writing or revising a plan: the page renders more than
+  plain markdown (GFM alerts and footnotes, mermaid, raw HTML and `<svg>`), and diagrams
+  belong in the plan itself so it stays one self-contained file. Sessions don't remember
+  artifacts, so the file carries the link: an `Artifact: <url>` line directly under the `# Title`. If the line is there, update that
   artifact (`url`) rather than publishing a new one; if not, publish, then add the line.
   In a repo, the `claude-stop-plan-artifact` stop check asks for the republish once a
   turn's edits have settled, so don't republish after every edit; plan mode's file lives

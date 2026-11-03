@@ -42,7 +42,9 @@ repos:
         name: claude hook self-tests
         entry: bin/claude-hook-selftests
         language: script
-        pass_filenames: false
+        # One invocation for the whole change-set, so the hooks a change affects
+        # are selected once and run together rather than split across batches.
+        require_serial: true
         files: ^bin/
 
 ci:
