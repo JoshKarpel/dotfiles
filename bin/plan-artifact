@@ -20,6 +20,8 @@ What a plan can use:
   autolinks, footnotes (`[^1]`), and alerts (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`,
   `[!CAUTION]`).
 - The first `#` heading is the page's title; `##` and `###` headings make the outline beside it.
+  Every heading from `##` down has an anchor and a faint `#` link beside it, so any section
+  can be linked to as `<artifact-url>#<slug>`, slugged the way GitHub does it.
 - Task items (`- [ ]`, `- [x]`) are counted into a progress bar under the title.
 - A table with five or more columns widens the page, so a catalogue or matrix isn't squeezed.
 - A ```` ```mermaid ```` fence is drawn as a diagram.
@@ -47,7 +49,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from markdown_it import MarkdownIt
+from markdown_it.renderer import RendererHTML
 from markdown_it.token import Token
+from markdown_it.utils import OptionsDict
 from markupsafe import Markup, escape
 from mdit_py_plugins.anchors import anchors_plugin
 from mdit_py_plugins.gfm import gfm_plugin
@@ -172,7 +176,10 @@ body {
 .outline code { font: 0.9em var(--mono); overflow-wrap: anywhere; }
 .plan { min-width: 0; }
 .plan > :first-child { margin-top: 0; }
-.plan h2, .plan h3 { font-family: var(--display); text-wrap: balance; scroll-margin-top: 1.5rem; }
+.plan :is(h2, h3, h4, h5, h6) { scroll-margin-top: 1.5rem; }
+.plan h2, .plan h3 { font-family: var(--display); text-wrap: balance; }
+.plan .header-anchor { margin-left: 0.4rem; color: var(--muted); font-weight: 400; text-decoration: none; opacity: 0.4; }
+.plan :is(h2, h3, h4, h5, h6):hover .header-anchor, .plan .header-anchor:focus-visible { opacity: 1; }
 .plan h2 { font-size: 1.45rem; font-weight: 650; margin: 2.6rem 0 0.8rem; padding-top: 1.2rem; border-top: 1px solid var(--rule); }
 .plan h3 { font-size: 1.12rem; font-weight: 600; margin: 1.8rem 0 0.5rem; }
 .plan h4 { font-size: 1rem; margin: 1.4rem 0 0.4rem; }
@@ -262,18 +269,27 @@ def widest_table(tokens: list[Token]) -> int:
 
 
 def markdown() -> MarkdownIt:
-    """GitHub-flavored markdown with raw HTML, plus heading anchors and mermaid fences."""
-    md = MarkdownIt("commonmark", {"html": True}).use(gfm_plugin).use(anchors_plugin, min_level=2, max_level=3, permalink=False)
+    """GitHub-flavored markdown with raw HTML, plus heading anchors and permalinks and mermaid fences."""
+    # The plugin's own `permalink` appends the link to the heading's inline tokens, where it would
+    # leak into outline labels, so it only sets ids and `heading_close` draws the link.
+    md = MarkdownIt("commonmark", {"html": True}).use(gfm_plugin).use(anchors_plugin, min_level=2, max_level=6, permalink=False)
     default_fence = md.renderer.rules["fence"]
 
     # Bound as a method of the renderer, hence `renderer` first.
-    def fence(renderer: object, tokens: list[Token], index: int, options: object, env: dict[str, object]) -> str:
+    def fence(renderer: RendererHTML, tokens: list[Token], index: int, options: OptionsDict, env: dict[str, object]) -> str:
         token = tokens[index]
         if token.info.strip() == "mermaid":
             return f'<pre class="mermaid">{escape(token.content)}</pre>\n'
         return default_fence(tokens, index, options, env)
 
+    def heading_close(renderer: RendererHTML, tokens: list[Token], index: int, options: OptionsDict, env: dict[str, object]) -> str:
+        # A heading is always heading_open, inline, heading_close.
+        anchor = tokens[index - 2].attrs.get("id")
+        permalink = f'<a class="header-anchor" href="#{escape(anchor)}" aria-label="Link to this section">#</a>' if isinstance(anchor, str) else ""
+        return permalink + renderer.renderToken(tokens, index, options, env)
+
     md.add_render_rule("fence", fence)
+    md.add_render_rule("heading_close", heading_close)
     return md
 
 
@@ -311,7 +327,7 @@ def parse_plan(source: str) -> Plan:
     headings = [
         Heading(level=int(token.tag[1]), anchor=anchor, label=inline_html(md, tokens[index + 1]))
         for index, token in enumerate(tokens)
-        if token.type == "heading_open" and isinstance(anchor := token.attrs.get("id"), str)
+        if token.type == "heading_open" and token.tag in ("h2", "h3") and isinstance(anchor := token.attrs.get("id"), str)
     ]
     body = md.renderer.render(tokens, md.options, {})
     # A wide table scrolls inside its own box rather than the page.
@@ -408,6 +424,8 @@ Artifact: https://claude.ai/code/artifact/abc
 
 ### Detail on `Query` and [links](https://example.com)
 
+#### Fine print
+
 ```mermaid
 graph TD; A-->B
 ```
@@ -425,10 +443,17 @@ x = "<b>"
     checks: list[tuple[str, object, object]] = [
         ("title from the first # heading, as plain text", plan.title, "Ship the thing"),
         (
-            "outline from ## and ###",
+            "outline from ## and ###, not deeper",
             [(h.level, h.anchor) for h in plan.headings],
             [(2, "steps"), (3, "detail-on-query-and-links")],
         ),
+        (
+            "a heading carries a permalink to its own anchor",
+            '<h2 id="steps">Steps<a class="header-anchor" href="#steps" aria-label="Link to this section">#</a></h2>' in plan.body,
+            True,
+        ),
+        ("a heading below the outline is still anchored", '<h4 id="fine-print">Fine print<a class="header-anchor" href="#fine-print"' in plan.body, True),
+        ("outline labels carry no permalink", "header-anchor" in html.partition("<nav")[2].partition("</nav>")[0], False),
         ("code in a heading is code in the outline", '<code>Query</code> and links</a>' in html, True),
         ("a heading's backticks never reach the page", "`" in html.partition("<article")[0], False),
         ("code in the title is code in the masthead", "<h1>Ship the <code>thing</code></h1>" in html, True),
