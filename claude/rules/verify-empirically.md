@@ -25,8 +25,8 @@ you think the API does.
   a flag that sets a value may still fall through to the behavior you thought it
   replaced.
 - **Platform behavior is a claim, not a fact.** How a third-party service renders,
-  serves, or size-limits something is worth one `curl -sSIL` before any code
-  depends on it. A remembered, precise-sounding threshold ("renders inline under
+  serves, or size-limits something is worth one request against the real service
+  before any code depends on it. A remembered, precise-sounding threshold ("renders inline under
   ~1 MB") is exactly the kind that proves false only after a feature, its tests,
   and its docs are built on it.
 - **Search the tracker before calling it a bug.** Third-party behavior that looks
