@@ -76,8 +76,9 @@
   artifacts, so the file carries the link: an `Artifact: <url>` line directly under the `# Title`. If the line is there, update that
   artifact (`url`) rather than publishing a new one; if not, publish, then add the line.
   In a repo, the `claude-stop-plan-artifact` stop check asks for the republish once a
-  turn's edits have settled, so don't republish after every edit; plan mode's file lives
-  outside any repo, so publish that one yourself when you write or revise it. The artifact
+  turn's edits have settled, but only the first time per plan in a session: after that,
+  republish at the end of any turn that changed the plan, not after every edit. Plan mode's
+  file lives outside any repo, so publish that one yourself when you write or revise it. The artifact
   is private, so the link is fine to commit even in a public repo.
 - Reach past plain `grep` when a code search is structural rather than textual. `ast-grep`
   matches and rewrites by AST pattern (a bare `except`, a call with a literal argument) where

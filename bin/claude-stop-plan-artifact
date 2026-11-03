@@ -3,8 +3,11 @@
 #
 # A plan is a `.md` file carrying an `Artifact: <url>` line, anything under `plans/`, or a `PLAN.md`.
 # Its page is derived by `plan-artifact`, so the only thing to decide is when to rebuild it: once the
-# turn is over and the plan has settled, rather than after every edit. Each plan's content (less its
-# `Artifact:` line, so adding the link after a first publish is not a change) is nudged about once.
+# turn is over and the plan has settled, rather than after every edit. Each plan is nudged about at
+# most once per session: having republished once, the model keeps doing it unprompted, so a second
+# nudge spends tokens restating what it already knows. A plan's content (less its `Artifact:` line,
+# so adding the link after a first publish is not a change) is recorded whether or not it was nudged,
+# so a later session isn't asked about edits an earlier one left in the working tree.
 #
 # Run by `claude-stop` after the finishing pass, since that pass may itself edit the plan.
 
@@ -32,8 +35,10 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   git -C "$repo" add -A
   git -C "$repo" commit -q -m init
 
+  SESSION=session-a1
   call() {
-    OUT=$(cd "$repo" && env "${unset_git[@]}" CLAUDE_HOOK_SELFTEST= "$SELF" </dev/null 2>&1) ||
+    OUT=$(cd "$repo" && printf '{"session_id":"%s"}' "$SESSION" |
+    env "${unset_git[@]}" CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1) ||
     { printf 'FAIL exited non-zero :: %s\n' "$OUT"; fails=1; }
   }
   silent() {
@@ -53,11 +58,17 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   silent "the same edit is not asked about twice"
 
   printf 'Step three.\n' >>"$repo/plans/ship.md"
-  names "a further edit is asked about again" "plans/ship.md"
+  silent "a further edit in the same session is not asked about"
+
+  SESSION=session-b2
+  silent "a new session is not asked about content an earlier one already covered"
+  printf 'Step four.\n' >>"$repo/plans/ship.md"
+  names "a new session's edit is asked about" "plans/ship.md"
 
   printf '# New\n\nIdea.\n' >"$repo/PLAN.md"
   names "a new PLAN.md is named as unpublished" "PLAN.md (not published yet)"
   printf '# New\n\nArtifact: https://claude.ai/code/artifact/def\n\nIdea.\n' >"$repo/PLAN.md"
+  SESSION=session-c3
   silent "adding the Artifact line after publishing is not a change"
 
   printf 'More.\n' >>"$repo/docs/guide.md"
@@ -75,7 +86,7 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   exit "$fails"
 fi
 
-cat >/dev/null
+SESSION_ID=$(jq -r '.session_id // ""')
 
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$ROOT"
@@ -102,6 +113,9 @@ while IFS= read -r path; do
   KEY=$({ printf '%s\n' "$path"; { grep -vE "$ARTIFACT_LINE" "$path" || true; } | cat -s; } | sha1sum | cut -d' ' -f1)
   grep -qxsF "$KEY" "$NUDGED" && continue
   printf '%s\n' "$KEY" >>"$NUDGED"
+  SESSION_KEY=$(printf '%s\n%s\n' "$SESSION_ID" "$path" | sha1sum | cut -d' ' -f1)
+  grep -qxsF "$SESSION_KEY" "$NUDGED" && continue
+  printf '%s\n' "$SESSION_KEY" >>"$NUDGED"
   URL=$(grep -m1 -E "$ARTIFACT_LINE" "$path" | sed -E 's/^Artifact:[[:space:]]*//; s/[[:space:]]*$//' || true)
   if [[ -n "$URL" ]]; then
     LINES+="- $path (published at $URL)"$'\n'
@@ -110,10 +124,12 @@ while IFS= read -r path; do
   fi
 done <<<"$CHANGED"
 
-[[ -n "$LINES" ]] || exit 0
-
 # Keep the record short; only recent content matters, and an old key costs nothing but a re-ask.
-tail -n 200 "$NUDGED" >"$NUDGED.tmp" && mv "$NUDGED.tmp" "$NUDGED"
+if [[ -f "$NUDGED" ]]; then
+  tail -n 200 "$NUDGED" >"$NUDGED.tmp" && mv "$NUDGED.tmp" "$NUDGED"
+fi
+
+[[ -n "$LINES" ]] || exit 0
 
 CONTEXT="These plans changed, so their published pages are out of date:
 
