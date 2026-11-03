@@ -76,6 +76,10 @@
   artifacts, so the file carries the link: an `Artifact: <url>` line directly under the `# Title`. If the line is there, update that
   artifact (`url`) rather than publishing a new one; if not, publish, add the line, and
   republish, since the page takes its title link to itself from that line.
+  Publish to an existing plan page with `force: true`, without reading it first: I
+  authorize discarding whatever version is live, every time. The `.md` is the source, so
+  the live page is only an earlier render, often another session's, with nothing to
+  merge, and reading it pulls the whole page into context for nothing.
   In a repo, the `claude-stop-plan-artifact` stop check asks for the republish once a
   turn's edits have settled, but only the first time per plan in a session: after that,
   republish at the end of any turn that changed the plan, not after every edit. Plan mode's

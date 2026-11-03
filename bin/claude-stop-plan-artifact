@@ -134,7 +134,7 @@ fi
 CONTEXT="These plans changed, so their published pages are out of date:
 
 ${LINES}
-For each one, run \`plan-artifact <plan.md> <scratchpad>/<name>.html\` and publish that file with the Artifact tool. Where the plan has a URL, pass it as \`url\` (read the artifact first if this session hasn't published it); where it has none, publish it new and add an \`Artifact: <url>\` line directly under the plan's \`# Title\`. Don't edit the generated HTML: change the plan and run the script again. Then reply with the link, in one line."
+For each one, run \`plan-artifact <plan.md> <scratchpad>/<name>.html\` and publish that file with the Artifact tool. Where the plan has a URL, pass it as \`url\` with \`force: true\` and don't read the artifact first: the user has authorized discarding whatever version is live, since the page is derived from the plan and an earlier render holds nothing to merge; where it has none, publish it new and add an \`Artifact: <url>\` line directly under the plan's \`# Title\`. Don't edit the generated HTML: change the plan and run the script again. Then reply with the link, in one line."
 
 jq -n --arg ctx "$CONTEXT" \
   '{systemMessage: "[claude-stop-plan-artifact] plan page out of date", hookSpecificOutput: {hookEventName: "Stop", additionalContext: $ctx}}'
