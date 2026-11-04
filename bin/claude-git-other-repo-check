@@ -1,0 +1,392 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""PreToolUse hook: auto-approve read-only ``git -C <clone>`` calls into other clones.
+
+Claude Code never treats ``git -C <dir> ...`` as read-only, so reading another
+clone at a commit (``git -C ~/work/other show <sha>:path | grep x``) prompts every
+time, and "don't ask again" saves the exact command, which the next call never
+matches. A settings glob can't fix it safely: the ``*`` in ``Bash(git -C * show *)``
+also matches ``git -C x -c core.pager=<cmd> show``, and git's ``-c`` can name a
+program to run. It would also have to spell out the home directory, which differs
+between machines.
+
+So this parses the command instead, and approves it only when every segment is
+provably read-only and at least one is a ``git -C`` into a clone under
+``$HOME/work`` or ``$HOME/projects``:
+
+- a git segment may carry only ``-C <dir>`` and ``--no-pager`` before its
+  subcommand, and the subcommand must be a read (see ``_git_args_are_read``);
+- any other segment must be a read-only text tool (``READONLY_TOOLS``) or a
+  line-range ``sed -n``;
+- redirection only to ``/dev/null`` or between file descriptors, and no command
+  substitution, backticks, or here-docs.
+
+Anything it can't prove emits nothing, so the call falls through to the normal
+permission flow. A ``-C`` naming the current repository is left alone, since
+``claude-git-dash-c-check`` blocks that. In a permission mode that never prompts
+there is nothing to spare, so the hook does nothing there. It fails open (no
+decision) on any error so a bug never bricks Bash.
+"""
+
+from __future__ import annotations
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests (`_selftest`).
+# This marker line is how `claude-hook-selftests` discovers participating hooks.
+
+import json
+import os
+import os.path
+import re
+import shlex
+import subprocess
+import sys
+
+# Permission modes that never ask the user to approve a Bash call.
+AUTO_APPROVE_MODES = {"auto", "bypassPermissions"}
+# Directories under $HOME whose clones may be read without a prompt.
+ROOTS = ("work", "projects")
+
+# Tools that only read their inputs and write to stdout, whatever their arguments.
+# `sort` (`-o`), `uniq` (a second operand), and `sed` are handled separately because
+# some of their forms write files; `rg` is absent because `--pre` runs a program.
+READONLY_TOOLS = {
+    "cat", "head", "tail", "wc", "grep", "cut", "tr", "nl", "jq", "column", "comm",
+    "tac", "rev", "echo", "printf", "true",
+}
+
+# Subcommands that read whatever their arguments.
+READ_SUBCOMMANDS = {
+    "show", "log", "diff", "status", "cat-file", "ls-files", "ls-tree", "rev-parse",
+    "rev-list", "merge-base", "blame", "shortlog", "describe", "show-ref",
+    "for-each-ref", "name-rev", "count-objects", "grep",
+}
+# `--output` makes diff-family commands write a file; `-O` makes `git grep` run one.
+_WRITING_FLAGS = re.compile(r"^(--output(=.*)?|-O.*|--open-files-in-pager(=.*)?)$")
+_BRANCH_LIST_FLAGS = {
+    "-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--show-current",
+    "--list", "-l", "--no-color", "--color", "--column", "--no-column",
+}
+_BRANCH_VALUE_FLAGS = {"--contains", "--no-contains", "--merged", "--no-merged", "--points-at"}
+_SED_RANGE = re.compile(r"^(\d+(,(\d+|\$))?p;?)+$")
+_REDIRECT_OPERATORS = {">", ">>", ">&", "&>", "<", ">|"}
+_SAFE_REDIRECT_TARGETS = {"/dev/null", "0", "1", "2"}
+_UNRESOLVABLE = re.compile(r"[$*?\[{`]")
+_OPERATOR_CHARS = set(";&|()<>\n")
+_SEPARATOR_CHARS = set(";|()\n")
+
+
+def _segments(command: str) -> list[list[str]]:
+    """Split COMMAND into simple commands on `;`, `&&`, `||`, `|`, `&`, and newlines."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars="".join(_OPERATOR_CHARS))
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in lexer:
+        is_operator = bool(token) and set(token) <= _OPERATOR_CHARS
+        if token in {"&", "&&"} or (is_operator and set(token) & _SEPARATOR_CHARS and token not in _REDIRECT_OPERATORS):
+            if current:
+                segments.append(current)
+                current = []
+            continue
+        current.append(token)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def _strip_redirects(segment: list[str]) -> list[str] | None:
+    """SEGMENT without its redirections, or None when one could write a file."""
+    words: list[str] = []
+    index = 0
+    while index < len(segment):
+        token = segment[index]
+        if token in _REDIRECT_OPERATORS:
+            target = segment[index + 1] if index + 1 < len(segment) else ""
+            if token != "<" and target not in _SAFE_REDIRECT_TARGETS:
+                return None
+            # A file descriptor written before the operator (`2>`) lexes as its own word.
+            if words and words[-1].isdigit():
+                words.pop()
+            index += 2
+            continue
+        words.append(token)
+        index += 1
+    return words
+
+
+def _resolve(directory: str, cwd: str, home: str) -> str | None:
+    if not directory or _UNRESOLVABLE.search(directory):
+        return None
+    if directory == "~" or directory.startswith("~/"):
+        directory = home + directory[1:]
+    elif directory.startswith("~"):
+        return None
+    return os.path.realpath(os.path.join(cwd, directory))
+
+
+def _is_under_roots(path: str, home: str) -> bool:
+    for root in ROOTS:
+        base = os.path.realpath(os.path.join(home, root))
+        if path != base and path.startswith(base + os.sep):
+            return True
+    return False
+
+
+def _git_args_are_read(subcommand: str, args: list[str]) -> bool:
+    if subcommand in READ_SUBCOMMANDS:
+        return not any(_WRITING_FLAGS.match(arg) for arg in args)
+    if subcommand == "branch":
+        listing = any(arg in {"--list", "-l"} for arg in args)
+        index = 0
+        while index < len(args):
+            arg = args[index]
+            if arg in _BRANCH_VALUE_FLAGS:
+                index += 2
+                continue
+            if arg.startswith(tuple(flag + "=" for flag in _BRANCH_VALUE_FLAGS)) or arg.startswith(("--format", "--sort")):
+                index += 1
+                continue
+            if arg in _BRANCH_LIST_FLAGS or (listing and not arg.startswith("-")):
+                index += 1
+                continue
+            return False
+        return True
+    if subcommand == "remote":
+        return args in ([], ["-v"], ["--verbose"]) or (bool(args) and args[0] in {"show", "get-url"})
+    if subcommand == "stash":
+        return bool(args) and args[0] in {"list", "show"}
+    if subcommand == "worktree":
+        return bool(args) and args[0] == "list"
+    if subcommand == "tag":
+        return not args or any(arg in {"-l", "--list", "--contains", "--points-at"} for arg in args)
+    return False
+
+
+def _classify_git(args: list[str], cwd: str, home: str, current_repo: str | None) -> str:
+    """`other` for a read into a clone under the roots, `local` for a read with no
+    `-C`, and `unsafe` for anything else."""
+    target: str | None = None
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--no-pager":
+            index += 1
+            continue
+        if arg == "-C" and target is None and index + 1 < len(args):
+            target = _resolve(args[index + 1], cwd, home)
+            if target is None:
+                return "unsafe"
+            index += 2
+            continue
+        break
+    if index >= len(args) or args[index].startswith("-"):
+        return "unsafe"
+    if not _git_args_are_read(args[index], args[index + 1:]):
+        return "unsafe"
+    if target is None:
+        return "local"
+    if target == current_repo or not _is_under_roots(target, home):
+        return "unsafe"
+    return "other"
+
+
+def _tool_is_read(name: str, args: list[str]) -> bool:
+    if name in READONLY_TOOLS:
+        return True
+    if name == "sort":
+        return not any(
+            arg.startswith("--output") or (arg.startswith("-") and not arg.startswith("--") and "o" in arg)
+            for arg in args
+        )
+    if name == "uniq":
+        # A second operand is the output file; `-` is an operand, not a flag.
+        return len([arg for arg in args if arg == "-" or not arg.startswith("-")]) <= 1
+    if name == "sed":
+        flags = [arg for arg in args if arg.startswith("-")]
+        scripts = [arg for arg in args if not arg.startswith("-")][:1]
+        return flags == ["-n"] and bool(scripts) and bool(_SED_RANGE.match(scripts[0]))
+    return False
+
+
+def approves(command: str, cwd: str, home: str, current_repo: str | None) -> bool:
+    """Whether every segment of COMMAND is a read and one reads another clone."""
+    if "`" in command or "$(" in command or "<<" in command:
+        return False
+    try:
+        segments = _segments(command)
+    except ValueError:
+        return False
+    saw_other = False
+    for raw_segment in segments:
+        segment = _strip_redirects(raw_segment)
+        if not segment:
+            return False
+        name, args = os.path.basename(segment[0]), segment[1:]
+        if name == "git":
+            kind = _classify_git(args, cwd, home, current_repo)
+            if kind == "unsafe":
+                return False
+            saw_other = saw_other or kind == "other"
+        elif not _tool_is_read(name, args):
+            return False
+    return saw_other
+
+
+_REASON = "Read-only git call into another clone under ~/work or ~/projects."
+
+H = "/h"
+CWD = "/h/work/here"
+CUR = "/h/work/here"
+# (command, expected). A safety hook without a test is theater; run these with
+# `CLAUDE_HOOK_SELFTEST=1 claude-git-other-repo-check`.
+_SELFTEST_CASES: list[tuple[str, bool]] = [
+    # --- allow: reads into another clone, the shapes sessions actually used ---
+    ("git -C /h/work/other log -1 --format='%h %cd'", True),
+    ("git -C /h/work/other show abc123:src/x.py | grep -n -E 'A|B'; echo ---; git -C /h/work/other show abc123:y.py | head", True),
+    ("git -C /h/work/other show abc:f.py | sed -n '205,232p'", True),
+    ("git -C /h/work/other show abc:f.py | sed -n '268,282p;345,352p'", True),
+    ("git -C /h/work/other cat-file -e abc:a.md && git -C /h/work/other cat-file -e abc:b.md && echo all-local-ok", True),
+    ("git -C /h/work/other grep -n -iE 'role' abc -- '*.tf' '*.md' | cut -c1-200 | head -15", True),
+    ("git -C /h/work/other branch -r --contains HEAD", True),
+    ("git -C /h/work/other branch --show-current", True),
+    ("git -C /h/projects/other log --oneline -3", True),
+    ("git -C ~/work/other status --short", True),
+    ("git -C ../other diff HEAD~1 --stat", True),
+    ("git --no-pager -C /h/work/other log -3", True),
+    ("git -C /h/work/worktrees/other-branch diff", True),
+    ("git -C /h/work/other log -1 2>&1 | tail -5", True),
+    ("git -C /h/work/other log -1 2>/dev/null", True),
+    ("git status --short; git -C /h/work/other log -1", True),
+    ("git -C /h/work/other remote -v", True),
+    ("git -C /h/work/other stash list", True),
+    ("git -C /h/work/other worktree list", True),
+    ("git -C /h/work/other tag --list 'v*'", True),
+    ("git -C /h/work/other log --format=%H | sort | uniq -c", True),
+    # --- defer: git global options that can run a program or redirect git itself ---
+    ("git -C /h/work/other -c core.pager=evil log", False),
+    ("git -c core.pager=evil -C /h/work/other log", False),
+    ("git -C /h/work/other --config-env=core.pager=X log", False),
+    ("git -C /h/work/other --exec-path=/x log", False),
+    ("git -C /h/work/other -C sub log", False),
+    # --- defer: writes or program execution through a read subcommand ---
+    ("git -C /h/work/other diff --output=/h/x", False),
+    ("git -C /h/work/other grep -Ovim x", False),
+    ("git -C /h/work/other branch -D old", False),
+    ("git -C /h/work/other branch newname", False),
+    ("git -C /h/work/other branch -r -d origin/x", False),
+    ("git -C /h/work/other tag v1", False),
+    ("git -C /h/work/other remote set-url origin x", False),
+    ("git -C /h/work/other stash pop", False),
+    ("git -C /h/work/other checkout main", False),
+    ("git -C /h/work/other fetch", False),
+    # --- defer: a target outside the roots, unresolvable, or the current repo ---
+    ("git -C /etc log", False),
+    ("git -C /h/work log", False),
+    ("git -C /h/elsewhere/x log", False),
+    ("git -C /h/work/here log", False),
+    ("git -C . log", False),
+    ("git -C $R show abc:x", False),
+    ("git -C /h/work/* log", False),
+    ("git -C ~other/work/x log", False),
+    # --- defer: the rest of the command isn't provably read-only ---
+    ("git -C /h/work/other log; rm -rf /h/work/other", False),
+    ("git -C /h/work/other log > /h/out.txt", False),
+    ("git -C /h/work/other log | sort -o /h/out", False),
+    ("git -C /h/work/other log | sort -ro /h/out", False),
+    ("git -C /h/work/other log | uniq - /h/out", False),
+    ("git -C /h/work/other show x | sed -i 's/a/b/' f", False),
+    ("git -C /h/work/other show x | sed -n 'w /h/out'", False),
+    ("git -C /h/work/other show x | python3 -c 'print(1)'", False),
+    ("git -C /h/work/other show $(cat ref)", False),
+    ("git -C /h/work/other show `cat ref`", False),
+    ("cd /h/work/other && git log", False),
+    ("git -C /h/work/other log | rg --pre evil x", False),
+    # --- defer: nothing reads another clone, so the normal flow decides ---
+    ("git log -3", False),
+    ("grep -n x /h/work/other/f", False),
+    ("", False),
+]
+
+# End to end through stdin, since the permission mode is decided outside `approves`.
+_SELFTEST_MODE_CASES: list[tuple[str, bool]] = [
+    ("default", True),
+    ("acceptEdits", True),
+    ("plan", True),
+    ("auto", False),
+    ("bypassPermissions", False),
+]
+
+
+def _selftest() -> int:
+    failures = 0
+    for command, expected in _SELFTEST_CASES:
+        got = approves(command, CWD, H, CUR)
+        if got != expected:
+            failures += 1
+            print(f"FAIL want={expected} got={got} :: {command!r}")
+    home = os.path.realpath(os.path.expanduser("~"))
+    for mode, want_allow in _SELFTEST_MODE_CASES:
+        payload = json.dumps({
+            "permission_mode": mode,
+            "cwd": "/",
+            "tool_input": {"command": f"git -C {home}/work/other log -1"},
+        })
+        stdout = subprocess.run(
+            [sys.executable, __file__],
+            input=payload,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "CLAUDE_HOOK_SELFTEST": "", "HOME": home},
+        ).stdout
+        if bool(stdout.strip()) != want_allow:
+            failures += 1
+            print(f"FAIL want_allow={want_allow} stdout={stdout!r} :: mode={mode!r}")
+    if not failures:
+        total = len(_SELFTEST_CASES) + len(_SELFTEST_MODE_CASES)
+        print(f"claude-git-other-repo-check: all {total} self-tests passed")
+    return 1 if failures else 0
+
+
+def _current_repo(cwd: str) -> str | None:
+    result = subprocess.run(
+        ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+    )
+    return os.path.realpath(result.stdout.strip()) if result.returncode == 0 else None
+
+
+def main() -> int:
+    if os.environ.get("CLAUDE_HOOK_SELFTEST"):
+        return _selftest()
+    try:
+        data = json.load(sys.stdin)
+        if data.get("permission_mode") in AUTO_APPROVE_MODES:
+            return 0
+        command = (data.get("tool_input") or {}).get("command") or ""
+        if "git" not in command or "-C" not in command:
+            return 0
+        cwd = data.get("cwd") or os.getcwd()
+        home = os.path.realpath(os.path.expanduser("~"))
+        if not approves(command, cwd, home, _current_repo(cwd)):
+            return 0
+    except Exception:
+        return 0
+    json.dump(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "permissionDecisionReason": _REASON,
+            }
+        },
+        sys.stdout,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -160,6 +160,7 @@
       "Bash(mise ls*)",
       "Bash(mise list*)",
       "Bash(mise --version)",
+      "Bash(claude --version)",
       "Bash(mise doctor*)",
       "Bash(mise env*)",
       "Bash(mise outdated*)",
@@ -296,6 +297,10 @@
           {
             "type": "command",
             "command": "claude-git-dash-c-check"
+          },
+          {
+            "type": "command",
+            "command": "claude-git-other-repo-check"
           },
           {
             "type": "command",
