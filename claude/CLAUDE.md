@@ -74,8 +74,7 @@
   plain markdown (GFM alerts and footnotes, mermaid, raw HTML and `<svg>`), and diagrams
   belong in the plan itself so it stays one self-contained file. Sessions don't remember
   artifacts, so the file carries the link: an `Artifact: <url>` line directly under the `# Title`. If the line is there, update that
-  artifact (`url`) rather than publishing a new one; if not, publish, add the line, and
-  republish, since the page takes its title link to itself from that line.
+  artifact (`url`) rather than publishing a new one; if not, publish and add the line.
   Publish to an existing plan page with `force: true`, without reading it first: I
   authorize discarding whatever version is live, every time. The `.md` is the source, so
   the live page is only an earlier render, often another session's, with nothing to
