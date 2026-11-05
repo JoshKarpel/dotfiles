@@ -1,0 +1,162 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""Report how much disk a git checkout takes, split by what the space is for.
+
+Each file is counted in exactly one bucket: the tracked files actually present
+in the working tree, untracked files, gitignored files (build output,
+dependency caches, virtualenvs), anything git lists as none of those (submodule
+checkouts, nested repositories), and the repository itself (the git common
+directory, shared by every linked worktree). Git decides what is untracked and
+what is ignored, so the split matches `git status`. Each row gives the apparent size
+(the bytes in the files) and the allocated size (the blocks the filesystem
+reserved, what ``du`` reports), which differ for sparse, compressed, or small
+files.
+
+Files are identified by inode, so a hardlinked file is counted once, in the
+first bucket that reaches it. Directories themselves are not counted, only what
+is in them. On PATH as ``git-disk-usage``, it also runs as ``git disk-usage``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import stat
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass(slots=True)
+class Tally:
+    """Running totals for one bucket: file count, apparent bytes, allocated bytes."""
+
+    files: int = 0
+    apparent: int = 0
+    allocated: int = 0
+
+    def add(self, st: os.stat_result) -> None:
+        """Count one file from its ``lstat`` result."""
+        self.files += 1
+        self.apparent += st.st_size
+        self.allocated += st.st_blocks * 512
+
+
+def git(cwd: Path, *args: str) -> str:
+    """Run a git command in ``cwd`` and return its stdout, failing loudly on error."""
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
+
+
+def count_new(path: Path, tally: Tally, seen: set[tuple[int, int]]) -> None:
+    """Add ``path`` to ``tally`` unless its inode was already counted.
+
+    A tracked file deleted from the working tree, or skipped by a sparse
+    checkout, is simply absent, as is a file removed mid-walk by a running build.
+    Directories (a submodule's gitlink entry among them) are not counted.
+    """
+    try:
+        st = path.lstat()
+    except FileNotFoundError:
+        return
+    if stat.S_ISDIR(st.st_mode):
+        return
+    key = (st.st_dev, st.st_ino)
+    if key in seen:
+        return
+    seen.add(key)
+    tally.add(st)
+
+
+def walk(root: Path, tally: Tally, seen: set[tuple[int, int]], prune: set[Path]) -> None:
+    """Count every file under ``root`` not already in ``seen``, skipping ``prune``."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        here = Path(dirpath)
+        dirnames[:] = [d for d in dirnames if here / d not in prune]
+        for name in filenames:
+            if here / name not in prune:
+                count_new(here / name, tally, seen)
+
+
+def count_listed(toplevel: Path, listing: str, tally: Tally, seen: set[tuple[int, int]]) -> None:
+    """Count each path in a `git ls-files -z` listing, walking any that is a directory.
+
+    `--directory` collapses a wholly ignored directory into one `dir/` entry, and
+    an untracked nested repository is listed the same way, so an entry can name
+    a whole subtree.
+    """
+    for rel in listing.split("\0"):
+        if not rel:
+            continue
+        path = toplevel / rel
+        if path.is_dir() and not path.is_symlink():
+            walk(path, tally, seen, prune=set())
+        else:
+            count_new(path, tally, seen)
+
+
+def human(n: int) -> str:
+    """Format a byte count with binary units."""
+    size = float(n)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if size < 1024 or unit == "TiB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    raise AssertionError("unreachable")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="git-disk-usage",
+        description=(
+            "Show the disk a git checkout uses: tracked files, everything else in "
+            "the working tree, and the repository (.git)."
+        ),
+    )
+    parser.add_argument("path", nargs="?", type=Path, default=Path.cwd(), help="any path inside the checkout (default: .)")
+    args = parser.parse_args()
+
+    start = args.path.resolve()
+    toplevel = Path(git(start, "rev-parse", "--show-toplevel").strip())
+    common_dir = Path(git(start, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()).resolve()
+
+    seen: set[tuple[int, int]] = set()
+    tracked, untracked, ignored, other, repo = Tally(), Tally(), Tally(), Tally(), Tally()
+
+    # Submodule gitlinks are directories here, which count_new skips, so their
+    # checkouts fall through to the final walk and land in `other`.
+    for rel in git(toplevel, "ls-files", "-z").split("\0"):
+        if rel:
+            count_new(toplevel / rel, tracked, seen)
+    count_listed(toplevel, git(toplevel, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"), ignored, seen)
+    count_listed(toplevel, git(toplevel, "ls-files", "-z", "--others", "--exclude-standard"), untracked, seen)
+    # A linked worktree's .git is a file pointing at the common dir; prune it
+    # alongside the common dir so neither lands in a working-tree bucket.
+    walk(toplevel, other, seen, prune={common_dir, toplevel / ".git"})
+    walk(common_dir, repo, seen, prune=set())
+
+    buckets = [
+        ("tracked", tracked),
+        ("untracked", untracked),
+        ("ignored", ignored),
+        ("submodules + other", other),
+        ("repository (.git)", repo),
+    ]
+    total = Tally(
+        sum(t.files for _, t in buckets),
+        sum(t.apparent for _, t in buckets),
+        sum(t.allocated for _, t in buckets),
+    )
+    rows = [*buckets, ("total", total)]
+
+    print(f"worktree    {toplevel}")
+    print(f"repository  {common_dir}")
+    print()
+    print(f"{'':<20} {'files':>9} {'size':>11} {'on disk':>11}")
+    for label, tally in rows:
+        print(f"{label:<20} {tally.files:>9,} {human(tally.apparent):>11} {human(tally.allocated):>11}")
+
+
+if __name__ == "__main__":
+    main()

@@ -84,6 +84,7 @@
     undo = reset --soft HEAD^
     dc = diff --cached
     root = rev-parse --show-toplevel
+    du = disk-usage
     discard = reset --hard
     remove-untracked = clean -fd
     l = log --graph --decorate --pretty=oneline --abbrev-commit

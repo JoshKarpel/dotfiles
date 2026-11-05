@@ -190,6 +190,10 @@ pre-commit run
 # install.sh; run it by hand to reclaim now.
 tidy
 
+# Show a checkout's disk use split into tracked, untracked, ignored, submodule,
+# and repository (.git) bytes. Also runs as `git disk-usage`, aliased `git du`.
+git-disk-usage [path]
+
 # Count Claude tokens in files/dirs via the Anthropic count_tokens API
 # (needs ANTHROPIC_API_KEY). Run with --help for usage and flags.
 count-claude-tokens --help
