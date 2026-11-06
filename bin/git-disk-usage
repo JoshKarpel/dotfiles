@@ -1,161 +1,441 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.15"
+# dependencies = ["counterweight==0.2.0"]
+#
+# [tool.uv]
+# exclude-newer = "7 days"
+# exclude-newer-package = { counterweight = false, evp = false, waxy = false, without-cli = false, without-logging = false, without-streams = false }
 # ///
 """Report how much disk a git checkout takes, split by what the space is for.
 
 Each file is counted in exactly one bucket: the tracked files actually present
 in the working tree, untracked files, gitignored files (build output,
-dependency caches, virtualenvs), anything git lists as none of those (submodule
-checkouts, nested repositories), and the repository itself (the git common
-directory, shared by every linked worktree). Git decides what is untracked and
-what is ignored, so the split matches `git status`. Each row gives the apparent size
-(the bytes in the files) and the allocated size (the blocks the filesystem
-reserved, what ``du`` reports), which differ for sparse, compressed, or small
-files.
+dependency caches, virtualenvs), submodule checkouts, and the repository itself
+(the git common directory, shared by every linked worktree). Git decides what
+is tracked and what is ignored, so the split matches `git status`; anything
+else in the working tree (a nested repository among it) is untracked. Each row
+gives the apparent size (the bytes in the files) and the allocated size (the
+blocks the filesystem reserved, what `du` reports), which differ for sparse,
+compressed, or small files.
 
-Files are identified by inode, so a hardlinked file is counted once, in the
-first bucket that reaches it. Directories themselves are not counted, only what
-is in them. On PATH as ``git-disk-usage``, it also runs as ``git disk-usage``.
+The tree is walked once, with `os.scandir` on a small thread pool: the stat
+calls release the GIL, so a few threads overlap them, while more contend for
+the GIL and get slower. A file with several hardlinks is counted once.
+Directories themselves are not counted, only what is in them. On a terminal a
+spinner shows the scan's progress. On PATH as `git-disk-usage`, it also runs as
+`git disk-usage`.
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
+import enum
 import os
-import stat
 import subprocess
+import sys
+import time
+from collections.abc import Callable
+from concurrent.futures import Future
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
+from queue import Empty
+from queue import SimpleQueue
+from typing import assert_never
+
+from counterweight import Inline
+from counterweight import app
+from counterweight.components import component
+from counterweight.controls import Quit
+from counterweight.elements import Text
+from counterweight.hooks import use_clock
+from counterweight.hooks import use_controls
+from counterweight.hooks import use_effect
+from counterweight.hooks import use_state
+from counterweight.styles.utilities import *
+
+FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+FRAME_TIME = timedelta(milliseconds=80)
+# Measured on a 445k-file checkout on an M-series Mac: 4 threads beat 2, 6, 8, and 16.
+DEFAULT_THREADS = 4
+SCANNING = "scanning"
+CANCEL_CHECK = timedelta(milliseconds=100)
 
 
-@dataclass(slots=True)
+class Bucket(enum.IntEnum):
+    """What a file's space is for; the values index the per-bucket totals."""
+
+    TRACKED = 0
+    UNTRACKED = 1
+    IGNORED = 2
+    SUBMODULE = 3
+    REPOSITORY = 4
+
+
+LABELS = {
+    Bucket.TRACKED: "tracked",
+    Bucket.UNTRACKED: "untracked",
+    Bucket.IGNORED: "ignored",
+    Bucket.SUBMODULE: "submodules",
+    Bucket.REPOSITORY: "repository (.git)",
+}
+
+
+@dataclass(frozen=True, slots=True)
 class Tally:
-    """Running totals for one bucket: file count, apparent bytes, allocated bytes."""
+    """One bucket's totals: file count, apparent bytes, allocated bytes."""
 
     files: int = 0
     apparent: int = 0
     allocated: int = 0
 
-    def add(self, st: os.stat_result) -> None:
-        """Count one file from its ``lstat`` result."""
-        self.files += 1
-        self.apparent += st.st_size
-        self.allocated += st.st_blocks * 512
+    def __add__(self, other: Tally) -> Tally:
+        return Tally(self.files + other.files, self.apparent + other.apparent, self.allocated + other.allocated)
+
+
+@dataclass(frozen=True, slots=True)
+class Classifier:
+    """What git says about the working tree, as relative paths, for sorting walked entries into buckets.
+
+    `ignored_dirs` keeps the trailing `/` that `ls-files --directory` gives a wholly ignored directory.
+    `pruned` holds the absolute paths the working-tree walk skips: the common dir, and a linked
+    worktree's `.git` file.
+    """
+
+    prefix_length: int
+    tracked: frozenset[str]
+    gitlinks: frozenset[str]
+    ignored_dirs: frozenset[str]
+    ignored_files: frozenset[str]
+    pruned: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class DirectoryScan:
+    """What scanning one directory found: totals by bucket, subdirectories to queue, and hardlinked files.
+
+    `totals` is `[files, apparent, allocated]` per bucket, as plain ints because the per-file loop is
+    the hot path. A hardlinked file goes in `hardlinked` instead, as `(dev, ino, bucket, apparent,
+    allocated)`, so the coordinator can count each inode once across threads.
+    """
+
+    totals: list[list[int]]
+    subdirectories: list[tuple[str, Bucket | None]]
+    hardlinked: list[tuple[int, int, Bucket, int, int]]
+    last_path: str
+    is_unreadable: bool
+
+
+@dataclass(slots=True)
+class Progress:
+    """Where a running scan is, written by the scan's coordinating thread and read by the spinner.
+
+    It is a shared mutable place on purpose: the spinner polls it, and `is_cancelled` is how the
+    spinner tells the scan to stop when it is interrupted.
+    """
+
+    phase: str = "asking git which files are tracked and ignored"
+    current: str = ""
+    files: int = 0
+    allocated: int = 0
+    is_cancelled: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Report:
+    """A finished scan: totals by bucket, how many directories could not be read, and how long it took."""
+
+    toplevel: Path
+    common_dir: Path
+    tallies: dict[Bucket, Tally]
+    unreadable_directories: int
+    elapsed: timedelta
+
+
+class Cancelled(Exception):
+    """The scan was told to stop before it finished."""
 
 
 def git(cwd: Path, *args: str) -> str:
-    """Run a git command in ``cwd`` and return its stdout, failing loudly on error."""
-    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
+    """Run a git command in `cwd` and return its stdout; git's own stderr passes through."""
+    return subprocess.run(["git", *args], cwd=cwd, check=True, stdout=subprocess.PIPE, text=True).stdout
 
 
-def count_new(path: Path, tally: Tally, seen: set[tuple[int, int]]) -> None:
-    """Add ``path`` to ``tally`` unless its inode was already counted.
+def entries(listing: str) -> list[str]:
+    """Split a `-z` listing into its entries."""
+    return [entry for entry in listing.split("\0") if entry]
 
-    A tracked file deleted from the working tree, or skipped by a sparse
-    checkout, is simply absent, as is a file removed mid-walk by a running build.
-    Directories (a submodule's gitlink entry among them) are not counted.
+
+def build_classifier(toplevel: Path, common_dir: Path) -> Classifier:
+    """Ask git which paths are tracked, which are submodules, and which are ignored."""
+    tracked: set[str] = set()
+    gitlinks: set[str] = set()
+    # `-s` lines are `<mode> <object> <stage>\t<path>`; mode 160000 is a submodule's gitlink.
+    for line in entries(git(toplevel, "ls-files", "-z", "-s")):
+        meta, path = line.split("\t", 1)
+        (gitlinks if meta.startswith("160000 ") else tracked).add(path)
+    ignored = entries(git(toplevel, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"))
+    return Classifier(
+        prefix_length=len(str(toplevel)) + 1,
+        tracked=frozenset(tracked),
+        gitlinks=frozenset(gitlinks),
+        ignored_dirs=frozenset(entry for entry in ignored if entry.endswith("/")),
+        ignored_files=frozenset(entry for entry in ignored if not entry.endswith("/")),
+        pruned=frozenset({str(common_dir), str(toplevel / ".git")}),
+    )
+
+
+def scan_directory(path: str, inherited: Bucket | None, classifier: Classifier) -> DirectoryScan:
+    """Stat every file in one directory, without recursing, sorting each into a bucket.
+
+    `inherited` is the bucket of a subtree that is wholly one thing (an ignored directory, a submodule,
+    the repository), so nothing under it needs classifying; `None` means classify each entry.
+    A file or directory that vanishes mid-scan, as a running build's output does, is skipped.
     """
+    totals = [[0, 0, 0] for _ in Bucket]
+    subdirectories: list[tuple[str, Bucket | None]] = []
+    hardlinked: list[tuple[int, int, Bucket, int, int]] = []
+    last_path = path
     try:
-        st = path.lstat()
+        iterator = os.scandir(path)
     except FileNotFoundError:
-        return
-    if stat.S_ISDIR(st.st_mode):
-        return
-    key = (st.st_dev, st.st_ino)
-    if key in seen:
-        return
-    seen.add(key)
-    tally.add(st)
+        return DirectoryScan(totals, subdirectories, hardlinked, last_path, is_unreadable=False)
+    except PermissionError:
+        return DirectoryScan(totals, subdirectories, hardlinked, last_path, is_unreadable=True)
+    with iterator:
+        for entry in iterator:
+            entry_path = entry.path
+            if inherited is None and entry.name == ".git" and entry_path in classifier.pruned:
+                continue
+            if entry.is_dir(follow_symlinks=False):
+                if inherited is not None:
+                    subdirectories.append((entry_path, inherited))
+                    continue
+                if entry_path in classifier.pruned:
+                    continue
+                relative = entry_path[classifier.prefix_length :]
+                if relative in classifier.gitlinks:
+                    subdirectories.append((entry_path, Bucket.SUBMODULE))
+                elif relative + "/" in classifier.ignored_dirs:
+                    subdirectories.append((entry_path, Bucket.IGNORED))
+                else:
+                    subdirectories.append((entry_path, None))
+                continue
+            try:
+                st = entry.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if inherited is not None:
+                bucket = inherited
+            else:
+                relative = entry_path[classifier.prefix_length :]
+                if relative in classifier.tracked:
+                    bucket = Bucket.TRACKED
+                elif relative in classifier.ignored_files:
+                    bucket = Bucket.IGNORED
+                else:
+                    bucket = Bucket.UNTRACKED
+            allocated = st.st_blocks * 512
+            if st.st_nlink > 1:
+                hardlinked.append((st.st_dev, st.st_ino, bucket, st.st_size, allocated))
+            else:
+                counts = totals[bucket]
+                counts[0] += 1
+                counts[1] += st.st_size
+                counts[2] += allocated
+            last_path = entry_path
+    return DirectoryScan(totals, subdirectories, hardlinked, last_path, is_unreadable=False)
 
 
-def walk(root: Path, tally: Tally, seen: set[tuple[int, int]], prune: set[Path]) -> None:
-    """Count every file under ``root`` not already in ``seen``, skipping ``prune``."""
-    for dirpath, dirnames, filenames in os.walk(root):
-        here = Path(dirpath)
-        dirnames[:] = [d for d in dirnames if here / d not in prune]
-        for name in filenames:
-            if here / name not in prune:
-                count_new(here / name, tally, seen)
+def scan(toplevel: Path, common_dir: Path, threads: int, progress: Progress) -> Report:
+    """Walk a working tree and its repository, reporting progress as it goes.
 
-
-def count_listed(toplevel: Path, listing: str, tally: Tally, seen: set[tuple[int, int]]) -> None:
-    """Count each path in a `git ls-files -z` listing, walking any that is a directory.
-
-    `--directory` collapses a wholly ignored directory into one `dir/` entry, and
-    an untracked nested repository is listed the same way, so an entry can name
-    a whole subtree.
+    Raises `Cancelled` once `progress.is_cancelled` is set; directories already being scanned finish
+    first, which takes moments, since each is one directory deep.
     """
-    for rel in listing.split("\0"):
-        if not rel:
-            continue
-        path = toplevel / rel
-        if path.is_dir() and not path.is_symlink():
-            walk(path, tally, seen, prune=set())
-        else:
-            count_new(path, tally, seen)
+    began = time.monotonic()
+    classifier = build_classifier(toplevel, common_dir)
+    progress.phase = SCANNING
+    inside = f"{toplevel}/"
+
+    totals = [[0, 0, 0] for _ in Bucket]
+    seen_inodes: set[tuple[int, int]] = set()
+    unreadable = 0
+    # Each finished future puts itself on `finished`. Waiting on the set of pending futures instead
+    # (`concurrent.futures.wait`) costs time in proportion to the set, which holds every queued
+    # directory, and made a 445k-file scan quadratic: 189s rather than 5s.
+    finished: SimpleQueue[Future[DirectoryScan]] = SimpleQueue()
+    outstanding = 0
+    with ThreadPoolExecutor(threads) as pool:
+
+        def submit(path: str, inherited: Bucket | None) -> None:
+            nonlocal outstanding
+            outstanding += 1
+            pool.submit(scan_directory, path, inherited, classifier).add_done_callback(finished.put)
+
+        # The working-tree walk prunes the common dir wherever it sits, so it is always its own root.
+        submit(str(toplevel), None)
+        submit(str(common_dir), Bucket.REPOSITORY)
+        while outstanding:
+            if progress.is_cancelled:
+                pool.shutdown(cancel_futures=True)
+                raise Cancelled
+            try:
+                future = finished.get(timeout=CANCEL_CHECK.total_seconds())
+            except Empty:
+                continue
+            outstanding -= 1
+            result = future.result()
+            unreadable += result.is_unreadable
+            for bucket, (files, apparent, allocated) in enumerate(result.totals):
+                counts = totals[bucket]
+                counts[0] += files
+                counts[1] += apparent
+                counts[2] += allocated
+                progress.files += files
+                progress.allocated += allocated
+            for dev, ino, bucket, apparent, allocated in result.hardlinked:
+                if (dev, ino) in seen_inodes:
+                    continue
+                seen_inodes.add((dev, ino))
+                counts = totals[bucket]
+                counts[0] += 1
+                counts[1] += apparent
+                counts[2] += allocated
+                progress.files += 1
+                progress.allocated += allocated
+            for path, inherited in result.subdirectories:
+                submit(path, inherited)
+            last = result.last_path
+            progress.current = last.removeprefix(inside) if last.startswith(inside) else last
+
+    return Report(
+        toplevel=toplevel,
+        common_dir=common_dir,
+        tallies={bucket: Tally(*totals[bucket]) for bucket in Bucket},
+        unreadable_directories=unreadable,
+        elapsed=timedelta(seconds=time.monotonic() - began),
+    )
 
 
 def human(n: int) -> str:
     """Format a byte count with binary units."""
     size = float(n)
-    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
-        if size < 1024 or unit == "TiB":
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if size < 1024:
             return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
         size /= 1024
-    raise AssertionError("unreachable")
+    return f"{size:.1f} TiB"
+
+
+def render(report: Report) -> str:
+    """Lay out a finished scan as the table the command prints."""
+    rows = [(LABELS[bucket], tally) for bucket, tally in report.tallies.items()]
+    rows.append(("total", sum(report.tallies.values(), Tally())))
+    lines = [
+        f"worktree    {report.toplevel}",
+        f"repository  {report.common_dir}",
+        "",
+        f"{'':<20} {'files':>9} {'size':>11} {'on disk':>11}",
+        *(f"{label:<20} {t.files:>9,} {human(t.apparent):>11} {human(t.allocated):>11}" for label, t in rows),
+        "",
+        f"scanned in {report.elapsed.total_seconds():.1f}s",
+    ]
+    if report.unreadable_directories:
+        lines.append(f"{report.unreadable_directories:,} directories could not be read and are not counted")
+    return "\n".join(lines)
+
+
+@dataclass(frozen=True, slots=True)
+class Snapshot:
+    """A copy of `Progress` for the spinner to render, so its output depends only on its state."""
+
+    phase: str = ""
+    current: str = ""
+    files: int = 0
+    allocated: int = 0
+
+
+@component
+def spinner(
+    run: Callable[[], Report], progress: Progress, finished: Callable[[Report | Exception], None]
+) -> Text:
+    """One line showing the scan's progress, which runs the scan and quits when it ends.
+
+    The scan's outcome, report or exception, goes to `finished` rather than being raised here, so the
+    caller sees a failure after the app has given the terminal back.
+    """
+    send = use_controls()
+    shown, set_shown = use_state(Snapshot())
+
+    async def work() -> None:
+        task = asyncio.create_task(asyncio.to_thread(run))
+        try:
+            while not task.done():
+                set_shown(Snapshot(progress.phase, progress.current, progress.files, progress.allocated))
+                await asyncio.wait({task}, timeout=FRAME_TIME.total_seconds())
+        except asyncio.CancelledError:
+            progress.is_cancelled = True
+            raise
+        try:
+            finished(task.result())
+        except Exception as error:
+            finished(error)
+        send(Quit())
+
+    use_effect(work, deps=())
+
+    frame = FRAMES[use_clock(FRAME_TIME).since_mount // FRAME_TIME % len(FRAMES)]
+    if shown.phase != SCANNING:
+        content = f"{frame} {shown.phase}"
+    else:
+        content = f"{frame} {shown.files:,} files, {human(shown.allocated)}  {shown.current}"
+    return Text(content=content, style=text_wrap_none | text_color("amber", 400))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="git-disk-usage",
         description=(
-            "Show the disk a git checkout uses: tracked files, everything else in "
-            "the working tree, and the repository (.git)."
+            "Show the disk a git checkout uses: tracked, untracked, ignored, and submodule files, "
+            "and the repository (.git)."
         ),
     )
     parser.add_argument("path", nargs="?", type=Path, default=Path.cwd(), help="any path inside the checkout (default: .)")
+    parser.add_argument(
+        "--threads", type=int, default=DEFAULT_THREADS, help=f"threads to scan with (default: {DEFAULT_THREADS})"
+    )
     args = parser.parse_args()
 
     start = args.path.resolve()
-    toplevel = Path(git(start, "rev-parse", "--show-toplevel").strip())
-    common_dir = Path(git(start, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()).resolve()
+    try:
+        toplevel = Path(git(start, "rev-parse", "--show-toplevel").strip())
+        common_dir = Path(git(start, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()).resolve()
+    except subprocess.CalledProcessError as error:
+        sys.exit(error.returncode)
+    progress = Progress()
 
-    seen: set[tuple[int, int]] = set()
-    tracked, untracked, ignored, other, repo = Tally(), Tally(), Tally(), Tally(), Tally()
+    def run() -> Report:
+        return scan(toplevel, common_dir, args.threads, progress)
 
-    # Submodule gitlinks are directories here, which count_new skips, so their
-    # checkouts fall through to the final walk and land in `other`.
-    for rel in git(toplevel, "ls-files", "-z").split("\0"):
-        if rel:
-            count_new(toplevel / rel, tracked, seen)
-    count_listed(toplevel, git(toplevel, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"), ignored, seen)
-    count_listed(toplevel, git(toplevel, "ls-files", "-z", "--others", "--exclude-standard"), untracked, seen)
-    # A linked worktree's .git is a file pointing at the common dir; prune it
-    # alongside the common dir so neither lands in a working-tree bucket.
-    walk(toplevel, other, seen, prune={common_dir, toplevel / ".git"})
-    walk(common_dir, repo, seen, prune=set())
+    if not sys.stdout.isatty():
+        print(render(run()))
+        return
 
-    buckets = [
-        ("tracked", tracked),
-        ("untracked", untracked),
-        ("ignored", ignored),
-        ("submodules + other", other),
-        ("repository (.git)", repo),
-    ]
-    total = Tally(
-        sum(t.files for _, t in buckets),
-        sum(t.apparent for _, t in buckets),
-        sum(t.allocated for _, t in buckets),
-    )
-    rows = [*buckets, ("total", total)]
-
-    print(f"worktree    {toplevel}")
-    print(f"repository  {common_dir}")
-    print()
-    print(f"{'':<20} {'files':>9} {'size':>11} {'on disk':>11}")
-    for label, tally in rows:
-        print(f"{label:<20} {tally.files:>9,} {human(tally.apparent):>11} {human(tally.allocated):>11}")
+    outcomes: list[Report | Exception] = []
+    asyncio.run(app(spinner(run, progress, outcomes.append), viewport=Inline(keep_last_frame=False)))
+    if not outcomes:
+        sys.exit(130)
+    match outcomes[0]:
+        case Report() as report:
+            print(render(report))
+        case Exception() as error:
+            raise error
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 if __name__ == "__main__":
