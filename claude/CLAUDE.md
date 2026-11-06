@@ -5,6 +5,7 @@
 - Be concise and direct; skip preamble and flattery.
 - When a request is ambiguous in a way that changes the outcome, ask rather than assume.
 - Avoid em dashes; use commas, parentheses, colons, or separate sentences instead.
+- Use the Oxford comma: "red, white, and blue", not "red, white and blue".
 - Don't cite volatile exact metrics (test counts, file counts, coverage percentages) in
   summaries or replies; they go stale on the next change. Say "tests pass" or "mypy clean",
   not "238 tests across 68 files".
