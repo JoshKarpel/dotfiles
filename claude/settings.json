@@ -128,6 +128,7 @@
       "Bash(git --no-pager show*)",
       "Bash(git --no-pager stash list*)",
       "Bash(git rev-parse *)",
+      "Bash(git --version)",
       "Bash(git remote*)",
       "Bash(git fetch*)",
       "Bash(git add *)",

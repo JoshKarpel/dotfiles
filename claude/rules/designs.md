@@ -84,6 +84,11 @@ someone else's, and how to lay out the document so it supports a decision.
 - **Keep the undecided visible.** Say what you decided not to do, give each
   open question an owner, and put deferred ideas in a "future improvements"
   section rather than dropping them.
+- **Lay out a decision someone else owns; don't make it.** Where the team that
+  owns a choice hasn't settled it, set out the options and what each costs, and
+  stop there: no ranking, no "leans toward", no filling in the owner's own doc.
+  The owner holds context you lack, and a lean written into a shared document
+  gets cited later as though it were the decision.
 - **Label extensibility as extensibility.** When a structure could absorb
   future requirements, say those requirements don't exist yet, so reviewers
   don't argue them as scope.

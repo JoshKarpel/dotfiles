@@ -59,9 +59,9 @@ decided, rewrite the exploratory language around it ("we could investigate",
 
 ## Volatile Metrics
 
-Don't bake volatile metrics into durable docs: an exact test count, file count,
-or coverage percentage is stale the moment the next change lands. State the
-property ("tests pass", "fully typed"), not the number.
+Don't bake counts that change into durable docs: a test or file count, a
+coverage percentage, or the size of a list the document is still growing. State
+the property instead ("tests pass", "a set of open questions").
 
 ## Don't Enumerate the Discoverable
 

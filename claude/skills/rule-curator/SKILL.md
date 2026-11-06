@@ -104,3 +104,21 @@ is). Capture only the user's preferences and suggested approaches, and start
 at the first real convention rather than a scene-setting intro. A short scoping
 or cross-reference line is fine when it marks a genuine boundary (what the rule
 deliberately excludes, or where a related concern lives), not background.
+
+Ask each candidate bullet these questions, drawn from the user's review of
+rules here; a "no" means cut it or rework it:
+
+- **Is it non-obvious?** If Claude would do it unprompted, drop it.
+- **Is it on topic for this rule?** A bullet that's true but about something
+  else ("true but doesn't have much to do with writing alerts") belongs in
+  that other rule or nowhere.
+- **Is it concrete?** If you can't name the mistake it defends against, it
+  isn't guidance yet.
+- **Is it general past its incident?** A bullet phrased around the situation
+  it came from either generalizes to the class, or shrinks to what was
+  actually decided in that case.
+- **Does it hold everywhere the rule loads?** A structural mandate that fits
+  one kind of document is too strict for the rest; state it as a default.
+- **Is it under the right heading?**
+- **Does it name both sides?** A tradeoff bullet gives the pro as well as the
+  cost, and names the cost plainly instead of softening it.

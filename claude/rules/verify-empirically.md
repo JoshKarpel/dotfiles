@@ -52,7 +52,11 @@ you think the API does.
   reproduction.
 - **Never state a performance claim you haven't measured**, least of all in a
   comment or doc. Plausible reasoning about what amortizes or what dominates is
-  frequently backwards, and a measurement is usually one command away.
+  frequently backwards, and a measurement is usually one command away. The same
+  goes for proportions: without numbers for how usage or traffic splits, state
+  the dependence ("grows as more clients adopt v2"), not the balance ("most
+  traffic is v2"). Likewise, a limit that a routine request lifts (a default quota, a rate
+  cap) isn't a cost of the design unless you've checked that it binds.
 
 This is parse-don't-validate applied to your own knowledge: don't trust a
 remembered fact at a boundary; establish it from ground truth.
