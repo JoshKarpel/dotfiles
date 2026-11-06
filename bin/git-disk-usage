@@ -35,7 +35,6 @@ import enum
 import os
 import subprocess
 import sys
-import time
 from collections.abc import Callable
 from concurrent.futures import Future
 from concurrent.futures import ThreadPoolExecutor
@@ -146,13 +145,12 @@ class Progress:
 
 @dataclass(frozen=True, slots=True)
 class Report:
-    """A finished scan: totals by bucket, how many directories could not be read, and how long it took."""
+    """A finished scan: totals by bucket, and how many directories could not be read."""
 
     toplevel: Path
     common_dir: Path
     tallies: dict[Bucket, Tally]
     unreadable_directories: int
-    elapsed: timedelta
 
 
 class Cancelled(Exception):
@@ -256,7 +254,6 @@ def scan(toplevel: Path, common_dir: Path, threads: int, progress: Progress) -> 
     Raises `Cancelled` once `progress.is_cancelled` is set; directories already being scanned finish
     first, which takes moments, since each is one directory deep.
     """
-    began = time.monotonic()
     classifier = build_classifier(toplevel, common_dir)
     progress.phase = SCANNING
     inside = f"{toplevel}/"
@@ -317,7 +314,6 @@ def scan(toplevel: Path, common_dir: Path, threads: int, progress: Progress) -> 
         common_dir=common_dir,
         tallies={bucket: Tally(*totals[bucket]) for bucket in Bucket},
         unreadable_directories=unreadable,
-        elapsed=timedelta(seconds=time.monotonic() - began),
     )
 
 
@@ -331,21 +327,33 @@ def human(n: int) -> str:
     return f"{size:.1f} TiB"
 
 
+def table_row(label: str, tally: Tally) -> str:
+    """One row of the report's table, aligned under its header."""
+    return f"{label:<20} {tally.files:>9,} {human(tally.apparent):>11} {human(tally.allocated):>11}"
+
+
 def render(report: Report) -> str:
-    """Lay out a finished scan as the table the command prints."""
-    rows = [(LABELS[bucket], tally) for bucket, tally in report.tallies.items()]
-    rows.append(("total", sum(report.tallies.values(), Tally())))
+    """Lay out a finished scan as the table the command prints.
+
+    The submodules row is left out when it is empty, since most repositories have none.
+    """
+    rows = [
+        (LABELS[bucket], tally)
+        for bucket, tally in report.tallies.items()
+        if not (bucket is Bucket.SUBMODULE and tally.files == 0)
+    ]
+    header = f"{'':<20} {'files':>9} {'size':>11} {'on disk':>11}"
     lines = [
         f"worktree    {report.toplevel}",
         f"repository  {report.common_dir}",
         "",
-        f"{'':<20} {'files':>9} {'size':>11} {'on disk':>11}",
-        *(f"{label:<20} {t.files:>9,} {human(t.apparent):>11} {human(t.allocated):>11}" for label, t in rows),
-        "",
-        f"scanned in {report.elapsed.total_seconds():.1f}s",
+        header,
+        *(table_row(label, tally) for label, tally in rows),
+        "─" * len(header),
+        table_row("total", sum(report.tallies.values(), Tally())),
     ]
     if report.unreadable_directories:
-        lines.append(f"{report.unreadable_directories:,} directories could not be read and are not counted")
+        lines += ["", f"{report.unreadable_directories:,} directories could not be read and are not counted"]
     return "\n".join(lines)
 
 
