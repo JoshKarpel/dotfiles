@@ -789,6 +789,53 @@ EOF
   systemctl --user restart vscode-web.service
 }
 
+# Serves `manage-worktrees serve` at `https://<vm>.exe.xyz:3002/`: a form that
+# opens a worktree in a new tab of the work session with Claude running in it,
+# so new work can start from a phone and continue there over Remote Control.
+#
+# It starts agents with a shell, so it rests on the same gate as VS Code: the
+# private exe.dev proxy. Never `share set-public` this port.
+#
+# The login shell is for ZELLIJ_SOCKET_DIR and the PATH the tab's command needs,
+# as for the zellij units; ZELLIJ_SESSION_NAME is the work session's name, which
+# do_zellij_session also takes from %l. `--no-cache` because a `uv run` holds a
+# shared lock on the uv cache for as long as it lives, which would block every
+# `uv cache prune` on the box; the cost is resolving the script's dependencies
+# afresh on each start.
+function do_worktrees_web() {
+  local units=~/.config/systemd/user
+
+  "$BASEDIR/bin/is-dev-box" || return 0
+
+  use_user_bus
+
+  log "Serving the worktree form over HTTPS..."
+
+  mkdir -p "$units"
+
+  cat > "$units/worktrees-web.service" << EOF
+[Unit]
+Description=Serve a form that opens worktrees in the work session over the exe.dev HTTPS proxy
+After=zellij-session.service
+
+[Service]
+Environment=ZELLIJ_SESSION_NAME=%l
+ExecStart=/bin/bash -lc 'exec uv run --no-cache --quiet --script $BASEDIR/bin/manage-worktrees serve --port 3002'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+  systemctl --user daemon-reload
+  systemctl --user enable worktrees-web.service
+
+  # Unconditionally, for the same reason as the others. A tab it opened lives in
+  # the zellij server rather than in this process, so a restart loses nothing.
+  systemctl --user restart worktrees-web.service
+}
+
 do_config
 
 . "$HOME/.commonrc-pre"
@@ -809,3 +856,4 @@ do_atlas
 do_zellij_session
 do_zellij_web
 do_vscode_web
+do_worktrees_web

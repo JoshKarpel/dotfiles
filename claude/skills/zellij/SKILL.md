@@ -87,6 +87,18 @@ acts on what the user is looking at.
   `$ZELLIJ_PANE_ID` via `list-panes --json --tab`, filtering
   `.is_plugin == false`: terminal and plugin pane ids are numbered separately
   and collide.
+- **A tab opened while no client is attached is lost (0.45.x,
+  zellij-org/zellij#5594).** It is sized from the attached clients, so with
+  none it is 0x0 and its layout fails with "Not enough room for panes", logged
+  only in the zellij log; even a one-pane layout fails. `new-tab` still exits 0
+  and prints an id, `list-tabs` lists the empty tab until the next client
+  attaches and discards it, and the pane's command, spawned before the layout
+  failed, keeps running with no tab and buffers its output without bound. Hold
+  a throwaway client on a pty for the instant of creation (`manage-worktrees`'s
+  `some_client_attached`); the tab keeps that size until a real client views
+  it. Check `list-clients` first, which prints only its header when nobody is
+  attached. The attach must not inherit `ZELLIJ_SESSION_NAME` naming its target,
+  or it panics with "You are trying to attach to the current session".
 - `tab_id` is stable; `position` is not, and `go-to-tab N` is 1-based. Prefer
   `go-to-tab-by-id`, `close-tab-by-id`, `rename-tab-by-id`.
 - `new-tab` prints the new tab's id and, without `--no-focus`, switches the
@@ -131,10 +143,9 @@ killing; that is cosmetic.
   `EXITED - attach to resurrect`**, because resurrection state lives in the
   shared cache dir. Attaching to it from there starts a second copy. Never
   attach to a session you didn't create in the probe.
-- **A background session with no client is not a faithful model.** Tabs are
-  never laid out (0x0 viewport, empty `dump-layout` body, panes missing from
-  `list-panes`), plugins don't load ("No connected clients found" in the log),
-  and `override-layout` silently does nothing. Attach a client through a pty:
+- **A background session with no client is not a faithful model.** New tabs
+  fail their layout (see #5594 above), plugins don't load ("No connected
+  clients found" in the log), and `override-layout` silently does nothing. Attach a client through a pty:
   `script -qfc "stty cols 120 rows 40; zellij attach probe" /dev/null < <(sleep 60) &`,
   or Python `pty.fork()` with `TIOCSWINSZ` when you need to send keys.
 - **Keybindings can only be tested through a pty client**, by writing the raw

@@ -18,18 +18,35 @@ Run with no command to pick a clone and a branch instead of typing them.
 from __future__ import annotations
 
 import asyncio
+import fcntl
+import html
 import json
 import os
+import pty
 import shlex
+import socket
+import struct
 import subprocess
 import sys
+import termios
+import threading
+import time
 from collections.abc import Callable
+from collections.abc import Iterable
+from collections.abc import Iterator
 from collections.abc import Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from dataclasses import replace
 from datetime import timedelta
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler
+from http.server import HTTPServer
 from pathlib import Path
 from typing import Annotated, Any, assert_never
+from urllib.parse import parse_qs
+from urllib.parse import quote
+from urllib.parse import urlsplit
 
 import typer
 from counterweight import app as counterweight_app
@@ -122,10 +139,118 @@ def fail(message: str) -> typer.Exit:
     return typer.Exit(1)
 
 
+def new_tab_command(name: str, path: Path, *, command: str | None, focus: bool) -> list[str]:
+    """The `zellij action new-tab` that opens the tab NAME at PATH, running the shell command COMMAND in it if given.
+
+    `--layout default` names the built-in layout rather than the session's
+    new_tab_template, because a resurrected session's template pins its pane to
+    the session's absolute cwd, which overrides `--cwd`.
+
+    COMMAND is the tab's own command rather than keys typed into a shell, so the
+    zellij server starts it and is its parent: nothing ties it to whoever ran
+    `new`, which returns as soon as the tab exists. Typing it in instead would
+    need the pane's id and a wait for its shell to be ready to read.
+    """
+    new_tab = ["zellij", "action", "new-tab", "--name", name, "--layout", "default", "--cwd", str(path)]
+    if not focus:
+        new_tab.append("--no-focus")
+    if command is not None:
+        new_tab += ["--", "bash", "-c", command]
+    return new_tab
+
+
+def attached_client_count(listing: str) -> int | None:
+    """How many clients `zellij action list-clients` lists, or None for an empty listing.
+
+    The listing is a header line followed by a row per client, so a header alone
+    means nobody is attached. Empty stdout is zellij's occasional exit-0 non-answer
+    (the race `list_tabs` retries), and reading it as zero clients would attach a
+    second client beside a real one.
+    """
+    lines = listing.splitlines()
+    if not lines:
+        return None
+    return sum(1 for line in lines[1:] if line.strip())
+
+
+ATTACH_WAIT = timedelta(seconds=10)
+
+
+@contextmanager
+def some_client_attached(session: str) -> Iterator[None]:
+    """Hold a throwaway client on SESSION while nobody is attached to it, so a tab opened meanwhile survives.
+
+    zellij 0.45 sizes a new tab from the clients viewing the session, and with
+    none it is 0x0: its layout fails with "Not enough room for panes" (only in
+    the zellij log), the empty tab is discarded when a client next attaches, and
+    the pane's command keeps running with no tab to reach it through, holding
+    every byte it writes (zellij-org/zellij#5594). A client is needed only at
+    the moment of creation: the tab keeps the size this one lends it until a real
+    client views it and resizes it. Remove this once a release carries the fix
+    (zellij-org/zellij#5612).
+    """
+    for _ in range(3):
+        count = attached_client_count(run("zellij", "action", "list-clients").stdout)
+        if count is not None:
+            break
+    else:
+        raise fail("zellij action list-clients printed nothing, so whether anyone is attached is unknown")
+    if count:
+        yield
+        return
+
+    controller, terminal = pty.openpty()
+    fcntl.ioctl(terminal, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 200, 0, 0))
+    # `attach` refuses the session its own ZELLIJ_SESSION_NAME names, as an attempt to nest.
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("ZELLIJ", "ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID")
+    }
+    client = subprocess.Popen(
+        ["zellij", "attach", session],
+        stdin=terminal,
+        stdout=terminal,
+        stderr=terminal,
+        env=environment | {"TERM": "xterm-256color"},
+        start_new_session=True,
+    )
+    os.close(terminal)
+    # The client blocks once the pty's buffer fills with frames nobody reads.
+    threading.Thread(target=drain, args=(controller,), daemon=True).start()
+    try:
+        deadline = time.monotonic() + ATTACH_WAIT.total_seconds()
+        while not attached_client_count(run("zellij", "action", "list-clients").stdout):
+            if client.poll() is not None or time.monotonic() > deadline:
+                raise fail(f"a client could not attach to {session}, so a new tab there would be discarded")
+            time.sleep(0.02)
+        yield
+    finally:
+        client.terminate()
+        client.wait()
+        os.close(controller)
+
+
+def drain(descriptor: int) -> None:
+    """Read DESCRIPTOR until it closes, discarding what arrives."""
+    try:
+        while os.read(descriptor, 65536):
+            pass
+    except OSError:
+        pass
+
+
 @app.command()
 def new(
     repo: Annotated[Path, typer.Argument(help="Any path in the clone, or in one of its worktrees.")],
     branch: Annotated[str, typer.Argument(help="Branch to work on.")],
+    command: Annotated[
+        str | None,
+        typer.Option(
+            help="Shell command the tab runs in place of a shell, through `bash -c`. When it exits, Enter runs it again and Ctrl+C closes the pane."
+        ),
+    ] = None,
+    focus: Annotated[bool, typer.Option(help="Switch to the new tab; --no-focus leaves every client where it is.")] = True,
 ) -> None:
     """Open BRANCH in a worktree beside the clone, in a new zellij tab.
 
@@ -139,11 +264,17 @@ def new(
     ones included, starts in the worktree. When the clone has a pre-commit
     config and its git hook is missing, or pinned to an interpreter that is
     gone, a floating pane in the new tab installs it.
+
+    The session is the one ZELLIJ_SESSION_NAME names, which zellij sets in each
+    of its panes and `serve`'s unit sets for itself.
     """
-    if not os.environ.get("ZELLIJ"):
-        raise fail("not inside a zellij session")
+    if not os.environ.get("ZELLIJ_SESSION_NAME"):
+        raise fail("ZELLIJ_SESSION_NAME is unset, so there is no zellij session to open a tab in")
 
     clone = clone_of(repo)
+    # git's own rules for a branch name, which also refuse `..` and a leading `-`,
+    # so the name cannot climb out of <repo>.worktrees/ or read as a flag below.
+    branch = git(clone, "check-ref-format", "--branch", branch)
     path = worktrees_root(clone) / branch
 
     if not path.exists():
@@ -158,12 +289,9 @@ def new(
         else:
             git(clone, "worktree", "add", "--no-track", "-b", branch, path, "origin/HEAD")
 
-    # `--layout default` names the built-in layout rather than the session's
-    # new_tab_template, because a resurrected session's template pins its pane to
-    # the session's absolute cwd, which overrides `--cwd`. new-tab prints the tab's id.
-    tab_id = run(
-        "zellij", "action", "new-tab", "--name", tab_name(clone, branch), "--layout", "default", "--cwd", path
-    ).stdout.strip()
+    with some_client_attached(os.environ["ZELLIJ_SESSION_NAME"]):
+        # new-tab prints the tab's id.
+        tab_id = run(*new_tab_command(tab_name(clone, branch), path, command=command, focus=focus)).stdout.strip()
 
     # Hooks live in the clone's git dir, shared by every worktree, so one install
     # covers them all. It runs from the clone rather than the worktree because the
@@ -329,14 +457,19 @@ def pick(context: typer.Context) -> None:
     if not os.environ.get("ZELLIJ"):
         raise fail("not inside a zellij session")
 
-    sections = tuple(Section(title=f"~/{root.name}", clones=discover_clones(root)) for root in CLONE_ROOTS)
     # Read up front, all of them, so stepping the picker never waits on git; it takes milliseconds.
-    branches = {clone: read_branches(clone) for section in sections for clone in section.clones}
+    sections, branches = read_clones()
     opening = asyncio.run(choose_opening(sections, branches, title="worktrees"))
     if opening is None:
         return
     typer.echo(f"opening {tab_name(opening.clone, opening.branch)}")
     new(opening.clone, opening.branch)
+
+
+def read_clones() -> tuple[tuple[Section, ...], dict[Path, Branches]]:
+    """Every clone under CLONE_ROOTS, a section per root, and the branches of each that `new` can open."""
+    sections = tuple(Section(title=f"~/{root.name}", clones=discover_clones(root)) for root in CLONE_ROOTS)
+    return sections, {clone: read_branches(clone) for section in sections for clone in section.clones}
 
 
 def discover_clones(root: Path) -> tuple[Path, ...]:
@@ -700,6 +833,365 @@ async def choose_opening(
     return chosen[-1] if chosen else None
 
 
+@app.command()
+def serve(
+    port: Annotated[int, typer.Option(help="Port to listen on.")] = 3002,
+    host: Annotated[str, typer.Option(help="Address to bind.")] = "127.0.0.1",
+) -> None:
+    """Serve a web form that runs `new` with Claude as the tab's command, for opening a worktree from a phone.
+
+    Pick a clone, name a branch, and the tab opens with Claude in it; Remote
+    Control then lists that session in the Claude app as <repo>:<branch>. The
+    tab opens with `--no-focus`, so whoever is looking at the session stays
+    where they are.
+
+    Meant to sit behind the exe.dev HTTPS proxy, which is private, so reaching
+    the form takes an exe.dev login with access to the box: the same gate as
+    VS Code on 3001, which hands the same people a terminal. A POST is refused
+    unless its Origin is the page the proxy served, so a page elsewhere cannot
+    submit the form with that login's cookie.
+
+    Requests are handled one at a time, so two submits for one branch cannot
+    race each other through `git worktree add`.
+    """
+    if not os.environ.get("ZELLIJ_SESSION_NAME"):
+        raise fail("ZELLIJ_SESSION_NAME is unset, so there is no zellij session to open tabs in")
+    with HTTPServer((host, port), OpeningHandler) as server:
+        typer.echo(f"manage-worktrees: serving on http://{host}:{port}/ for session {os.environ['ZELLIJ_SESSION_NAME']}", err=True)
+        server.serve_forever()
+
+
+@dataclass(frozen=True, slots=True)
+class Rejection:
+    """Why a submitted form opens nothing, and the status that says so."""
+
+    status: HTTPStatus
+    message: str
+
+
+def parse_opening(headers: Mapping[str, str], body: str, clones: Iterable[Path]) -> Opening | Rejection:
+    """What a form submission asks `new` to open, or why it is refused.
+
+    HEADERS are keyed in lowercase. The repo has to be one of CLONES, so the
+    form can only name a clone the page offered, never an arbitrary path. The
+    branch is checked by `new` itself, through git.
+    """
+    expected_origin = f"{headers.get('x-forwarded-proto', '')}://{headers.get('x-forwarded-host', '')}"
+    if headers.get("origin") != expected_origin:
+        return Rejection(HTTPStatus.FORBIDDEN, "This form only accepts submissions from its own page.")
+    fields = parse_qs(body, keep_blank_values=True)
+    by_path = {str(clone): clone for clone in clones}
+    if (clone := by_path.get(fields.get("repo", [""])[0])) is None:
+        return Rejection(HTTPStatus.BAD_REQUEST, "That repository is not one of the clones listed.")
+    if not (branch := fields.get("branch", [""])[0].strip()):
+        return Rejection(HTTPStatus.BAD_REQUEST, "Name a branch to open.")
+    return Opening(clone=clone, branch=branch)
+
+
+@dataclass(frozen=True, slots=True)
+class Link:
+    """A button under a notice."""
+
+    text: str
+    href: str
+
+
+@dataclass(frozen=True, slots=True)
+class Notice:
+    """A line shown above the form: what was opened, or what went wrong, with somewhere to go next."""
+
+    text: str
+    is_error: bool
+    link: Link | None = None
+
+
+# Where Claude Code keeps a record per running session, named for its pid and
+# removed when it exits. It is Claude Code's own bookkeeping rather than an
+# interface (`claude agents --json`, the supported listing, has no Remote
+# Control id), so a release can change its shape, and the page then says to
+# find the session by name instead of linking it.
+CLAUDE_SESSIONS = Path.home() / ".claude" / "sessions"
+SESSIONS_PAGE = "https://claude.ai/code"
+# How often the page looks again for the Remote Control session it opened, and for how long.
+RECHECK_EVERY = timedelta(seconds=2)
+RECHECK_FOR = timedelta(seconds=30)
+
+
+def read_session_records(directory: Path) -> list[dict[str, object]]:
+    """The records of Claude's running sessions in DIRECTORY.
+
+    One that cannot be read is skipped: its session starting or exiting can
+    catch the file mid-write or just removed.
+    """
+    records = []
+    for path in directory.glob("*.json"):
+        try:
+            records.append(json.loads(path.read_text()))
+        except OSError, json.JSONDecodeError:
+            continue
+    return records
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteSession:
+    """A running Claude that has connected to Remote Control, and its page on claude.ai."""
+
+    name: str
+    status: str
+    cwd: Path
+    started_at: int
+    url: str
+
+
+def remote_sessions(records: Iterable[Mapping[str, object]]) -> tuple[RemoteSession, ...]:
+    """The sessions among RECORDS with a Remote Control page, newest first.
+
+    One that has not connected yet has no `bridgeSessionId`, and is left out
+    until it does. A session never named is listed by its directory's name.
+    """
+    sessions = []
+    for record in records:
+        if not (isinstance(bridge := record.get("bridgeSessionId"), str) and bridge):
+            continue
+        cwd = Path(str(record.get("cwd", "")))
+        name = record.get("name")
+        started_at = record.get("startedAt")
+        sessions.append(
+            RemoteSession(
+                name=name if isinstance(name, str) and name else cwd.name,
+                status=str(record.get("status", "")),
+                cwd=cwd,
+                started_at=started_at if isinstance(started_at, int) else 0,
+                url=f"{SESSIONS_PAGE}/{quote(bridge)}",
+            )
+        )
+    return tuple(sorted(sessions, key=lambda session: session.started_at, reverse=True))
+
+
+def remote_control_url(sessions: Iterable[RemoteSession], name: str) -> str | None:
+    """The claude.ai page of the session named NAME, once it has connected."""
+    return next((session.url for session in sessions if session.name == name), None)
+
+
+def opened_notice(name: str, url: str | None, checks: int) -> tuple[Notice, str | None]:
+    """What the page says after opening NAME, and where it refreshes to, if anywhere, having looked CHECKS times."""
+    if url is not None:
+        return Notice(f"Opened {name}.", is_error=False, link=Link("Open in Claude", url)), None
+    if checks * RECHECK_EVERY < RECHECK_FOR:
+        return Notice(f"Opened {name}. Waiting for Claude to connect…", is_error=False), (
+            f"/?opened={quote(name)}&checks={checks + 1}"
+        )
+    return (
+        Notice(
+            f"Opened {name}, but its Remote Control session has not shown up. Look for {name} in the Claude app.",
+            is_error=True,
+            link=Link("Claude Code sessions", SESSIONS_PAGE),
+        ),
+        None,
+    )
+
+
+PAGE_STYLE = """
+:root { --ground: #f7f7f5; --surface: #fff; --ink: #1d1d1b; --muted: #6b6b66; --line: #d9d9d4;
+  --accent: #2f5fd0; --accent-ink: #fff; --ok: #e6f2e8; --ok-ink: #1f5b2c; --bad: #fbe9e7; --bad-ink: #8a2516;
+  color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root { --ground: #161615; --surface: #1f1f1d; --ink: #ecece8;
+  --muted: #9a9a94; --line: #3a3a37; --accent: #7aa2ff; --accent-ink: #10131a; --ok: #1d3323; --ok-ink: #b7e3c1;
+  --bad: #3a1f1b; --bad-ink: #f2b8ae; color-scheme: dark; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--ink);
+  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 32rem; margin: 0 auto; padding: 1.5rem 1rem; }
+h1 { font-size: 1.25rem; margin: 0 0 1rem; }
+h1 span { color: var(--muted); font-weight: normal; }
+form { display: grid; gap: 1rem; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 0.75rem; padding: 1rem; }
+label { display: grid; gap: 0.35rem; font-weight: 600; font-size: 0.9rem; }
+select, input, button { font: inherit; padding: 0.7rem 0.75rem; border-radius: 0.5rem;
+  border: 1px solid var(--line); background: var(--ground); color: var(--ink); width: 100%; }
+button { background: var(--accent); color: var(--accent-ink); border: none; font-weight: 600; }
+.notice { padding: 0.75rem 1rem; border-radius: 0.5rem; margin: 0 0 1rem; overflow-wrap: anywhere;
+  background: var(--ok); color: var(--ok-ink); }
+.notice.error { background: var(--bad); color: var(--bad-ink); white-space: pre-wrap; }
+.notice a, .sessions a.button { display: block; margin-top: 0.6rem; text-align: center; text-decoration: none;
+  padding: 0.7rem 0.75rem; border-radius: 0.5rem; background: var(--accent); color: var(--accent-ink);
+  font-weight: 600; white-space: normal; }
+h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; }
+.sessions { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.sessions a { display: block; padding: 0.7rem 0.9rem; border-radius: 0.5rem; background: var(--surface);
+  border: 1px solid var(--line); color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+.sessions small { display: block; color: var(--muted); }
+.empty { color: var(--muted); }
+"""
+
+# Refills the branch suggestions for the clone picked, and remembers that clone,
+# since the next thing started from a phone is usually in the same repository.
+PAGE_SCRIPT = """
+const repo = document.getElementById("repo");
+const list = document.getElementById("branches");
+function suggest() {
+  list.replaceChildren(...(BRANCHES[repo.value] || []).map((name) => new Option(name)));
+  try { localStorage.setItem("repo", repo.value); } catch {}
+}
+try { const last = localStorage.getItem("repo"); if (last && last in BRANCHES) repo.value = last; } catch {}
+repo.addEventListener("change", suggest);
+suggest();
+"""
+
+
+def render_notice(notice: Notice | None) -> str:
+    """NOTICE as a paragraph, with its link as a button under the text, or nothing."""
+    if notice is None:
+        return ""
+    link = "" if notice.link is None else f'<a href="{html.escape(notice.link.href)}">{html.escape(notice.link.text)}</a>'
+    return f'<p class="notice{" error" if notice.is_error else ""}" role="status">{html.escape(notice.text)}{link}</p>'
+
+
+def render_sessions(sessions: tuple[RemoteSession, ...]) -> str:
+    """Each running Remote Control session as a link to its claude.ai page, with its status and directory under it."""
+    if not sessions:
+        return '<p class="empty">No Claude session on this box is connected to Remote Control.</p>'
+    home = Path.home()
+    items = "".join(
+        f'<li><a href="{html.escape(session.url)}">{html.escape(session.name)}'
+        f"<small>{html.escape(session.status)} · "
+        f"{html.escape(str('~' / session.cwd.relative_to(home)) if session.cwd.is_relative_to(home) else str(session.cwd))}"
+        "</small></a></li>"
+        for session in sessions
+    )
+    return f'<ul class="sessions">{items}</ul>'
+
+
+def render_page(
+    sections: tuple[Section, ...],
+    branches: Mapping[Path, Branches],
+    host: str,
+    notice: Notice | None,
+    sessions: tuple[RemoteSession, ...],
+    refresh_to: str | None,
+) -> str:
+    """The form, listing each section's clones and suggesting each clone's branches, under NOTICE if there is one.
+
+    The running SESSIONS follow it, and the page reloads at REFRESH_TO after a
+    moment when it is waiting on one to connect.
+    """
+    groups = "".join(
+        f'<optgroup label="{html.escape(section.title)}">'
+        + "".join(f'<option value="{html.escape(str(clone))}">{html.escape(clone.name)}</option>' for clone in section.clones)
+        + "</optgroup>"
+        for section in sections
+        if section.clones
+    )
+    suggestions = {
+        str(clone): [*branches[clone].worktrees, *branches[clone].without_worktree] for clone in branches
+    }
+    # `</` would end the script element early, wherever a branch name put it.
+    suggestions_json = json.dumps(suggestions).replace("</", "<\\/")
+    refresh = (
+        ""
+        if refresh_to is None
+        else f'<meta http-equiv="refresh" content="{int(RECHECK_EVERY.total_seconds())}; url={html.escape(refresh_to)}">'
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{refresh}
+<title>worktrees · {html.escape(host)}</title>
+<style>{PAGE_STYLE}</style>
+</head>
+<body>
+<main>
+<h1>Open a worktree <span>on {html.escape(host)}</span></h1>
+{render_notice(notice)}
+<form method="post" action="/open">
+<label>Repository<select name="repo" id="repo">{groups}</select></label>
+<label>Branch<input name="branch" list="branches" required autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go"></label>
+<datalist id="branches"></datalist>
+<button>Open with Claude</button>
+</form>
+<h2>Remote Control sessions</h2>
+{render_sessions(sessions)}
+</main>
+<script>const BRANCHES = {suggestions_json};{PAGE_SCRIPT}</script>
+</body>
+</html>
+"""
+
+
+class OpeningHandler(BaseHTTPRequestHandler):
+    """The shell around `parse_opening` and `render_page`: reads the clones, runs `new`, and writes the response."""
+
+    def do_GET(self) -> None:
+        url = urlsplit(self.path)
+        if url.path != "/":
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        query = parse_qs(url.query)
+        sessions = remote_sessions(read_session_records(CLAUDE_SESSIONS))
+        if not (opened := query.get("opened", [""])[0]):
+            self.send_page(HTTPStatus.OK, None, sessions)
+            return
+        checks = int(checks_text) if (checks_text := query.get("checks", ["0"])[0]).isdigit() else 0
+        notice, refresh_to = opened_notice(opened, remote_control_url(sessions, opened), checks)
+        self.send_page(HTTPStatus.OK, notice, sessions, refresh_to)
+
+    def do_POST(self) -> None:
+        if urlsplit(self.path).path != "/open":
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        body = self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode()
+        headers = {key.lower(): value for key, value in self.headers.items()}
+        sections, _ = read_clones()
+        match parse_opening(headers, body, (clone for section in sections for clone in section.clones)):
+            case Rejection(status=status, message=message):
+                self.send_page(status, Notice(message, is_error=True), remote_sessions(read_session_records(CLAUDE_SESSIONS)))
+            case Opening(clone=clone, branch=branch):
+                name = tab_name(clone, branch)
+                # The name goes to both flags: `--name` is what the prompt box and
+                # /resume show, and `--remote-control` is what the Claude app lists.
+                claude = shlex.join(["claude", "--name", name, "--remote-control", name])
+                # The script's own interpreter already has its dependencies, so this skips uv entirely.
+                result = subprocess.run(
+                    [sys.executable, str(Path(__file__).resolve()), "new", "--command", claude, "--no-focus", "--", str(clone), branch],
+                    capture_output=True,
+                    text=True,
+                    timeout=timedelta(minutes=2).total_seconds(),
+                )
+                if result.returncode != 0:
+                    message = result.stderr.strip() or f"manage-worktrees new exited {result.returncode}"
+                    self.send_page(
+                        HTTPStatus.INTERNAL_SERVER_ERROR,
+                        Notice(message, is_error=True),
+                        remote_sessions(read_session_records(CLAUDE_SESSIONS)),
+                    )
+                    return
+                # Post/redirect/get, so reloading the page that says it opened does not open it again.
+                self.send_response(HTTPStatus.SEE_OTHER)
+                self.send_header("Location", f"/?opened={quote(name)}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            case _ as unreachable:
+                assert_never(unreachable)
+
+    def send_page(
+        self,
+        status: HTTPStatus,
+        notice: Notice | None,
+        sessions: tuple[RemoteSession, ...],
+        refresh_to: str | None = None,
+    ) -> None:
+        sections, branches = read_clones()
+        body = render_page(sections, branches, socket.gethostname().split(".")[0], notice, sessions, refresh_to).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 def _selftest() -> int:
     import tempfile
     from counterweight.autopilot import typed
@@ -835,6 +1327,92 @@ def _selftest() -> int:
     cases += [
         ("tabs close with the active one last", closing_order(tabs, ["dotfiles:a", "dotfiles:b", "dotfiles:c"]) == [2, 9, 4]),
         ("a tab already closed is skipped", closing_order(tabs, ["dotfiles:b", "dotfiles:gone"]) == [9]),
+    ]
+
+    origin = {
+        "origin": "https://box.exe.xyz:3002",
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "box.exe.xyz:3002",
+    }
+    clones = (projects / "dotfiles", projects / "ray")
+    page = render_page(
+        (Section(title="~/projects", clones=(projects / "a<b",)),),
+        {projects / "a<b": Branches(worktrees=("x</script>",), without_worktree=())},
+        "box",
+        Notice("<oops>", is_error=True),
+        (),
+        None,
+    )
+    records = [
+        {"name": "dotfiles:old", "cwd": "/w/a", "status": "idle", "startedAt": 1, "bridgeSessionId": "session_old"},
+        {"name": "dotfiles:new", "cwd": "/w/b", "status": "busy", "startedAt": 2, "bridgeSessionId": "session_new"},
+        {"name": "dotfiles:starting", "cwd": "/w/c", "status": "idle", "startedAt": 3},
+        {"cwd": "/w/unnamed", "status": "idle", "startedAt": 0, "bridgeSessionId": "session_bare"},
+    ]
+    sessions = remote_sessions(records)
+    cases += [
+        (
+            "only connected sessions are listed, newest first, an unnamed one by its directory",
+            [session.name for session in sessions] == ["dotfiles:new", "dotfiles:old", "unnamed"],
+        ),
+        ("a session links to its claude.ai page", remote_control_url(sessions, "dotfiles:old") == "https://claude.ai/code/session_old"),
+        ("a session not yet connected has no link", remote_control_url(sessions, "dotfiles:starting") is None),
+        (
+            "a connected session's notice links to it and stops refreshing",
+            opened_notice("r:b", "https://claude.ai/code/s", 3)
+            == (Notice("Opened r:b.", is_error=False, link=Link("Open in Claude", "https://claude.ai/code/s")), None),
+        ),
+        ("while waiting, the page refreshes with one more check counted", opened_notice("r:b", None, 4)[1] == "/?opened=r%3Ab&checks=5"),
+        (
+            "after waiting long enough, the page stops refreshing and says so",
+            (lambda notice, refresh: notice.is_error and refresh is None)(*opened_notice("r:b", None, 15)),
+        ),
+    ]
+    clients_header = "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n"
+    cases += [
+        ("a client listing with only its header counts nobody attached", attached_client_count(clients_header) == 0),
+        (
+            "a client listing counts each client's row",
+            attached_client_count(clients_header + "1 terminal_0 claude\n3 terminal_7 bash\n") == 2,
+        ),
+        ("an empty client listing is no answer rather than nobody attached", attached_client_count("") is None),
+    ]
+    cases += [
+        (
+            "a tab with no command opens a shell and takes focus",
+            new_tab_command("r:b", Path("/w"), command=None, focus=True)
+            == ["zellij", "action", "new-tab", "--name", "r:b", "--layout", "default", "--cwd", "/w"],
+        ),
+        (
+            "a tab's command runs whole through bash, without taking focus",
+            new_tab_command("r:b", Path("/w"), command="claude --name 'r:b'", focus=False)[-5:]
+            == ["--no-focus", "--", "bash", "-c", "claude --name 'r:b'"],
+        ),
+        (
+            "a submission from the page opens the clone and branch it names",
+            parse_opening(origin, "repo=%2Fp%2Fray&branch=+feat%2Fx+", clones) == Opening(projects / "ray", "feat/x"),
+        ),
+        (
+            "a submission from another origin is refused",
+            parse_opening({**origin, "origin": "https://evil.exe.xyz"}, "repo=%2Fp%2Fray&branch=x", clones)
+            == Rejection(HTTPStatus.FORBIDDEN, "This form only accepts submissions from its own page."),
+        ),
+        (
+            "a submission with no Origin is refused even with no proxy headers to compare",
+            isinstance(parse_opening({}, "repo=%2Fp%2Fray&branch=x", clones), Rejection),
+        ),
+        (
+            "a repo the page did not list is refused",
+            parse_opening(origin, "repo=%2Fetc&branch=x", clones)
+            == Rejection(HTTPStatus.BAD_REQUEST, "That repository is not one of the clones listed."),
+        ),
+        (
+            "a blank branch is refused",
+            parse_opening(origin, "repo=%2Fp%2Fray&branch=++", clones)
+            == Rejection(HTTPStatus.BAD_REQUEST, "Name a branch to open."),
+        ),
+        ("the page escapes clone names and notices", "a&lt;b" in page and "&lt;oops&gt;" in page and "<oops>" not in page),
+        ("a branch name cannot close the page's script early", "x</script>" not in page and "x<\\/script>" in page),
     ]
 
     def picked(

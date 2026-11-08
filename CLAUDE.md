@@ -19,7 +19,8 @@ Personal dotfiles repository. The `install.sh` script symlinks configs into plac
 Systemd user units are the exception to `config/`. `install.sh` writes
 `cloister-codex.{service,timer}`, `converge-atlas.{service,timer}`,
 `sync-branches.{service,timer}`, `tidy.{service,timer}`,
-`zellij-session.service`, `zellij-web.service`, and `vscode-web.service` into `~/.config/systemd/user/` rather than symlinking them
+`zellij-session.service`, `zellij-web.service`, `vscode-web.service`, and
+`worktrees-web.service` into `~/.config/systemd/user/` rather than symlinking them
 from here, because a unit has to name the absolute path of the clone it was
 installed from, and only `install.sh` knows where that is. The same directory is
 where `claude-scriptorium` and `exe-dev-atlas` write the units
@@ -52,7 +53,9 @@ forwards 3000-9999 to `https://<vm>.exe.xyz:<port>/`.
 [exe-dev-atlas](https://github.com/JoshKarpel/exe-dev-atlas) takes the bare
 hostname's port so the front door is an index of everything else. The atlas
 sorts by port, so the bottom of the forwarded range is the top of the index, and
-the ways in to the box take it: the work session on 3000 and VS Code on 3001.
+the ways in to the box take it: the work session on 3000, VS Code on 3001,
+and on 3002 the form that opens a worktree with Claude in it
+(`manage-worktrees serve`), which is how new work starts from a phone.
 A dev server lands wherever it lands above those, and
 services that are only occasionally opened start at 4000, where the codex is.
 
@@ -248,7 +251,9 @@ zellij-custom-keybinds
 # tab of its own, and `wt done` removes the worktree and closes its tab. `wt`
 # alone (Alt+Shift+e in zellij) picks the clone, from ~/projects and ~/work, and
 # the worktree, local branch, or new branch instead of taking them as
-# arguments. The
+# arguments. `wt new --command CMD` runs CMD as the tab's command in place of a
+# shell, and `manage-worktrees serve` is `new` with Claude as that command,
+# behind a web form, for dev boxes to serve on 3002. The
 # claude-tab-status hook marks each tab working (●), waiting on you (?), paused
 # on background work or a scheduled job that will wake it (◌), or finished (✓).
 # Run with --help for subcommands and flags.
@@ -470,10 +475,11 @@ would apply a style to every session on every machine. The `harry` alias in
   the exemplar with third-party dependencies; the Python hooks (`claude-rm-scope-check`,
   `claude-gh-api-check`) use the same shebang with an empty dependency set. `--quiet`
   keeps `uv`'s own output off stdout, which matters for hooks whose stdout must stay
-  clean (parseable JSON or empty). Every one of them is a short-lived command, which
-  is what makes that shebang safe here: a `uv run` holds a shared lock on the uv cache
-  for its whole life, so anything long-lived would need `--no-cache` to keep from
-  blocking every `uv cache prune` on the machine.
+  clean (parseable JSON or empty). A `uv run` holds a shared lock on the uv cache
+  for its whole life, which is harmless for a short-lived command and blocks every
+  `uv cache prune` on the machine for a long-lived one, so a script run as a
+  service runs under `uv run --no-cache` rather than its shebang
+  (`worktrees-web.service` runs `manage-worktrees serve` that way).
 - Shell scripts use 2-space indentation (enforced by beautysh via pre-commit)
 - Target files in `targets/` are auto-sorted by the `file-contents-sorter` pre-commit hook
 - Pre-commit hooks run via [pre-commit.ci](https://pre-commit.ci) on push; see
