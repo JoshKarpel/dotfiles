@@ -77,8 +77,9 @@
   rendered by `plan-artifact <plan.md> <out.html>` and never written or edited by hand: the
   page is derived from the `.md` each time, so any later session just reruns the script.
   Read `plan-artifact --help` before writing or revising a plan: the page renders more than
-  plain markdown (GFM alerts and footnotes, mermaid, raw HTML and `<svg>`), and diagrams
-  belong in the plan itself so it stays one self-contained file. Sessions don't remember
+  plain markdown (GFM alerts and footnotes, mermaid, raw HTML and `<svg>`, and a `<figure>`
+  with its own scoped style and script for an interactive diagram), and diagrams belong in
+  the plan itself so it stays one self-contained file. Sessions don't remember
   artifacts, so the file carries the link: an `Artifact: <url>` line directly under the `# Title`. If the line is there, update that
   artifact (`url`) rather than publishing a new one; if not, publish and add the line.
   Publish to an existing plan page with `force: true`, without reading it first: I

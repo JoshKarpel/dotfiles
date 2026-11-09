@@ -24,14 +24,26 @@ What a plan can use:
   faint `#` link beside it, so any section can be linked to as `<artifact-url>#<slug>`, slugged
   the way GitHub does it, and the title's slug is the top of the page.
 - Task items (`- [ ]`, `- [x]`) are counted into a progress bar under the title.
-- A table with five or more columns widens the page, so a catalogue or matrix isn't squeezed.
+- A table with five or more columns, or a `<figure class="wide">`, widens the page, so a catalogue,
+  a matrix, or a large diagram isn't squeezed.
 - A ```` ```mermaid ```` fence is drawn as a diagram.
 - Raw HTML passes through: `<details>`/`<summary>` to fold away detail, `<kbd>`, `<sup>`/`<sub>`,
-  inline `<svg>`. An HTML block ends at the first blank line, so keep blank lines out of an `<svg>`;
-  to write markdown inside `<details>`, leave a blank line after `</summary>` and before
-  `</details>`.
+  `<svg>`, and `<figure>`. An `<svg>` or `<figure>` that starts a line is one raw block through
+  its closing tag, with any blank lines inside it dropped (a blank line inside a `<pre>` or a JS
+  template literal goes too), and one that is never closed is an error. Any other HTML block ends
+  at the first blank line, so to write markdown inside `<details>`, leave a blank line after
+  `</summary>` and before `</details>`; a `<figure>` whose opening line is followed by a blank line
+  works the same way, which is how a mermaid fence goes inside a `<figure class="wide">`.
 - Color an `<svg>` from the page's tokens so it follows the theme: `currentColor`, `var(--ink)`,
-  `var(--muted)`, `var(--accent)`, `var(--rule)`, `var(--surface)`.
+  `var(--muted)`, `var(--accent)`, `var(--rule)`, `var(--surface)`, `var(--paper)`.
+- A `<figure>` can carry its own `<style>` and `<script>`, for a diagram with its own palette or
+  controls. They share the page with everything else, so scope every rule under the figure's own
+  class, prefix its custom properties, ids and marker ids (`--net-forge`, `net-arrow`), and never
+  style `:root`, `body` or a bare element. Take neutrals from the page's tokens, and theme the
+  rest with the page's selectors: values on the figure's class, then again under
+  `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .net { ... } }` and
+  `:root[data-theme="dark"] .net { ... }`. Write the markup so the figure is complete before its
+  script runs; the script adds interaction, never content.
 
 An `Artifact: <url>` line directly under the title is bookkeeping for whoever republishes, so it is
 left out of the page.
@@ -46,6 +58,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -126,8 +139,8 @@ body {
   justify-content: center;
   padding-block: 2.5rem 4rem;
 }
-/* A plan carrying a wide table (a catalogue, a matrix) widens the article column so the table isn't
-   squeezed into the prose measure; paragraphs and list items keep their 68ch cap regardless. */
+/* A plan carrying a wide table (a catalogue, a matrix) or a wide figure widens the article column so
+   it isn't squeezed into the prose measure; paragraphs and list items keep their 68ch cap regardless. */
 .page.wide { grid-template-columns: minmax(0, 13rem) minmax(0, 90rem); gap: 2.5rem; }
 .page.wide .plan table { font-size: 0.86rem; line-height: 1.45; }
 .masthead { grid-column: 1 / -1; display: grid; gap: 0.6rem; }
@@ -195,6 +208,8 @@ body {
 .plan th { font-family: var(--display); font-weight: 600; }
 .plan svg { max-width: 100%; height: auto; color: var(--ink); }
 .plan img { max-width: 100%; }
+.plan figure { margin: 1.5rem 0; min-width: 0; }
+.plan figcaption { color: var(--muted); font-size: 0.88rem; margin-top: 0.5rem; max-width: 68ch; }
 .plan .contains-task-list { list-style: none; padding-left: 1.7rem; }
 .plan .task-list-item-checkbox { accent-color: var(--done); margin: 0 0.5rem 0 -1.7rem; width: 1.2rem; vertical-align: -0.1em; }
 .plan hr { border: none; border-top: 1px solid var(--rule); margin: 2rem 0; }
@@ -255,6 +270,57 @@ class Plan:
 
 # A table with at least this many columns gets the wide page layout.
 WIDE_TABLE_COLUMNS = 5
+
+# A figure opts into the wide page layout with a `wide` class, quoted either way.
+WIDE_FIGURE = re.compile(r"""<figure\b[^>]*\bclass=(["'])(?:(?!\1).)*?(?<![\w-])wide(?![\w-])""", re.IGNORECASE)
+
+# Elements that, starting a line, are one raw HTML block through their closing tag. CommonMark ends
+# such a block at the first blank line, which would split a drawing or a figure's script mid-way and
+# render the rest as paragraphs, so `join_raw_blocks` drops the blank lines inside them. A tag that
+# closes itself on its line (`<svg .../>`) opens nothing, or the count would never return to zero.
+RAW_BLOCK_OPEN = re.compile(r"<(svg|figure)(?=[\s/>]|$)(?![^<>]*/>)", re.IGNORECASE)
+RAW_BLOCK_START = re.compile(r"^ {0,3}" + RAW_BLOCK_OPEN.pattern, re.IGNORECASE)
+RAW_BLOCK_CLOSE = re.compile(r"</(svg|figure)\s*>", re.IGNORECASE)
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def join_raw_blocks(lines: list[str]) -> list[str]:
+    """
+    The plan's lines with blank lines dropped inside each `<svg>` or `<figure>` that starts a line.
+
+    Nesting is counted, so the block ends at the outer element's closing tag. Fenced code is left
+    alone, so a fence showing an `<svg>` keeps its blank lines, and an element that opens mid-line
+    stays inline HTML for markdown to handle. A `<figure>` whose opening line is followed by a blank
+    line is left alone too: that is how markdown (a mermaid fence, an image) goes inside one, as with
+    `<details>`.
+
+    Raises `ValueError` on an element that is never closed, which would otherwise swallow every
+    blank line after it and render the rest of the plan as one raw block.
+    """
+    kept: list[str] = []
+    fence: str | None = None
+    depth, opened_at = 0, 0
+    for number, line in enumerate(lines, start=1):
+        if depth == 0 and (match := FENCE.match(line)):
+            marker, rest = match.groups()
+            if fence is None:
+                fence = marker
+            # A closing fence carries no info string.
+            elif marker[0] == fence[0] and len(marker) >= len(fence) and not rest.strip():
+                fence = None
+        elif fence is None and depth > 0:
+            if not line.strip():
+                continue
+            depth = max(0, depth + len(RAW_BLOCK_OPEN.findall(line)) - len(RAW_BLOCK_CLOSE.findall(line)))
+        elif fence is None and (start := RAW_BLOCK_START.match(line)):
+            markdown_inside = start.group(1).lower() == "figure" and number < len(lines) and not lines[number].strip()
+            if not markdown_inside:
+                depth = max(0, len(RAW_BLOCK_OPEN.findall(line)) - len(RAW_BLOCK_CLOSE.findall(line)))
+                opened_at = number
+        kept.append(line)
+    if depth > 0:
+        raise ValueError(f"the <svg> or <figure> opened on line {opened_at} is never closed")
+    return kept
 
 
 def widest_table(tokens: list[Token]) -> int:
@@ -318,7 +384,7 @@ def parse_plan(source: str) -> Plan:
     The first `#` heading is the page's title and is lifted out of the body into the masthead; the
     `Artifact:` line is dropped wherever it sits. A plan with no `#` heading is titled "Plan".
     """
-    lines = [line for line in source.splitlines() if not ARTIFACT_LINE.match(line)]
+    lines = join_raw_blocks([line for line in source.splitlines() if not ARTIFACT_LINE.match(line)])
     md = markdown()
     tokens = md.parse("\n".join(lines))
     first_h1 = next((i for i, token in enumerate(tokens) if token.type == "heading_open" and token.tag == "h1"), None)
@@ -348,7 +414,8 @@ def parse_plan(source: str) -> Plan:
         body=Markup(body),
         tasks_done=done,
         tasks_total=total,
-        wide=widest_table(tokens) >= WIDE_TABLE_COLUMNS,
+        wide=widest_table(tokens) >= WIDE_TABLE_COLUMNS
+        or any(token.type == "html_block" and WIDE_FIGURE.search(token.content) for token in tokens),
     )
 
 
@@ -421,6 +488,15 @@ def overwrite_refusal(out: Path, existing: str | None) -> str | None:
         return f"{out} is not an .html path"
     if existing is not None and GENERATOR not in existing:
         return f"{out} exists and is not a page plan-artifact wrote, so it is not overwritten"
+    return None
+
+
+def raises(call: Callable[[], object]) -> BaseException | None:
+    """The exception `call` raises, or `None`, so a self-test can compare it like any other value."""
+    try:
+        call()
+    except Exception as error:
+        return error
     return None
 
 
@@ -504,6 +580,63 @@ x = "<b>"
         ("a plan without wide tables keeps the narrow page", plan.wide, False),
         ("a five-column table widens the page", parse_plan("| a | b | c | d | e |\n|-|-|-|-|-|\n| 1 | 2 | 3 | 4 | 5 |\n").wide, True),
         ("a four-column table does not", parse_plan("| a | b | c | d |\n|-|-|-|-|\n| 1 | 2 | 3 | 4 |\n").wide, False),
+        ("a wide figure widens the page", parse_plan('<figure class="map wide">\n<svg viewBox="0 0 9 9"></svg>\n</figure>\n').wide, True),
+        ("a figure that isn't wide does not", parse_plan("<figure>\n<svg viewBox=\"0 0 9 9\"></svg>\n</figure>\n").wide, False),
+        (
+            "an svg with blank lines inside stays one raw block",
+            ("<p>" in (spaced := parse_plan("<svg viewBox=\"0 0 9 9\">\n<rect/>\n\n<text>after</text>\n</svg>\n").body), "<text>after</text>\n</svg>" in spaced),
+            (False, True),
+        ),
+        (
+            "a figure's style and script pass through whole, blank lines and all",
+            (
+                (scripted := parse_plan("<figure>\n<style>\n.a { color: red; }\n\n.b { color: blue; }\n</style>\n\n<script>\nlet x = 1;\n\nx += 1;\n</script>\n</figure>\n\nAfter.\n").body).count("<p>"),
+                ".b { color: blue; }\n</style>\n<script>\nlet x = 1;\nx += 1;\n</script>\n</figure>" in scripted,
+                "<p>After.</p>" in scripted,
+            ),
+            (1, True, True),
+        ),
+        (
+            "nested svg and figure close the block only at the outer closing tag",
+            "<p>" in parse_plan("<figure>\n<svg>\n<svg>\n</svg>\n\ninner words\n</svg>\n\nmore words\n</figure>\n").body,
+            False,
+        ),
+        (
+            "blank lines in a code fence showing an svg are kept",
+            "&lt;svg&gt;\n\n&lt;/svg&gt;" in parse_plan("```html\n<svg>\n\n</svg>\n```\n").body,
+            True,
+        ),
+        (
+            "a fence line with an info string does not close a fence",
+            (
+                "&lt;svg&gt;\n\n&lt;/svg&gt;" in (refenced := parse_plan("```\n```python\n<svg>\n\n</svg>\n```\n\n<svg>\n<rect/>\n\n<text>x</text>\n</svg>\n").body),
+                "<p>" in refenced,
+            ),
+            (True, False),
+        ),
+        (
+            "a self-closing svg leaves the rest of the plan to markdown",
+            ("<h2" in (closed := parse_plan('<svg viewBox="0 0 1 1"/>\n\n## Next\n\none\n\ntwo\n').body), closed.count("<p>")),
+            (True, 2),
+        ),
+        ("a custom element named like svg opens nothing", parse_plan("<svg-icon>\n</svg-icon>\n\none\n\ntwo\n").body.count("<p>"), 2),
+        (
+            "a figure opened with a blank line holds markdown, a mermaid fence included",
+            ('<pre class="mermaid">' in (marked := parse_plan('<figure class="wide">\n\n```mermaid\ngraph TD; A-->B\n```\n\n</figure>\n')).body, marked.wide),
+            (True, True),
+        ),
+        ("a wide class in single quotes widens the page", parse_plan("<figure class='wide'>\n</figure>\n").wide, True),
+        ("a class merely containing wide does not", parse_plan('<figure class="not-wide">\n</figure>\n').wide, False),
+        (
+            "an element never closed is an error",
+            isinstance(raises(lambda: parse_plan("<figure>\n<svg>\n</svg>\n\nmore\n")), ValueError),
+            True,
+        ),
+        (
+            "an svg mid-paragraph is left to markdown",
+            parse_plan("an icon <svg viewBox=\"0 0 1 1\"></svg> here\n\nnext\n").body.count("<p>"),
+            2,
+        ),
         ("a list without boxes counts no tasks", parse_plan("- one\n- two\n").tasks_total, 0),
         ("a bare url becomes a link", '<a href="https://example.com/x">' in parse_plan("see https://example.com/x\n").body, True),
         (
@@ -559,7 +692,11 @@ def main() -> int:
         existing = None
     if reason := overwrite_refusal(out, existing):
         parser.error(reason)
-    out.write_text(page(parse_plan(source.read_text())))
+    try:
+        plan = parse_plan(source.read_text())
+    except ValueError as error:
+        parser.error(f"{source}: {error}")
+    out.write_text(page(plan))
     print(out)
     return 0
 
