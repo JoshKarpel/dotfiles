@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -108,7 +109,8 @@ CODE = "code"
 # can be told apart from anything else the login shell puts on the stream.
 PWD_MARKER = "exe-dev-pwd:"
 
-# Runs once at first boot, unattended and without a TTY. exe.dev caps setup
+# Runs once, unattended and without a TTY: at first boot as `new`'s setup script,
+# or detached over SSH when an existing VM is adopted. exe.dev caps setup
 # scripts at 10KiB, so this stays a bootstrap: clone the repo, hand off to
 # install.sh, which is what generates this box's own SSH key.
 BOOTSTRAP = f"""#!/usr/bin/env bash
@@ -837,6 +839,48 @@ def url(
     typer.echo(f"https://{vm_host(vm)}:{port}/")
 
 
+def detached_bootstrap_command(bootstrap: str) -> str:
+    """A shell command that starts BOOTSTRAP on a box and returns at once.
+
+    Sent direct to `<vm>.exe.xyz` rather than through the lobby, which strips
+    quotes before the VM's shell sees them: `bash -c "$(...)"` arrives as
+    `bash -c $(...)` and word-splits. The script crosses as base64 so nothing in
+    it is shell syntax on the way. `setsid -f` detaches it from the session, so
+    the run survives the connection closing, the way first boot runs it with
+    nobody attached.
+    """
+    encoded = base64.b64encode(bootstrap.encode()).decode()
+    return f'setsid -f bash -c "$(echo {encoded} | base64 -d)" </dev/null >/dev/null 2>&1'
+
+
+def tags_of(name: str) -> list[str] | None:
+    """The tags VM NAME carries, or None when the account holds no such VM."""
+    out = run_without_stdin(lobby_command("ls", "--json"), capture_output=True, text=True, check=True)
+    for vm in json.loads(out.stdout)["vms"]:
+        if vm["vm_name"] == name:
+            return list(vm["tags"])
+    return None
+
+
+def finish(name: str, tag: str) -> None:
+    """Follow NAME's bootstrap to its status, then register the box's own key.
+
+    The half of standing a box up that doesn't care how the bootstrap started,
+    whether as `new`'s setup script at first boot or started by `adopt` on a box
+    that already existed.
+    """
+    pin_published(vm_host(name))
+
+    status = follow_bootstrap(name)
+    if status != 0:
+        typer.echo(f"\nbootstrap failed with status {status}", err=True)
+        raise typer.Exit(status)
+
+    register_key(name, tag)
+
+    typer.echo(f"\n{name} is ready: ssh {vm_host(name)}")
+
+
 def build(name: str, tag: str, bootstrap: str, cpu: int, memory: str, disk: str) -> None:
     """Create a VM carrying TAG, run BOOTSTRAP on it, and register its key.
 
@@ -852,16 +896,45 @@ def build(name: str, tag: str, bootstrap: str, cpu: int, memory: str, disk: str)
 
     typer.echo(f"\nwaiting for {name} to answer...")
     wait_for_vm(name)
+
+    finish(name, tag)
+
+
+def adopt(name: str, tag: str, other_tag: str, bootstrap: str) -> None:
+    """Tag an existing VM with TAG, run BOOTSTRAP on it, and register its key.
+
+    For a box created some other way, such as one made only to hold its name.
+    A box already carrying OTHER_TAG is refused rather than given both, since
+    the tag decides which GitHub identity its writes take and a box with both
+    would take either.
+
+    A box that already has a bootstrap log is refused too: its old exit marker
+    would be the first line the follower reads, and report a run that isn't
+    this one.
+    """
+    pin_published(LOBBY)
+
+    tags = tags_of(name)
+    if tags is None:
+        typer.echo(f"no VM named {name}", err=True)
+        raise typer.Exit(1)
+    if other_tag in tags:
+        typer.echo(f"{name} is tagged {other_tag}; untag it first: {lobby_hint('tag', '-d', name, other_tag)}", err=True)
+        raise typer.Exit(1)
+    if tag not in tags:
+        run_without_stdin(lobby_command("tag", name, tag), check=True)
+        typer.echo(f"tagged {name} {tag}")
+
+    wait_for_vm(name)
+
+    if run_without_stdin(control_plane_command(name, "test", "!", "-e", LOG)).returncode != 0:
+        typer.echo(f"{name} already has a {LOG}; it has been bootstrapped before", err=True)
+        raise typer.Exit(1)
+
     pin_published(vm_host(name))
+    run_without_stdin(vm_command(name, detached_bootstrap_command(bootstrap)), check=True)
 
-    status = follow_bootstrap(name)
-    if status != 0:
-        typer.echo(f"\nbootstrap failed with status {status}", err=True)
-        raise typer.Exit(status)
-
-    register_key(name, tag)
-
-    typer.echo(f"\n{name} is ready: ssh {vm_host(name)}")
+    finish(name, tag)
 
 
 @app.command()
@@ -905,6 +978,30 @@ def create_botbox(
     want a person, and both are per-box rather than per-kind.
     """
     build(name, BOT_BOX_TAG, BOT_BOX_BOOTSTRAP, cpu, memory, disk)
+
+
+@app.command()
+def adopt_devbox(
+    name: Annotated[str, typer.Argument(help="Existing VM to make a devbox.", autocompletion=complete_vm)],
+) -> None:
+    """Make an existing VM a devbox: tag it, install the dotfiles, follow the bootstrap.
+
+    `create-devbox` for a VM that already exists, such as one created only to
+    reserve its name. Its resources stay whatever it was created with.
+    """
+    adopt(name, DEV_BOX_TAG, BOT_BOX_TAG, BOOTSTRAP)
+
+
+@app.command()
+def adopt_botbox(
+    name: Annotated[str, typer.Argument(help="Existing VM to make a bot-box.", autocompletion=complete_vm)],
+) -> None:
+    """Make an existing VM a bot-box: tag it, install the dotfiles, follow the bootstrap.
+
+    `create-botbox` for a VM that already exists, and run from an unscoped
+    credential for the same reason.
+    """
+    adopt(name, BOT_BOX_TAG, DEV_BOX_TAG, BOT_BOX_BOOTSTRAP)
 
 
 @app.command()

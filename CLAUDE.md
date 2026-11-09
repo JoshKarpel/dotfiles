@@ -36,7 +36,8 @@ All of those units but `sync-branches` and `tidy` are for a person to look at,
 so they are gated on `is-dev-box` rather than `is-exe-dev`: a VM running a
 workload has nobody reading its session archive and no reason to spend its
 proxied ports on an index of itself. It reads the same `dev-box` tag
-`exe-dev create-devbox` sets at creation, which is what keeps a bot-box running
+`exe-dev create-devbox` sets at creation (or `adopt-devbox` on an existing VM),
+which is what keeps a bot-box running
 `install.sh` on its timer from installing any of them. Reading it back through
 reflection rather than off the disk is what lets a box change its mind
 (`exe-dev lobby tag <vm> dev-box`) without being rebuilt. `sync-branches` and
@@ -202,8 +203,9 @@ git-disk-usage [path]
 count-claude-tokens --help
 
 # Reach exe.dev and its VMs over checked host keys: run lobby commands, open a
-# shell or a VS Code window on a box, create one from this repo, cut a new one
-# over to an existing name, or print the URL the box you are on answers at.
+# shell or a VS Code window on a box, create one from this repo (or adopt an
+# existing VM, such as one made to reserve its name), cut a new one over to an
+# existing name, or print the URL the box you are on answers at.
 # Run with --help for subcommands and flags.
 exe-dev --help
 
