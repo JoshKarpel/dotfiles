@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Print the remote new branches start from: `upstream` when the repo has one,
+# `origin` otherwise. Also runs as `git base-remote`.
+#
+# A fork's work goes back to its parent, so a branch cut from the fork's own
+# default branch starts from whatever the fork last synced and drags that lag
+# into the pull request. `gh repo clone` adds the parent as `upstream` when it
+# clones a fork, which is what lets the name stand in for "the repo this one
+# contributes to" with no per-repo setup. A clone made any other way needs
+# `git remote add upstream <parent-url>` once.
+#
+# Pushes are unaffected: callers branch with --no-track, so push.autoSetupRemote
+# sends the first push to origin, the fork, whichever remote the branch left.
+
+set -euo pipefail
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
+# line is how `claude-hook-selftests` discovers participating scripts.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+  export GIT_CONFIG_GLOBAL=/dev/null HOME="$workdir" XDG_CONFIG_HOME="$workdir"
+
+  check() {
+    local desc="$1" want="$2" repo="$3" got
+    got=$(cd "$repo" && CLAUDE_HOOK_SELFTEST= "$SELF")
+    [[ "$got" == "$want" ]] ||
+    { printf 'FAIL %s: want %q, got %q\n' "$desc" "$want" "$got"; fails=1; }
+  }
+
+  git init -q "$workdir/plain"
+  git -C "$workdir/plain" remote add origin https://example.com/me/plain.git
+  check "a clone with only origin starts from origin" origin "$workdir/plain"
+
+  git init -q "$workdir/fork"
+  git -C "$workdir/fork" remote add origin https://example.com/me/fork.git
+  git -C "$workdir/fork" remote add upstream https://example.com/them/fork.git
+  check "a fork with an upstream remote starts from upstream" upstream "$workdir/fork"
+
+  mkdir "$workdir/fork/sub"
+  check "a subdirectory answers for its repo" upstream "$workdir/fork/sub"
+
+  git init -q "$workdir/other-name"
+  git -C "$workdir/other-name" remote add origin https://example.com/me/other.git
+  git -C "$workdir/other-name" remote add parent https://example.com/them/other.git
+  check "only a remote named upstream counts" origin "$workdir/other-name"
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+if git remote get-url upstream >/dev/null 2>&1; then
+  echo upstream
+else
+  echo origin
+fi

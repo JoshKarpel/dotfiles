@@ -55,6 +55,11 @@
   killed having produced nothing at all. Start the work in the background, go do something
   else, and read the output file if you want progress before the notification arrives.
 - In a uv project, Python is `uv run python`, heredocs and one-liners included.
+- Clone a GitHub repo with `gh repo clone <owner>/<repo>`, not `git clone`. For a fork it
+  adds the parent as an `upstream` remote, which is where `git new` and
+  `manage-worktrees new` start branches (`git base-remote` says which remote), so
+  a pull request back to the parent doesn't carry the fork's lag. A fork cloned
+  some other way needs `git remote add upstream <parent-url>` before branching.
 - Spell the scratchpad path out literally in every command rather than through a variable.
   Shell state doesn't persist between calls, `$TMPDIR` may be unset (it is on exe.dev), so
   `$TMPDIR/x` lands at `/x`, and Claude Code refuses an `rm` whose target is a variable.

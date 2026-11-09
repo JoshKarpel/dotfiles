@@ -11,10 +11,11 @@
 Pick local branches across every clone to delete, tearing down any worktree one has checked out.
 
 Lists every local branch in every clone under ~/projects and ~/work, except the default branch and the one the
-clone itself has checked out, with where each stands against origin/HEAD. Space marks or unmarks the highlighted
-branch and Enter deletes every marked one, including any the query is hiding, whether or not git counts it merged:
-marking it is the decision `git branch -d` would otherwise make. So only branches whose work is on origin/HEAD start
-out marked: those merged into it, and those squash-merged into it, found by the patch of the branch's whole diff. A
+clone itself has checked out, with where each stands against the default branch of the remote `git-base-remote` names:
+a fork's parent when the clone has one, since that is where its work lands, and origin otherwise. Space marks or
+unmarks the highlighted branch and Enter deletes every marked one, including any the query is hiding, whether or not
+git counts it merged: marking it is the decision `git branch -d` would otherwise make. So only branches whose work is
+on that default branch start out marked: those merged into it, and those squash-merged into it, found by the patch of the branch's whole diff. A
 branch with no upstream is never marked for you, because a branch `manage-worktrees new` just made looks merged until its first
 commit, and one whose worktree has changes cannot be marked at all.
 
@@ -76,14 +77,14 @@ class Status(StrEnum):
     """Where a branch stands, which decides whether it starts out marked."""
 
     CHANGED = "worktree has changes"
-    GONE = "upstream gone, not on origin/HEAD"
+    GONE = "upstream gone, not on the default branch"
     MERGED = "merged"
     SQUASHED = "squash-merged"
     UNMERGED = "not merged"
     UNPUSHED = "never pushed"
 
 
-# Only branches whose work is provably on origin/HEAD, since deleting a marked branch deletes whatever it holds.
+# Only branches whose work is provably on the default branch, since deleting a marked branch deletes whatever it holds.
 PREMARKED = frozenset({Status.MERGED, Status.SQUASHED})
 
 
@@ -219,9 +220,9 @@ def patch_ids(patches: str) -> str:
     return result.stdout
 
 
-def squashed(clone: Path, branches: list[str]) -> frozenset[str]:
+def squashed(clone: Path, landing: str, branches: list[str]) -> frozenset[str]:
     """
-    Which of BRANCHES had their whole diff land on origin/HEAD as one commit since they forked.
+    Which of BRANCHES had their whole diff land on LANDING as one commit since they forked.
 
     Everything that landed since the oldest of their forks is read once, rather than once per branch, which would be most
     of the cost in a clone with dozens of squash-merged branches. The log is limited to the paths the branches touch:
@@ -235,7 +236,7 @@ def squashed(clone: Path, branches: list[str]) -> frozenset[str]:
     for branch in branches:
         # By its full name, and before a `--`, since a branch can share its name with a path (a `docs` branch).
         ref = f"refs/heads/{branch}"
-        base = git(clone, "merge-base", "origin/HEAD", ref)
+        base = git(clone, "merge-base", landing, ref)
         names = run("git", "-C", clone, "diff", "--no-renames", "--name-only", "-z", base, ref, "--")
         if touched := [path for path in names.split("\0") if path]:
             diffs[branch] = run("git", "-C", clone, "diff", "--no-renames", base, ref, "--")
@@ -245,9 +246,14 @@ def squashed(clone: Path, branches: list[str]) -> frozenset[str]:
         return frozenset()
     oldest = git(clone, "merge-base", "--octopus", *sorted(bases))
     landed = run(
-        "git", "-C", clone, "log", "--patch", "--no-renames", "--no-merges", f"{oldest}..origin/HEAD", "--", *sorted(paths)
+        "git", "-C", clone, "log", "--patch", "--no-renames", "--no-merges", f"{oldest}..{landing}", "--", *sorted(paths)
     )
     return landed_among(diffs, patch_ids(labelled(diffs)), patch_ids(landed))
+
+
+def default_branch(clone: Path, remote: str) -> str:
+    """The name of REMOTE's default branch, as CLONE last fetched it."""
+    return git(clone, "symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD").removeprefix(f"{remote}/")
 
 
 def standing(clone: Path) -> tuple[Branch, ...]:
@@ -255,10 +261,13 @@ def standing(clone: Path) -> tuple[Branch, ...]:
     upstreams = parse_upstreams(
         git(clone, "for-each-ref", "refs/heads", "--format=%(refname:short)%00%(upstream)%00%(upstream:track)")
     )
-    merged = set(git(clone, "branch", "--merged", "origin/HEAD", "--format=%(refname:short)").splitlines())
-    default = git(clone, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").removeprefix("origin/")
+    base = git(clone, "base-remote")
+    landing = f"{base}/HEAD"
+    merged = set(git(clone, "branch", "--merged", landing, "--format=%(refname:short)").splitlines())
+    # Both defaults, since a fork's own can differ in name from its parent's, and is no more deletable for it.
+    defaults = {default_branch(clone, "origin"), default_branch(clone, base)}
     checkouts = parse_checkouts(git(clone, "worktree", "list", "--porcelain"))
-    names = sorted(name for name in upstreams if name not in (default, checkouts.in_clone))
+    names = sorted(name for name in upstreams if name not in defaults and name != checkouts.in_clone)
     changed = {
         name
         for name in names
@@ -270,7 +279,7 @@ def standing(clone: Path) -> tuple[Branch, ...]:
         for name in names
         if upstreams[name][0] and upstreams[name][1] == "[gone]" and name not in merged and name not in changed
     ]
-    landed = squashed(clone, could_be_squashed)
+    landed = squashed(clone, landing, could_be_squashed)
     return tuple(
         Branch(
             clone=clone,

@@ -255,10 +255,11 @@ def new(
     """Open BRANCH in a worktree beside the clone, in a new zellij tab.
 
     The worktree lands at <repo>.worktrees/<branch>. A branch that already exists,
-    locally or on origin, is checked out as it is. Any other is created from
-    origin/HEAD with no upstream, so the first push tracks origin/<branch> rather
-    than the default branch. Running this again for a worktree that exists opens
-    another tab on it.
+    locally or on origin, is checked out as it is. Any other is created from the
+    default branch of the remote `git-base-remote` names, a fork's parent when
+    the clone has one, with no upstream, so the first push tracks
+    origin/<branch> rather than the default branch. Running this again for a
+    worktree that exists opens another tab on it.
 
     The tab is named <repo>:<branch>, and every pane opened in it, floating
     ones included, starts in the worktree. When the clone has a pre-commit
@@ -278,7 +279,8 @@ def new(
     path = worktrees_root(clone) / branch
 
     if not path.exists():
-        git(clone, "fetch", "--quiet", "origin")
+        base = git(clone, "base-remote")
+        git(clone, "fetch", "--quiet", "--multiple", *dict.fromkeys(("origin", base)))
         exists = any(
             run("git", "-C", clone, "rev-parse", "--verify", "--quiet", ref, check=False).returncode == 0
             for ref in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}")
@@ -287,7 +289,7 @@ def new(
             # A branch only on origin gets a local one tracking it, by git's own DWIM.
             git(clone, "worktree", "add", path, branch)
         else:
-            git(clone, "worktree", "add", "--no-track", "-b", branch, path, "origin/HEAD")
+            git(clone, "worktree", "add", "--no-track", "-b", branch, path, f"{base}/HEAD")
 
     with some_client_attached(os.environ["ZELLIJ_SESSION_NAME"]):
         # new-tab prints the tab's id.

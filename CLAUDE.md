@@ -260,8 +260,9 @@ zellij-custom-keybinds
 manage-worktrees --help
 
 # Pick local branches across every clone to delete (Alt+Shift+d in zellij),
-# with the ones merged or squash-merged into origin/HEAD already marked. A
-# branch checked out in a worktree goes through `wt done`, tab and all.
+# with the ones merged or squash-merged into the default branch already marked
+# (a fork's parent's, when `git base-remote` says `upstream`). A branch checked
+# out in a worktree goes through `wt done`, tab and all.
 manage-git
 
 # See what is listening on which TCP port, copy a port's URL (exe.dev's on a VM),
