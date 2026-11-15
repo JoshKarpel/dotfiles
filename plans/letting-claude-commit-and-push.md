@@ -9,6 +9,8 @@ It has to work on every machine these dotfiles reach, including a work laptop,
 with whatever credential that machine uses: exe.dev's GitHub integration,
 a `gh auth login`, or git over SSH with Josh's own key.
 So nothing in it may depend on exe.dev.
+Git may push with any of those; Claude pushing a branch other than the
+default also needs `gh` able to read pull requests on that host (decision 2).
 
 What Claude may do differs by repo, and changes over time as a spike grows up
 or a repo starts deploying something.
@@ -378,12 +380,32 @@ and reviewing a commit is no harder than reviewing a working tree.
 - Allow when the current branch isn't the repo's default branch, or the repo's
   entry allows default-branch pushes (decision 7). A detached `HEAD` has no
   current branch to check, so a commit there is denied.
+- The default branch here comes from `git symbolic-ref refs/remotes/origin/HEAD`,
+  which is local and costs no network call.
+  A repo with no `origin` has nowhere to push, so a commit is allowed on any
+  branch, which covers a `git init` scratch repo.
+  A repo with an `origin` and no `origin/HEAD` is refused rather than guessed
+  at, with a message saying Josh needs to run `git remote set-head origin --auto`:
+  Claude can't, since `Bash(git remote set*)` is denied.
+- This branch check keeps the default branch tidy; it isn't the guard.
+  Claude can move `origin/HEAD` locally, and a commit stays local either way,
+  so nothing depends on the check holding: the push check (decision 2) reads
+  the default branch from the remote itself.
 - Don't otherwise gate commit on the allowed list. A commit stays local, so
   where `origin` points matters only at push.
-- Refuse `--no-verify`/`-n` and `-c core.hooksPath=…`, so pre-commit always runs.
-  Refuse the environment spellings of the same thing too: pre-commit's `SKIP=`
-  and `PRE_COMMIT_ALLOW_NO_CONFIG=`, and `GIT_CONFIG_*` or
-  `GIT_CONFIG_PARAMETERS` on the commit.
+- Refuse `--no-verify`/`-n`, so pre-commit always runs.
+- Refuse every way of overriding config for the one command, on every git
+  command the hook checks, push included: `-c`, `--config-env`, and any
+  `GIT_CONFIG*` variable (which covers `GIT_CONFIG_COUNT` with
+  `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_PARAMETERS`, and `GIT_CONFIG_GLOBAL`).
+  Refuse pre-commit's `SKIP` and `PRE_COMMIT_ALLOW_NO_CONFIG` too.
+- A variable counts wherever the compound command sets it, not only as a prefix
+  on the git segment: `export`, `declare -x`, and `env` in an earlier segment
+  set it just as well. A compound command that runs a git write alongside
+  `source`, `.`, `eval`, or `set -a` is denied, since the hook can't see what
+  those set. A variable exported from a shell startup file reaches the command
+  without appearing in it at all; no parser sees that, and the push-time scan
+  (decision 5) is what covers it.
 - Refusing the skip flags proves nothing when no hook is installed, which is
   the state `gh repo clone` leaves a clone in. In a repo with a
   `.pre-commit-config.yaml`, the hook allows only when the hooks directory git
@@ -404,6 +426,10 @@ and reviewing a commit is no harder than reviewing a working tree.
   through them either. pre-commit's default `pre-commit` hook doesn't run for
   any of them, so the push-time secret scan (decision 5) is what covers their
   content.
+- Leave out the forms that can't create a commit: `git merge --ff-only`,
+  `git pull --ff-only`, and a bare `git pull` while `pull.ff` resolves to
+  `only` (Josh's gitconfig sets it) only move a branch to commits that already
+  exist, so they're allowed on any branch, the default included.
 
 Cost: Claude writes the commit messages, and pre-commit runs inside Claude's
 turn instead of Josh's. Squash merges mean the PR title and body are what
@@ -414,9 +440,31 @@ survives on the default branch, so the commit messages matter less than the PR.
 - Allow `git push`, `git push -u origin HEAD`, and `git push origin <current>`
   when `origin` is on the allowed list (decision 7), and `<current>` either isn't
   the default branch or the repo's entry allows default-branch pushes.
-- Refuse force in every spelling (`-f`, `--force`, `--force-with-lease`, a `+`
-  refspec), `--delete`/`-d`, `--mirror`, `--all`, `--tags`, any refspec that
-  renames (`src:dst`), and anything naming a branch other than the current one.
+- The options a push may carry are an allowlist: `-u`/`--set-upstream`,
+  `-q`, and `-v`. Any other option denies, which covers force in every spelling
+  (`-f`, `--force`, `--force-with-lease`, `--force-if-includes`),
+  `--delete`/`-d`, `--mirror`, `--all`, `--tags`, `--follow-tags`,
+  `--repo=<url>` (which replaces the remote), `--receive-pack`/`--exec`, and
+  `--no-verify`. Refuse a `+` refspec, any refspec that renames (`src:dst`),
+  and anything naming a branch other than the current one.
+- Refuse config overrides on the push, as on the commit (decision 1).
+  Every check below reads config from disk (`git config`,
+  `git remote get-url --push`), so `git -c remote.origin.pushurl=… push` or
+  `git -c push.default=matching push` would otherwise send the push somewhere,
+  or send something, the hook never checked.
+- Read the remote's state from the remote, not from local refs.
+  Claude can rewrite `refs/remotes/origin/*` with `git update-ref` or
+  `git symbolic-ref`, and those refs follow the fetch URL, which can differ from
+  where the push goes. So the hook runs
+  `git ls-remote --symref <push URL> HEAD 'refs/heads/*'` once per push, which
+  needs only the credential git pushes with, and takes from it the default
+  branch (what `HEAD` points at) and every branch's SHA.
+  The **commits being pushed** are `git rev-list HEAD --not <those SHAs>`,
+  dropping any SHA not present locally, which can only widen the range.
+  That covers a branch's first push, and leaves out commits a merge of the
+  default branch brought in, which are already on GitHub.
+  The secret scan (decision 5) and the workflow-file ask (decision 6) both use
+  this range. When `ls-remote` fails, deny.
 - Deny when the branch's open pull request has auto-merge armed, as
   `gh pr view <branch> --repo <origin's repo> --json autoMergeRequest` reports.
   The `--repo` matters: in a fork's clone `gh` resolves against the parent by
@@ -426,9 +474,17 @@ survives on the default branch, so the commit messages matter less than the PR.
   write access pushes, which Claude does as Josh, so a push onto that branch
   merges as soon as CI goes green. Draft or ready doesn't matter: with
   approvals at 0, auto-merge is what turns a push into a merge. No open PR
-  (a branch's first push, a fork, a `default-branch` push) is not a failure
-  and allows; when the lookup itself fails (network, auth, a parse error),
-  deny.
+  (a branch's first push, a fork) is not a failure and allows; when the lookup
+  itself fails (network, auth, a parse error), deny.
+- The lookup needs `gh` authenticated for `origin`'s host, separately from
+  whatever git pushes with. On a machine where git pushes over SSH and `gh`
+  isn't logged in, Claude's branch pushes are denied with a message saying so,
+  and Josh pushes there by hand. Treating an unreadable PR as unarmed would let
+  a PR armed from another machine merge on Claude's push, and opening the PR
+  (decision 8) needs the same `gh` anyway.
+- A `default-branch` push skips the lookup. The push is itself the landing,
+  so a PR auto-merging afterward adds nothing, and a spike still takes Claude's
+  pushes from a machine with only an SSH key.
 - Auto-merge armed between the hook's check and the push is a window the hook
   can't close. It's seconds wide, and opening it takes Josh acting on the PR at
   that moment, so the plan accepts it.
@@ -458,11 +514,8 @@ Josh doesn't rebase, and the `resolve-conflicts` skill already merges the base
 branch in, so nothing in this workflow needs a force push. It stays denied with
 no planned exception.
 
-The default branch comes from `git symbolic-ref refs/remotes/origin/HEAD`, which
-is local and needs neither `gh` nor the network. A clone where it's unset gets
-refused rather than guessed at, with a message saying Josh needs to run
-`git remote set-head origin --auto`: Claude can't, since `Bash(git remote set*)`
-is denied.
+The push check reads the default branch from the remote, so unlike the commit
+check (decision 1) it needs no `origin/HEAD`.
 
 ### 3. Merge, release, and every other `gh` write: guard them in the harness
 
@@ -483,17 +536,27 @@ harness. Layered, so a gap in one isn't a gap in all:
   GraphQL query read from a file (`-F query=@q.graphql`) is invisible to a parser.
 - The allowed writes are `gh pr create` in the form decision 8 requires,
   `gh pr ready`, `gh pr comment`, `gh pr edit` limited to `--title`, `--body`,
-  and `--body-file`, `gh issue create`, `gh issue comment`, and the review
-  replies the `handle-pr-review` skill posts, once its `gh api` calls are read
-  off the skill.
+  and `--body-file`, `gh issue create`, and `gh issue comment`.
   Each of them names its target with `--repo`, and the target must be on the
   allowed list, for the same reason as `gh pr create`: in a fork's clone `gh`
   can resolve to the parent, which would put a comment or an issue on someone
   else's repo under Josh's name.
-- Reads stay as they are: `claude-gh-api-check` already proves `gh api` reads,
-  and the read-only subcommands are in `allow`. A `gh` call the hook can
-  classify as neither a read nor an allowed write is denied, any GraphQL
-  mutation included.
+- A comment can set off more writes than its own: a workflow triggered by
+  `issue_comment`, or an app that acts on comment commands, runs with a token
+  of its own. Dependabot's merge commands
+  [were removed in January 2026](https://github.blog/changelog/2026-01-27-changes-to-github-dependabot-pull-request-comment-commands/),
+  and the repo setup checklist covers the rest, since what a comment triggers
+  is configured on GitHub, not in the harness.
+- Reads keep the one list they have. `claude-gh-api-check` proves `gh api`
+  reads, and for every other subcommand the hook reads the `Bash(gh …)` entries
+  in the `allow` lists of the settings files in force (user, project, and local)
+  and stays silent on a call one of them matches, leaving it to `allow`.
+  The hook keeps no copy of that list to drift from it.
+  The writes it denies by name are checked first, so no `allow` entry can let
+  one through, and its self-test asserts that no `allow` entry matches a write
+  the hook knows of, which catches an entry as broad as `Bash(gh pr *)`.
+  A `gh` call that matches neither an `allow` entry nor an allowed write is
+  denied, any GraphQL mutation included.
 - Default deny covers the rules and the repo itself: rulesets, branch
   protection, `gh repo edit`, and `PATCH` or `DELETE` on `repos/<o>/<r>`, which
   changes the default branch or makes a private repo public. Where the
@@ -544,7 +607,7 @@ in the audit log), and has only the permissions both Josh and the app have.
   is part of the larger isolation work this plan leaves out of scope, and is
   what turns the narrower token from a default into a boundary.
 
-This is phase 6, after everything else works, because the hook covers the
+This is phase 5, after everything else works, because the hook covers the
 same ground for the common case and the token only adds coverage for scripts.
 
 #### Alternatives rejected
@@ -590,7 +653,7 @@ in every repo, not just merges.
   a recognized secret before it lands, server-side, whatever the harness did.
 - Have `claude-git-write-check` run [gitleaks](https://github.com/gitleaks/gitleaks)
   over the commits being
-  pushed (the range decision 6 defines) and deny the push on a finding. That
+  pushed (the range decision 2 defines) and deny the push on a finding. That
   holds in every repo whatever its pre-commit config says, including a repo
   with none, and covers commits `git commit` never made: a `cherry-pick`, an
   `am`, or Josh's own. The scanner the hook calls is a machine-wide tool, so it
@@ -618,13 +681,9 @@ can write, it can merge a green PR through the API or push a default branch
 that has no PR rule. GitHub runs that, so nothing in the harness sees it.
 
 - The hook asks, rather than allowing, when the commits being pushed touch
-  `.github/workflows/` or an `action.yml`/`action.yaml`. The commits being
-  pushed are those on `HEAD` that no `origin` ref holds yet
-  (`git rev-list HEAD --not --remotes=origin`), which covers a branch's first
-  push, when it has no upstream, and leaves out commits a merge of the default
-  branch brought in, which are already on GitHub. A probe confirmed that a
-  hook's `ask` produces a real prompt in auto mode rather than going to the
-  classifier.
+  `.github/workflows/` or an `action.yml`/`action.yaml`, in the range
+  decision 2 reads from the remote. A probe confirmed that a hook's `ask`
+  produces a real prompt in auto mode rather than going to the classifier.
 - That narrows the gap without closing it. A workflow runs code from the
   branch (a test suite, a `just` recipe, a `repo: local` pre-commit hook such as
   dotfiles' `claude-hook-selftests`), and that code reaches whatever the job
@@ -719,7 +778,8 @@ A pushed branch nobody knows about is how work gets lost or reviewed late.
 - `gh pr create` pushes the branch itself when it isn't fully pushed, through
   a `git push` of its own that the hook never sees, so it would skip every push
   check in decision 2. The hook therefore requires `--head <current>`, which
-  turns that push off, and that `origin/<current>` already points at `HEAD`.
+  turns that push off, and that the remote's `<current>`, read with
+  `git ls-remote` as decision 2 does, already points at `HEAD`.
   The push goes first, through `git push` and its checks.
 - Claude never opens a PR on a repo Josh doesn't own, which rules out PRs to a
   fork's parent. In a fork, Claude pushes the branch and opens no PR; Josh
@@ -765,6 +825,8 @@ in the harness can apply or check for itself. A new skill,
 - [ ] A publishing environment, where there is one, requires Josh's review.
 - [ ] Actions secrets, where there are any, sit behind an environment with
   required reviewers.
+- [ ] No workflow triggered by `issue_comment` or `pull_request_review_comment`
+  can write, and no installed app merges or pushes on a comment command.
 - [ ] pre-commit runs a secret scanner and `detect-private-key`.
 - [ ] The local clone has `origin/HEAD` set and an allow-list entry.
 
@@ -799,16 +861,19 @@ found getting past the deny rules that a parser can unwrap.
 
 | Segment | Result |
 |---|---|
-| `git commit`, `--amend` and merge conclusions included, on a branch the repo's mode allows, no hook-skipping flags or env, pre-commit installed | allow |
-| `gh pr create --repo <host>/<o>/<r> --head <current>`, repo on the allowed list, `origin/<current>` at `HEAD`; `gh pr ready` | allow |
+| `git commit`, `--amend` and merge conclusions included, on a branch the repo's mode allows (any branch in a repo with no `origin`), no hook-skipping flags, config overrides, or env, pre-commit installed | allow |
+| `git merge --ff-only`, `git pull --ff-only`, a bare `git pull` while `pull.ff` is `only` | allow |
+| `gh pr create --repo <host>/<o>/<r> --head <current>`, repo on the allowed list, the remote's `<current>` at `HEAD`; `gh pr ready` | allow |
 | `gh pr comment`, `gh pr edit` with only title or body (body unchanged outside the `<details>` fold), `gh issue create` or `comment`, each with `--repo` on the allowed list | allow |
-| `git push` of the current branch to `origin`, branch allowed by the repo's mode, no force/delete/mirror/all/tags/rename, no auto-merge armed, no secrets and no workflow files in the range | allow |
+| a `gh` call matching a `Bash(gh …)` entry in `allow`, or a `gh api` read | no decision |
+| `git push` of the current branch to `origin`, branch allowed by the repo's mode as read from the remote, only allowed options, no config overrides, no auto-merge armed (not checked for a `default-branch` push), no secrets and no workflow files in the range | allow |
 | the same push, with workflow files in the range | ask |
 | `git commit` on a branch the repo's mode doesn't allow, or a detached `HEAD` | deny |
-| a push naming a branch other than the current one or one the mode doesn't allow, any force push, `--delete`, `--mirror` | deny |
-| a push to a branch whose PR has auto-merge armed, or whose PR state can't be read | deny |
+| a push naming a branch other than the current one or one the mode doesn't allow, or carrying any option outside the allowlist | deny |
+| any git write with `-c`, `--config-env`, or a `GIT_CONFIG*`, `SKIP`, or `PRE_COMMIT_ALLOW_NO_CONFIG` set anywhere in the command; a git write in a compound command with `source`, `.`, `eval`, or `set -a` | deny |
+| a branch push whose PR has auto-merge armed, or whose PR state can't be read | deny |
 | a push whose range the secret scanner flags | deny |
-| `git push` where origin isn't on the list; `git commit` or `git push` where `origin/HEAD` is unset; any use while the list doesn't parse | deny |
+| `git push` where origin isn't on the list or `git ls-remote` against its push URL fails; `git commit` where `origin` exists and `origin/HEAD` is unset; any use while the list doesn't parse | deny |
 | `gh pr create` without `--repo` or `--head`, with a repo not on the list, or before the branch is pushed | deny |
 | `gh pr merge`, `gh pr review --approve`, `gh release create`, and any other `gh` write not allowed above, `gh api` and GraphQL mutations included | deny |
 | `gh auth token`, `gh auth status -t`, `git credential fill`, `gh auth git-credential` | deny |
@@ -831,11 +896,8 @@ calls.
 
 - [x] A hook's `ask` in auto mode is a real prompt. Headless, it was refused
   with the hook's reason, while the same command with no hook decision ran.
-- [x] PreToolUse hooks run, and log, for a command a `deny` rule then blocks,
-  so phase 2's shadow mode works as described.
-- [x] A `deny` rule blocks a call the hook returned `allow` for, so restoring
-  the deny entries blocks every spelling those rules match. The spellings they
-  miss are why rollback also unregisters the hook (see Rollback).
+- [x] A `deny` rule blocks a call the hook returned `allow` for, so the prefix
+  backstops in `deny` hold whatever the hook decides.
 - [ ] Does a hook's `allow` skip the auto-mode classifier? Unsettled: the
   classifier allowed every control meant to be blocked (see In the harness), so
   the experiment had nothing to compare against. If `allow` does skip it, the
@@ -868,47 +930,41 @@ calls.
   can't tell Josh from Claude, but it makes a release two writes rather than
   one, and the hook denies the second as well.
 
-### Phase 2: merge guard, guidance, and the hook in shadow mode
+### Phase 2: the harness, on this branch
+
+Everything in the harness lands together, in one PR from this branch.
+An empty allow-list denies every push, so nothing pushes until phase 3 adds an
+entry on a machine.
 
 - [ ] Deny `Bash(gh pr merge*)`, `Bash(gh release create*)`,
-  `Bash(gh auth token*)`, and `Bash(git credential fill*)` now: they close gaps
-  that exist today, independent of the rest. The hook covers the spellings a
-  prefix rule can't, such as `gh auth status -t`.
+  `Bash(gh auth token*)`, and `Bash(git credential fill*)` as prefix backstops.
+  The hook covers the spellings a prefix rule can't, such as
+  `gh auth status -t`.
 - [ ] Set `"attribution": false` in `claude/settings.json`.
 - [ ] Add `claude/rules/public-record.md`.
-- [ ] Add gitleaks to mise, and to pre-commit in every repo.
-- [ ] Write `claude-git-write-check` and `claude-push-allow-list`, with self-tests.
-- [ ] Register the hook with the commit and push deny entries still in place,
-  logging what it would have decided, for a week of normal use.
-- [ ] Read the log: anything it would have allowed that it shouldn't, or
-  refused that it should have allowed.
-
-### Phase 3: commit
-
-- [ ] Switch the hook from logging to deciding. Until this step, its `gh` and
-  token denials are only logged.
-- [ ] Add dotfiles to the allow-list in `branches` mode on each machine, with
-  `claude-push-allow-list add`. `gh pr create` needs the branch pushed first,
-  so it opens with push in phase 4, and works only in dotfiles until phase 5.
-- [ ] Remove `Bash(git commit*)` from `deny`; the hook decides.
+- [ ] Add gitleaks to mise, and to dotfiles' pre-commit.
+- [ ] Write `claude-git-write-check` and `claude-push-allow-list`, with
+  self-tests, and register the hook.
+- [ ] Remove `Bash(git commit*)` and `Bash(git push*)` from `deny`; the hook
+  decides.
 - [ ] Rewrite the commit bullet in `claude/CLAUDE.md` as the authorization in
   "What replaces it", including that merging, approving, and releasing stay
   Josh's.
 - [ ] Write the `check-repo-setup` skill.
 
-### Phase 4: push, one repo
+### Phase 3: dotfiles
 
-- [ ] Remove `Bash(git push*)` from `deny`, with the allow-list still holding
-  only dotfiles.
-- [ ] Use it for real work, from the phone and from a laptop over SSH, for a
-  while, and tune the when-to-push guidance from what happens.
+- [ ] Merge the PR, then add dotfiles to the allow-list in `branches` mode on
+  each machine, with `claude-push-allow-list add`.
+- [ ] Use it for real work, from the phone and from a laptop over SSH, and tune
+  the when-to-push guidance from what happens.
 
-### Phase 5: more repos
+### Phase 4: more repos
 
-- [ ] Add repos to the allow-list as each passes `check-repo-setup`, owner-wide
-  once enough of them do.
+- [ ] Add repos to the allow-list as each passes `check-repo-setup`, adding
+  gitleaks to its pre-commit on the way, and owner-wide once enough of them do.
 
-### Phase 6: a narrower credential
+### Phase 5: a narrower credential
 
 - [ ] Create a GitHub App for Claude with `Contents`, `Pull requests`, and
   `Issues` write and no `Administration`, `Workflows`, or `Secrets`, and a
@@ -916,19 +972,6 @@ calls.
   Claude's sessions on machines that use `gh auth login`.
 - [ ] Sandbox Claude's reads of Josh's own `gh` config and SSH key, as part of
   the isolation work this plan leaves out of scope.
-
-## Rollback
-
-Restoring `Bash(git commit*)` and `Bash(git push*)` to `deny` in
-`claude/settings.json`, and unregistering `claude-git-write-check`, puts the
-barrier back. Settings hot-reload, so both reach running sessions without a
-restart. Phase 0 found that a `deny` rule outranks the hook's `allow`, but only
-for the spellings the rule matches: left registered, the hook would still allow
-`git -C . push`, `git -c k=v commit`, and `bash -c 'git push …'`, which the
-rules miss and which the hook's parser sees through. The
-GitHub-side changes don't need rolling back: a PR rule, push protection, a
-read-only workflow token, and a reviewed publishing environment are tighter
-than today, not looser.
 
 ## What doesn't go away
 
