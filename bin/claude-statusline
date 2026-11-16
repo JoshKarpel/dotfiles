@@ -9,6 +9,7 @@ context_pct=$(echo "$data" | jq -r '.context_window.used_percentage // 0' | cut 
 effort=$(echo "$data" | jq -r '.effort.level // empty')
 pr_number=$(echo "$data" | jq -r '.pr.number // empty')
 pr_review_state=$(echo "$data" | jq -r '.pr.review_state // empty')
+pr_url=$(echo "$data" | jq -r '.pr.url // empty')
 
 date_str=$(date +%Y-%m-%d\ %H:%M)
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
@@ -62,6 +63,12 @@ colorize() {
   elif (( val > 60 )); then echo "\033[33m${text}\033[0m"
 else echo "$text"; fi
 }
+
+# The payload carries `pr` only while the branch's PR is open, so the branch links to it
+# exactly then. An OSC 8 hyperlink: ESC ] 8 ; ; URL BEL, the text, then an empty one to close.
+if [[ -n "$branch" && -n "${pr_url:-}" ]]; then
+  branch="\033]8;;${pr_url}\a${branch}\033]8;;\a"
+fi
 
 status="${date_str}${branch:+ | ${branch}} | ${model}${effort:+ (${effort})} $(colorize "$context_pct" "ctx:${context_pct}%")"
 if [[ -n "${pr_number:-}" ]]; then

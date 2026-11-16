@@ -111,9 +111,10 @@ than the attaching client's, and a pane zellij resurrects runs its serialized
 command directly, with no shell of its own, so the server's environment is the
 only one it ever gets. Pinning variables in the unit one at a time is a second
 copy of shell startup, and every variable it misses breaks only in resurrected
-panes. `TERM` is the one exception, set by `env` in `config/zellij/config.kdl`,
-since zellij is the terminal its panes run in. Only a CLI client applies that
-block to the server it spawns, so `zellij-web.service` pins the same value for
+panes. `TERM` and `FORCE_HYPERLINK` are the exceptions, set by `env` in
+`config/zellij/config.kdl`, since zellij is the terminal its panes run in and
+these say what it supports. Only a CLI client applies that
+block to the server it spawns, so `zellij-web.service` pins the same values for
 the sessions `zellij web` creates, and starts after the work session so that a
 browser tab reconnecting at boot cannot create the work session first.
 

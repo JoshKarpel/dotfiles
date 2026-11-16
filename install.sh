@@ -701,8 +701,8 @@ function restart_stale_zellij_session() {
 # a session that does not exist yet creates it. The web server's copy then takes
 # the socket path, stranding the one the unit started, and it is missing what
 # only a CLI client gives a server: the `env` block in config/zellij/config.kdl,
-# which `zellij web` does not apply. Hence TERM again below, for the sessions the
-# web server creates on purpose.
+# which `zellij web` does not apply. Hence TERM and FORCE_HYPERLINK again below,
+# for the sessions the web server creates on purpose.
 function do_zellij_web() {
   local units=~/.config/systemd/user
 
@@ -725,6 +725,7 @@ After=zellij-session.service
 
 [Service]
 Environment=TERM=xterm-256color
+Environment=FORCE_HYPERLINK=1
 ExecStart=/bin/bash -lc 'exec zellij web'
 Restart=always
 RestartSec=5
