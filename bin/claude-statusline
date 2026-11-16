@@ -7,11 +7,23 @@ data=$(cat)
 model=$(echo "$data" | jq -r '.model.display_name // "unknown"')
 context_pct=$(echo "$data" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
 effort=$(echo "$data" | jq -r '.effort.level // empty')
-pr_number=$(echo "$data" | jq -r '.pr.number // empty')
-pr_review_state=$(echo "$data" | jq -r '.pr.review_state // empty')
 
 date_str=$(date +%Y-%m-%d\ %H:%M)
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+
+# The branch's open PR, from claude-fetch-pr rather than the payload's `pr`, which
+# Claude Code's own lookup leaves empty behind exe.dev's gh proxy. Review states
+# follow the names the payload uses.
+pr=$(claude-fetch-pr 2>/dev/null | jq -c 'select(.state == "OPEN")' 2>/dev/null)
+if [[ -n "$pr" ]]; then
+  pr_number=$(jq -r '.number' <<<"$pr")
+  pr_url=$(jq -r '.url' <<<"$pr")
+  pr_review_state=$(jq -r '
+    if .isDraft then "draft"
+    elif .reviewDecision == "APPROVED" then "approved"
+    elif .reviewDecision == "CHANGES_REQUESTED" then "changes_requested"
+    else "pending" end' <<<"$pr")
+fi
 
 # Fetch cached usage limits (gracefully skipped if unavailable)
 usage=$(claude-fetch-usage 2>/dev/null)
@@ -62,6 +74,12 @@ colorize() {
   elif (( val > 60 )); then echo "\033[33m${text}\033[0m"
 else echo "$text"; fi
 }
+
+# The branch links to its PR while the PR is open. An OSC 8 hyperlink: ESC ] 8 ; ; URL BEL,
+# the text, then an empty one to close.
+if [[ -n "$branch" && -n "${pr_url:-}" ]]; then
+  branch="\033]8;;${pr_url}\a${branch}\033]8;;\a"
+fi
 
 status="${date_str}${branch:+ | ${branch}} | ${model}${effort:+ (${effort})} $(colorize "$context_pct" "ctx:${context_pct}%")"
 if [[ -n "${pr_number:-}" ]]; then

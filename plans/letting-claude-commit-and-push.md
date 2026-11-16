@@ -510,11 +510,11 @@ When Claude had already written this branch's draft, that costs one rewrite,
 in a case that needs a reused name in the main clone.
 `git land --path` prints that path, so Claude never derives it.
 The body holds everything Claude wrote (the problem, the change, how it was
-checked) inside a `<details>` fold, with the model and effort level as the
-`<summary>`, such as `<summary>Claude Opus 5.5, high effort</summary>`, following
+checked) inside a `<details>` fold, with the model as the
+`<summary>`, such as `<summary>Claude Opus 5.5</summary>`, following
 [Simon Willison's details-summary pattern](https://simonwillison.net/2026/Nov/9/details-summary/).
-Claude writes the fold itself, since only Claude knows which model and effort
-it ran at.
+Claude writes the fold itself, since only Claude knows which model it ran as.
+It leaves out the effort level, which it has no way to see.
 
 **On every run:**
 

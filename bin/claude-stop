@@ -89,7 +89,7 @@ EOF
       CLAUDE_HOOK_SELFTEST= "$SELF" <<<"$payload" 2>&1) || exit_code=$?
 
     local got="" name
-    for name in gate precommit finish plan-artifact commit land summary sound tab-paused tab-finished; do
+    for name in gate precommit finish plan-artifact commit land summary sound tab-paused tab-finished tab-waiting; do
       [[ -e "$stubs/$name.called" ]] && got+="${got:+,}$name"
     done
     STOPS=$(cat "$stubs/stops")
@@ -120,11 +120,11 @@ EOF
   # --- the question gate ---
   t "a question ends the stop with no checks" \
     "{$P,\"last_assistant_message\":\"Which one?\"}" \
-    0 "" "gate,sound,tab-finished" STUB_CLAUDE_OUT=YES
+    0 "" "gate,sound,tab-waiting" STUB_CLAUDE_OUT=YES
   stopped "a gate before the finishing pass marks the prompt" "p1 --gated"
   t "a question after the finishing pass ends the sequence" \
     "{$P,\"stop_hook_active\":true,\"last_assistant_message\":\"Suppress it?\"}" \
-    0 "" "gate,sound,tab-finished" STUB_CLAUDE_OUT=YES STUB_ASKED=finish
+    0 "" "gate,sound,tab-waiting" STUB_CLAUDE_OUT=YES STUB_ASKED=finish
   stopped "a gate after the finishing pass records no mark" "p1"
   t "a model call that fails counts as not a question" "{$P,\"last_assistant_message\":\"Which one?\"}" \
     0 "" "gate,$ALL,sound,tab-finished" STUB_CLAUDE_OUT=YES STUB_CLAUDE_EXIT=1
@@ -138,24 +138,24 @@ EOF
     0 "" "$ALL,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES \
     STUB_LAND_STATE=$'landed=no\nunlanded=3\npr_failed=no\ndefault=no'
   t "a landed branch with unlanded commits could block" "{$P,\"last_assistant_message\":\"Which one?\"}" \
-    0 "" "gate,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES \
+    0 "" "gate,sound,tab-waiting" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES \
     STUB_LAND_STATE=$'landed=yes\nunlanded=1\npr_failed=no\ndefault=no'
   t "a PR that failed to open could block" "{$P,\"last_assistant_message\":\"Which one?\"}" \
-    0 "" "gate,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES \
+    0 "" "gate,sound,tab-waiting" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES \
     STUB_LAND_STATE=$'landed=no\nunlanded=0\npr_failed=yes\ndefault=no'
   t "a changed prompt whose finishing pass and report have asked needs no gate" \
     "{$P,\"last_assistant_message\":\"Which one?\"}" \
     0 "" "$ALL,sound,tab-finished" STUB_ASKED="finish summary" STUB_CLAUDE_OUT=YES
   t "a changed prompt whose report hasn't asked could block" \
     "{$P,\"last_assistant_message\":\"Which one?\"}" \
-    0 "" "gate,sound,tab-finished" STUB_ASKED="finish" STUB_CLAUDE_OUT=YES
+    0 "" "gate,sound,tab-waiting" STUB_ASKED="finish" STUB_CLAUDE_OUT=YES
   t "a landed branch whose land check has asked needs no gate" \
     "{$P,\"last_assistant_message\":\"Which one?\"}" \
     0 "" "$ALL,sound,tab-finished" STUB_CHANGED=1 STUB_ASKED="land" STUB_CLAUDE_OUT=YES \
     STUB_LAND_STATE=$'landed=yes\nunlanded=1\npr_failed=no\ndefault=no'
   echo dirty >"$repo/stray"
   t "a dirty tree could block" "{$P,\"last_assistant_message\":\"Which one?\"}" \
-    0 "" "gate,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES
+    0 "" "gate,sound,tab-waiting" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES
   : >"$repo/stray" && mv "$repo/stray" "$stubs/stray-moved-aside"
 
   # --- no prompt id: no check can run, so the first stop blocks to say so and the retry passes ---
@@ -180,6 +180,11 @@ EOF
   t "ended shell finishes" \
     "{$P,\"last_assistant_message\":\"Done.\",\"background_tasks\":[{\"type\":\"shell\",\"status\":\"completed\"}]}" \
     0 "" "$ALL,sound,tab-finished"
+
+  # --- a question waits on Josh even with background work that will wake the session ---
+  t "a question with a running shell waits rather than pauses" \
+    "{$P,\"last_assistant_message\":\"Which one?\",\"background_tasks\":[{\"type\":\"shell\",\"status\":\"running\"}]}" \
+    0 "" "gate,sound,tab-waiting" STUB_CLAUDE_OUT=YES
 
   # --- a scheduled job will wake the session, so the stop is a pause ---
   t "pending cron pauses" \
@@ -330,9 +335,11 @@ ends_on_question() {
 # finishing pass hasn't run yet this prompt (always so on its first stop, and so after pre-commit
 # blocked), the snapshot is marked and the next prompt keeps this one's start, so the pass and the
 # report cover this turn's changes then.
+# The tab shows it waiting on Josh rather than finished or paused, even with background work
+# pending, since nothing moves until he answers.
 if could_block && ends_on_question; then
   claude-prompt-snapshot asked "$PROMPT_ID" finish || GATED=--gated
-  announce_stop
+  announce waiting
   exit 0
 fi
 

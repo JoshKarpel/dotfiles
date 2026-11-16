@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Print the current branch's pull request as `gh pr view --json` gives it, from a
+# cache, for claude-statusline. Prints `{}` when the branch has no PR, and nothing
+# at all off a branch or before the first lookup lands.
+# Usage: claude-fetch-pr [--refresh]
+#
+# The status line renders every few seconds and a lookup takes over a second, so
+# reading never waits on one: a cache older than TTL starts a detached `--refresh`
+# and prints what it has, and the next render picks up the result. The status
+# line therefore lags a new or merged PR by up to TTL plus one render.
+#
+# It asks `gh` itself rather than reading the status line payload's `pr`, which
+# Claude Code fills from its own GitHub lookup, and that lookup fails behind
+# exe.dev's gh proxy even where `gh pr view` works.
+#
+# The cache is one file per branch under the git directory, so worktrees and
+# branches never read each other's PR. A failed lookup caches `{}` like "no PR"
+# does: `gh` exits 1 for both, and a missing link for one TTL is harmless.
+
+set -euo pipefail
+
+TTL=60 # seconds
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
+# line is how `claude-hook-selftests` discovers participating scripts. A stub gh on
+# PATH answers STUB_PR_JSON (or fails when it is unset) and records each call, so the
+# tests assert on what is printed and on whether a lookup ran.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  stubs=$(realpath "$(mktemp -d)")
+  repo=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$stubs" "$repo"' EXIT
+  for var in $(git rev-parse --local-env-vars); do unset "$var"; done
+  git init -q -b feat/x "$repo"
+  git -C "$repo" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m init
+  cache="$repo/.git/claude-pr/feat/x.json"
+
+  cat >"$stubs/gh" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "$STUB_DIR/gh.calls"
+[ -n "${STUB_PR_JSON:-}" ] || exit 1
+printf '%s\n' "$STUB_PR_JSON"
+EOF
+  chmod +x "$stubs/gh"
+
+  # t <desc> <want-out> <want-lookup: yes|no|-> [args...]
+  # A `-` skips the lookup check, for a read whose detached refresh races it.
+  t() {
+    local desc="$1" want_out="$2" want_lookup="$3" out exit_code=0 got_lookup=no
+    shift 3
+    rm -f "$stubs/gh.calls"
+    out=$(cd "$repo" && env STUB_DIR="$stubs" PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= \
+      "$SELF" "$@" 2>&1) || exit_code=$?
+    [[ -e "$stubs/gh.calls" ]] && got_lookup=yes
+    [[ "$exit_code" == 0 && "$out" == "$want_out" ]] ||
+    { printf 'FAIL %s: exit=%s want_out=%q got_out=%q\n' "$desc" "$exit_code" "$want_out" "$out"; fails=1; }
+    [[ "$want_lookup" == - || "$got_lookup" == "$want_lookup" ]] ||
+    { printf 'FAIL %s: want_lookup=%s got_lookup=%s\n' "$desc" "$want_lookup" "$got_lookup"; fails=1; }
+  }
+
+  PR='{"number":7,"state":"OPEN","url":"https://example.com/pull/7"}'
+
+  STUB_PR_JSON="$PR" t "a refresh caches the PR" "" yes --refresh
+  [[ "$(cat "$cache")" == "$PR" ]] || { printf 'FAIL refresh wrote %q\n' "$(cat "$cache")"; fails=1; }
+  t "a fresh cache is printed without a lookup" "$PR" no
+  t "a refresh with no PR caches {}" "" yes --refresh
+  [[ "$(cat "$cache")" == "{}" ]] || { printf 'FAIL no-PR refresh wrote %q\n' "$(cat "$cache")"; fails=1; }
+
+  # A stale cache is printed as it stands, and the refresh it starts runs detached, so
+  # the test waits on the cache changing rather than on the call returning.
+  printf '%s\n' "$PR" >"$cache"
+  touch -d '@0' "$cache"
+  STUB_PR_JSON='{"number":8}' t "a stale cache is printed while it refreshes" "$PR" -
+  timeout 10 sh -c 'until grep -q "\"number\":8" "$1" 2>/dev/null; do :; done' _ "$cache" ||
+  { printf 'FAIL the stale read never refreshed the cache\n'; fails=1; }
+
+  rm -rf "$repo/.git/claude-pr"
+  STUB_PR_JSON="$PR" t "no cache prints nothing while it looks up" "" -
+  timeout 10 sh -c 'until [ -s "$1" ]; do :; done' _ "$cache" ||
+  { printf 'FAIL the first read never filled the cache\n'; fails=1; }
+
+  git -C "$repo" checkout -q --detach
+  t "a detached HEAD prints nothing and looks nothing up" "" no
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+branch=$(git symbolic-ref --short -q HEAD 2>/dev/null) || exit 0
+cache="$(git rev-parse --absolute-git-dir)/claude-pr/$branch.json"
+
+if [[ "${1:-}" == "--refresh" ]]; then
+  mkdir -p "${cache%/*}"
+  # One refresh at a time per branch; a render that finds one running leaves it be.
+  # Without flock (macOS) two overlapping refreshes just write the same answer.
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$cache.lock"
+    flock -n 9 || exit 0
+  fi
+  pr=$(gh pr view --json number,url,state,isDraft,reviewDecision 2>/dev/null) || pr="{}"
+  printf '%s\n' "$pr" >"$cache.tmp"
+  mv "$cache.tmp" "$cache"
+  exit 0
+fi
+
+mtime=0
+if [[ -f "$cache" ]]; then
+  case "$(uname -s)" in
+    Darwin) mtime=$(stat -f %m "$cache") ;;
+    *) mtime=$(stat -c %Y "$cache") ;;
+  esac
+  cat "$cache"
+fi
+# Detached, with every stream closed, so the status line's read of this script's
+# output ends without waiting for the lookup.
+if (($(date +%s) - mtime >= TTL)); then
+  "$0" --refresh </dev/null >/dev/null 2>&1 &
+fi
+exit 0
