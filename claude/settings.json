@@ -6,10 +6,7 @@
     "DISABLE_TELEMETRY": "1",
     "DISABLE_ERROR_REPORTING": "1"
   },
-  "attribution": {
-    "commit": "",
-    "pr": ""
-  },
+  "attribution": false,
   "includeGitInstructions": false,
   "cleanupPeriodDays": 36500,
   "permissions": {
@@ -208,11 +205,20 @@
       "Bash(helm show *)",
       "Bash(helm lint *)",
       "Bash(dyff *)",
-      "Bash(docker system df *)"
+      "Bash(docker system df *)",
+      "Bash(git land)",
+      "Bash(git land --path)"
     ],
     "deny": [
-      "Bash(git commit*)",
       "Bash(git push*)",
+      "Bash(git-land*)",
+      "Bash(gh pr create*)",
+      "Bash(gh pr edit*)",
+      "Bash(gh pr merge*)",
+      "Bash(gh pr review*)",
+      "Bash(gh release create*)",
+      "Bash(git yeet*)",
+      "Bash(git-yeet*)",
       "Bash(git reset --hard*)",
       "Bash(git checkout .)",
       "Bash(git clean -f*)",
@@ -235,7 +241,9 @@
       "Bash(*.env*)",
       "Edit(**/uv.lock)"
     ],
-    "ask": [],
+    "ask": [
+      "Bash(git land --workflows*)"
+    ],
     "defaultMode": "auto"
   },
   "model": "opus[1m]",
@@ -322,6 +330,10 @@
           {
             "type": "command",
             "command": "claude-sleep-poll-check"
+          },
+          {
+            "type": "command",
+            "command": "claude-git-commit-check"
           }
         ]
       },
@@ -370,6 +382,10 @@
           {
             "type": "command",
             "command": "claude-tab-status working"
+          },
+          {
+            "type": "command",
+            "command": "claude-prompt-snapshot"
           }
         ]
       }

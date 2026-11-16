@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Stop check: ask Claude to commit the turn's staged changes, once per prompt.
+#
+# Claude commits at the end of each turn that changed files, so uncommitted work never piles up
+# across turns where a later one can't tell what's settled. This runs after `claude-stop-precommit`
+# has staged tracked changes and run pre-commit, and after the finishing pass and the plan page have
+# settled, so the commit holds the turn's final state.
+#
+# It asks only when the tree still matches the pass fingerprint `claude-stop-precommit` recorded.
+# That hook reports each failure (or each untracked file) once per prompt and is silent after, so
+# without the match this would ask for a commit over a state pre-commit never passed. A state with
+# no pass carries its changes to the next turn instead. Where Claude may commit is
+# `is-claude-commit-branch`'s answer, the same one `claude-git-commit-check` gives the commit itself.
+
+set -euo pipefail
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker line is how
+# `claude-hook-selftests` discovers participating hooks. Each case is a git state in a throwaway
+# clone; run these with `CLAUDE_HOOK_SELFTEST=1 claude-stop-commit`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  BIN_DIR=$(dirname "$SELF")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+  # During a `git commit` git's own environment points at the outer repo; the sandbox needs its own.
+  for var in $(git rev-parse --local-env-vars); do unset "$var"; done
+  export GIT_CONFIG_GLOBAL=/dev/null HOME="$workdir" XDG_CONFIG_HOME="$workdir"
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+  export PATH="$BIN_DIR:$PATH"
+
+  git init -q -b main "$workdir/origin"
+  echo base >"$workdir/origin/file"
+  git -C "$workdir/origin" add file
+  git -C "$workdir/origin" commit -q -m init
+  git clone -q "$workdir/origin" "$workdir/repo"
+  repo="$workdir/repo"
+  cd "$repo"
+  git switch -q -c feature
+
+  pass() {
+    CLAUDE_HOOK_SELFTEST= claude-prompt-snapshot fingerprint >"$(git rev-parse --absolute-git-dir)/claude-precommit-passed"
+  }
+  asks() {
+    local desc="$1" prompt="$2" want="$3" got=no out
+    out=$(jq -cn --arg p "$prompt" '{prompt_id: $p}' | CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1) ||
+    { printf 'FAIL %s: exited non-zero :: %s\n' "$desc" "$out"; fails=1; }
+    [[ "$out" == *"Commit the staged changes"* ]] && got=yes
+    [[ "$got" == "$want" ]] || { printf 'FAIL %s: want_ask=%s got=%s :: %s\n' "$desc" "$want" "$got" "$out"; fails=1; }
+  }
+
+  asks "a clean tree is silent" p1 no
+
+  echo edit >>file
+  git add file
+  asks "staged changes with no recorded pass are silent" p2 no
+  pass
+  asks "staged changes that passed pre-commit ask" p3 yes
+  asks "the same prompt is asked once" p3 no
+
+  echo more >>file
+  git add file
+  asks "a tree that moved since the pass is silent" p4 no
+  pass
+
+  git commit -q -m "commit by hand"
+  echo stray >other
+  pass
+  asks "untracked files alone aren't staged changes" p5 no
+  rm other
+
+  git switch -q main
+  echo on-main >>file
+  git add file
+  pass
+  asks "the default branch is silent" p6 no
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+INPUT=$(cat)
+PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")
+
+GIT_DIR=$(git rev-parse --absolute-git-dir 2>/dev/null) || exit 0
+git diff --cached --quiet && exit 0
+is-claude-commit-branch >/dev/null || exit 0
+[[ "$(cat "$GIT_DIR/claude-precommit-passed" 2>/dev/null)" == "$(claude-prompt-snapshot fingerprint)" ]] || exit 0
+
+claude-prompt-snapshot ask "$PROMPT_ID" commit || exit 0
+
+CONTEXT="Pre-commit passed and this turn's changes are staged:
+
+$(git diff --cached --stat)
+
+Commit the staged changes now with \`git commit\`, with a message describing this step: a short imperative subject, then a body saying why if it isn't obvious. Turn-sized commits are fine; the squash merge keeps only the PR's title and body. Reply in one line, and hold the turn's report: the last check asks for it."
+
+jq -n --arg ctx "$CONTEXT" \
+  '{systemMessage: "[claude-stop-commit] commit the turn", hookSpecificOutput: {hookEventName: "Stop", additionalContext: $ctx}}'

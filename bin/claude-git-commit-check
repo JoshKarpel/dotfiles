@@ -1,0 +1,497 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# ///
+"""PreToolUse hook: keep Claude's commits off the default branch, and keep pre-commit running.
+
+Claude commits on worktree branches without being asked, and `git land` pushes whatever
+branch it's on, so a commit on the default branch is one land away from skipping the pull
+request wherever a repo has no PR rule. This blocks, before the Bash call runs:
+
+- a `git commit` that skips the hooks (`--no-verify`, `-n`, or a short-flag cluster with
+  `n` in it, such as `-anm`), and a `merge`, `pull`, or `am` with `--no-verify`;
+- a `commit`, `cherry-pick`, `revert`, `am`, or `rebase` on a branch
+  `is-claude-commit-branch` refuses (the default branch, a detached `HEAD`, or an `origin`
+  with no `HEAD`), except `--abort` and `--quit`, which create nothing;
+- a `merge` or `pull` on such a branch, unless it only fast-forwards the branch to its own
+  upstream: `git pull --ff-only`, or a bare `git pull` where `pull.ff` is `only`, naming
+  no ref (a lone remote name counts as none), and `git merge --ff-only` naming nothing,
+  `@{u}`, `@{upstream}`, `<branch>@{u}`, or `origin/<branch>`. One naming any other ref
+  gets the branch check, `--ff-only` or not: on the default branch,
+  `git pull --ff-only origin feature` moves it to `feature`.
+
+It is a level-1 guard: it catches the natural spelling of an honest mistake. It
+deliberately does not parse `git -c`, `git -C`, `--git-dir`, `GIT_CONFIG*`, `SKIP`,
+`bash -c`, or a `cd` into another repo before the commit. Those are level-2 routes no
+parser closes, and the commit is local, so the push is the step that matters. Branch
+state is read from the session's working directory, and only when a git call needs it.
+It fails open (exit 0) on any internal error, so a bug never bricks Bash.
+"""
+
+from __future__ import annotations
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests (`selftest`).
+# This marker line is how `claude-hook-selftests` discovers participating hooks.
+
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+
+VAR_ASSIGN = re.compile(r"^\w+=")
+SHORT_CLUSTER = re.compile(r"^-[A-Za-z]+$")
+
+# Subcommands that create or rewrite commits, and so get the branch check.
+COMMITTING = {"commit", "cherry-pick", "revert", "am", "rebase", "merge", "pull"}
+# Flags that end or inspect an operation in progress without creating a commit.
+NON_CREATING = {"--abort", "--quit", "--show-current-patch", "--edit-todo"}
+# Subcommands whose `--no-verify` skips the hooks pre-commit installs.
+NO_VERIFY = {"commit", "merge", "pull", "am"}
+
+# Options that take a value as the next token (unless written `--opt=value`), per
+# subcommand, so the value isn't mistaken for a ref. Short letters in a cluster: the rest
+# of the cluster is the value, or the next token when the letter ends it.
+LONG_VALUE = {
+    "commit": {
+        "--message", "--file", "--reuse-message", "--reedit-message", "--template",
+        "--author", "--date", "--fixup", "--squash", "--cleanup", "--trailer",
+        "--pathspec-from-file",
+    },
+    "merge": {"--message", "--file", "--strategy", "--strategy-option", "--into-name", "--cleanup"},
+    "pull": {
+        "--strategy", "--strategy-option", "--depth", "--deepen", "--shallow-since",
+        "--shallow-exclude", "--server-option", "--upload-pack", "--jobs",
+    },
+}
+SHORT_VALUE = {
+    "commit": set("mFCct"),
+    "merge": set("mFsX"),
+    "pull": set("sXoj"),
+}
+
+PULL_NOT_FF_ONLY = {"--ff", "--no-ff", "--rebase", "-r"}
+
+
+@dataclass(frozen=True, slots=True)
+class BranchState:
+    """What the branch check needs to know about the repo the session is in.
+
+    `refusal` is `is-claude-commit-branch`'s reason, or `None` where it allows a commit.
+    """
+
+    refusal: str | None
+    branch: str | None
+    pull_ff_only: bool
+    remotes: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class GitCall:
+    """One `git <subcommand> <args>` found in the command."""
+
+    subcommand: str
+    args: tuple[str, ...]
+
+
+def statements(command: str) -> list[str]:
+    """Split on unquoted newlines, which shell tokenizing would treat as whitespace."""
+    result: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for char in command:
+        if escaped:
+            buf.append(char)
+            escaped = False
+        elif char == "\\" and quote != "'":
+            buf.append(char)
+            escaped = True
+        elif quote:
+            buf.append(char)
+            if char == quote:
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+            buf.append(char)
+        elif char == "\n":
+            result.append("".join(buf))
+            buf = []
+        else:
+            buf.append(char)
+    result.append("".join(buf))
+    return result
+
+
+def segments(statement: str) -> list[list[str]]:
+    """Tokenize one statement and split it on `;`, `&&`, `||`, `|`, and parentheses."""
+    lexer = shlex.shlex(statement, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    result: list[list[str]] = []
+    current: list[str] = []
+    for token in lexer:
+        if token and all(char in ";&|()" for char in token):
+            if current:
+                result.append(current)
+                current = []
+            continue
+        current.append(token)
+    if current:
+        result.append(current)
+    return result
+
+
+def git_call(segment: list[str]) -> GitCall | None:
+    """The `git` call a segment makes, past `VAR=x` prefixes, `env`, and `--no-pager`.
+
+    Any other global option (`-c`, `-C`, `--git-dir`) ends the match: those are the
+    level-2 routes this hook leaves alone.
+    """
+    index = 0
+    while index < len(segment) and VAR_ASSIGN.match(segment[index]):
+        index += 1
+    if index < len(segment) and segment[index] == "env":
+        index += 1
+        while index < len(segment) and (segment[index].startswith("-") or VAR_ASSIGN.match(segment[index])):
+            index += 1
+    if index >= len(segment) or os.path.basename(segment[index]) != "git":
+        return None
+    index += 1
+    while index < len(segment) and segment[index] == "--no-pager":
+        index += 1
+    if index >= len(segment) or segment[index].startswith("-"):
+        return None
+    return GitCall(segment[index], tuple(segment[index + 1:]))
+
+
+def git_calls(command: str) -> list[GitCall]:
+    calls: list[GitCall] = []
+    for statement in statements(command):
+        try:
+            parsed = segments(statement)
+        except ValueError:
+            continue
+        for segment in parsed:
+            call = git_call(segment)
+            if call is not None and call.subcommand in COMMITTING:
+                calls.append(call)
+    return calls
+
+
+def skips_hooks(call: GitCall) -> bool:
+    """Whether the call skips the hooks: `--no-verify`, or `commit`'s `-n` in any cluster."""
+    long_value = LONG_VALUE.get(call.subcommand, set())
+    short_value = SHORT_VALUE.get(call.subcommand, set())
+    skip_next = False
+    for arg in call.args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--":
+            return False
+        if arg == "--no-verify" and call.subcommand in NO_VERIFY:
+            return True
+        if arg in long_value:
+            skip_next = True
+            continue
+        if call.subcommand != "commit" or not SHORT_CLUSTER.match(arg):
+            continue
+        for position, letter in enumerate(arg[1:], start=1):
+            if letter == "n":
+                return True
+            if letter in short_value:
+                skip_next = position == len(arg) - 1
+                break
+    return False
+
+
+def positionals(call: GitCall) -> list[str]:
+    """The call's non-option arguments, skipping the values of value-taking options."""
+    long_value = LONG_VALUE.get(call.subcommand, set())
+    short_value = SHORT_VALUE.get(call.subcommand, set())
+    result: list[str] = []
+    skip_next = False
+    past_options = False
+    for arg in call.args:
+        if skip_next:
+            skip_next = False
+            continue
+        if past_options or not arg.startswith("-") or arg == "-":
+            result.append(arg)
+            continue
+        if arg == "--":
+            past_options = True
+            continue
+        if arg in long_value:
+            skip_next = True
+            continue
+        if SHORT_CLUSTER.match(arg):
+            for position, letter in enumerate(arg[1:], start=1):
+                if letter in short_value:
+                    skip_next = position == len(arg) - 1
+                    break
+    return result
+
+
+def fast_forwards_to_upstream(call: GitCall, state: BranchState) -> bool:
+    """Whether a `pull` or `merge` only fast-forwards the branch to its own upstream."""
+    args = set(call.args)
+    refs = positionals(call)
+    if call.subcommand == "pull":
+        ff_only = "--ff-only" in args or (
+            state.pull_ff_only
+            and not args & PULL_NOT_FF_ONLY
+            and not any(arg.startswith("--rebase=") for arg in args)
+        )
+        return ff_only and (not refs or (len(refs) == 1 and refs[0] in state.remotes))
+    if call.subcommand == "merge":
+        if "--ff-only" not in args:
+            return False
+        if not refs:
+            return True
+        upstream = {"@{u}", "@{upstream}"}
+        if state.branch is not None:
+            upstream |= {f"{state.branch}@{{u}}", f"{state.branch}@{{upstream}}", f"origin/{state.branch}"}
+        return len(refs) == 1 and refs[0] in upstream
+    return False
+
+
+def refusal(command: str, state: Callable[[], BranchState]) -> str | None:
+    """Why the command must not run, or `None`. `state` is called only when a call needs it."""
+    for call in git_calls(command):
+        spelled = f"git {call.subcommand}"
+        if skips_hooks(call):
+            return (
+                f"Blocked `{spelled}` that skips the git hooks: pre-commit has to run on "
+                "every commit. Run it without `--no-verify`/`-n` and fix what the hooks "
+                "flag; if a hook can't pass, say so and stop.\n"
+            )
+        if set(call.args) & NON_CREATING:
+            continue
+        current = state()
+        if current.refusal is None:
+            continue
+        if call.subcommand in {"merge", "pull"} and fast_forwards_to_upstream(call, current):
+            continue
+        message = f"Blocked `{spelled}`: {current.refusal}.\n"
+        if call.subcommand in {"merge", "pull"}:
+            message += (
+                "Syncing the branch with its own upstream is allowed anywhere: "
+                "`git pull --ff-only`, or `git merge --ff-only @{u}`.\n"
+            )
+        return message + "When a guard blocks something, say so and stop; don't look for another route.\n"
+    return None
+
+
+def run(args: list[str], cwd: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=5)
+
+
+def read_state(cwd: str) -> BranchState:
+    """Read the branch state of the repo at `cwd`. Outside a repo nothing is refused,
+    since git itself will refuse the commit."""
+    if run(["git", "rev-parse", "--git-dir"], cwd).returncode != 0:
+        return BranchState(None, None, False, frozenset())
+    check = run(["is-claude-commit-branch"], cwd)
+    branch = run(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], cwd)
+    pull_ff = run(["git", "config", "--get", "pull.ff"], cwd)
+    remotes = run(["git", "remote"], cwd)
+    return BranchState(
+        refusal=None if check.returncode == 0 else (check.stdout.strip() or "is-claude-commit-branch refused"),
+        branch=branch.stdout.strip() if branch.returncode == 0 else None,
+        pull_ff_only=pull_ff.stdout.strip() == "only",
+        remotes=frozenset(remotes.stdout.split()),
+    )
+
+
+DEFAULT_REASON = "on the default branch master: Claude commits on a worktree branch, never the default"
+FEATURE = BranchState(None, "feature", True, frozenset({"origin", "upstream"}))
+DEFAULT = BranchState(DEFAULT_REASON, "master", True, frozenset({"origin", "upstream"}))
+DEFAULT_NO_PULL_FF = BranchState(DEFAULT_REASON, "master", False, frozenset({"origin"}))
+DETACHED = BranchState("HEAD is detached", None, True, frozenset({"origin"}))
+
+# (command, state, should_block). A safety hook without a test is theater; run these with
+# `CLAUDE_HOOK_SELFTEST=1 claude-git-commit-check`.
+CASES: list[tuple[str, BranchState, bool]] = [
+    # --- commits on a branch: allowed, amend and merge conclusion included ---
+    ("git commit -m 'add widget'", FEATURE, False),
+    ("git commit --amend --no-edit", FEATURE, False),
+    ("git add -A && git commit -am 'step'", FEATURE, False),
+    ("git commit", FEATURE, False),
+    ("git cherry-pick abc123", FEATURE, False),
+    ("git merge origin/master", FEATURE, False),
+    ("git rebase origin/master", FEATURE, False),
+    # --- commits on the default branch or a detached HEAD: refused ---
+    ("git commit -m 'fix'", DEFAULT, True),
+    ("git --no-pager commit -m 'fix'", DEFAULT, True),
+    ("FOO=1 git commit -m fix", DEFAULT, True),
+    ("env FOO=1 git commit -m fix", DEFAULT, True),
+    ("git commit -m fix", DETACHED, True),
+    ("git cherry-pick abc123", DEFAULT, True),
+    ("git revert HEAD", DEFAULT, True),
+    ("git am < patch.mbox", DEFAULT, True),
+    ("git rebase -i HEAD~3", DEFAULT, True),
+    ("git cherry-pick --continue", DEFAULT, True),
+    # --- ending an operation creates nothing ---
+    ("git cherry-pick --abort", DEFAULT, False),
+    ("git rebase --abort", DEFAULT, False),
+    ("git merge --abort", DEFAULT, False),
+    ("git am --quit", DEFAULT, False),
+    # --- hooks skipped: refused anywhere ---
+    ("git commit --no-verify -m x", FEATURE, True),
+    ("git commit -n -m x", FEATURE, True),
+    ("git commit -anm x", FEATURE, True),
+    ("git merge --no-verify origin/master", FEATURE, True),
+    ("git pull --no-verify", FEATURE, True),
+    # --- a message or value containing n is not the flag ---
+    ("git commit -m 'nothing new'", FEATURE, False),
+    ("git commit -m -n", FEATURE, False),
+    ("git commit -am nope", FEATURE, False),
+    ("git commit --message -n", FEATURE, False),
+    ("git commit -C HEAD", FEATURE, False),
+    # merge's and pull's -n is --no-stat, not --no-verify
+    ("git merge -n origin/master", FEATURE, False),
+    # --- syncing with the branch's own upstream: allowed on the default branch ---
+    ("git pull", DEFAULT, False),
+    ("git pull --ff-only", DEFAULT, False),
+    ("git pull --ff-only origin", DEFAULT, False),
+    ("git pull --ff-only", DEFAULT_NO_PULL_FF, False),
+    ("git fetch origin && git merge --ff-only @{u}", DEFAULT, False),
+    ("git merge --ff-only @{upstream}", DEFAULT, False),
+    ("git merge --ff-only master@{u}", DEFAULT, False),
+    ("git merge --ff-only origin/master", DEFAULT, False),
+    ("git merge --ff-only", DEFAULT, False),
+    # --- naming another ref, or not fast-forward-only: refused on the default branch ---
+    ("git pull --ff-only origin feature", DEFAULT, True),
+    ("git pull origin feature", DEFAULT, True),
+    ("git pull", DEFAULT_NO_PULL_FF, True),
+    ("git pull --no-ff", DEFAULT, True),
+    ("git pull --rebase", DEFAULT, True),
+    ("git merge --ff-only origin/feature", DEFAULT, True),
+    ("git merge --ff-only feature", DEFAULT, True),
+    ("git merge origin/master", DEFAULT, True),
+    ("git merge --ff-only -m msg origin/feature", DEFAULT, True),
+    ("git merge --ff-only @{u}", DETACHED, False),
+    ("git merge --ff-only origin/master", DETACHED, True),
+    # --- compound commands: the later bad segment still blocks ---
+    ("git status && git commit -m x", DEFAULT, True),
+    ("git commit -m ok; git commit --no-verify -m bad", FEATURE, True),
+    ("echo hi | git commit -F -", DEFAULT, True),
+    ("git add file\ngit commit -m x", DEFAULT, True),
+    ("(cd sub && git commit -m x)", DEFAULT, True),
+    # --- not a commit, or only mentioned: allowed ---
+    ("git status", DEFAULT, False),
+    ("git log --oneline", DEFAULT, False),
+    ("echo 'git commit -m x'", DEFAULT, False),
+    ("grep 'git commit' notes.md", DEFAULT, False),
+    # --- KNOWN LEVEL-2 ROUTES (allowed; documented in the module docstring) ---
+    ("git -c core.hooksPath=/dev/null commit -m x", DEFAULT, False),
+    ("git -C . commit -m x", DEFAULT, False),
+    ("bash -c 'git commit -m x'", DEFAULT, False),
+    ("SKIP=all git commit -m x", FEATURE, False),
+]
+
+
+def end_to_end_cases(self_path: Path) -> int:
+    """Pipe real payloads through the hook in a sandbox clone, where origin/HEAD exists."""
+    failures = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp).resolve()
+        local_env = subprocess.run(
+            ["git", "rev-parse", "--local-env-vars"], capture_output=True, text=True,
+        ).stdout.split()
+        env = {key: value for key, value in os.environ.items() if key not in local_env}
+        env |= {
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "HOME": str(root),
+            "XDG_CONFIG_HOME": str(root),
+            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+            "PATH": f"{self_path.parent}:{os.environ.get('PATH', '')}",
+        }
+        env.pop("CLAUDE_HOOK_SELFTEST", None)
+
+        def git(*args: str, cwd: Path = root) -> None:
+            subprocess.run(["git", *args], cwd=cwd, env=env, check=True, capture_output=True)
+
+        git("init", "-q", "-b", "trunk", "origin-src")
+        git("commit", "-q", "--allow-empty", "-m", "init", cwd=root / "origin-src")
+        git("clone", "-q", "--bare", "origin-src", "origin.git")
+        git("clone", "-q", "origin.git", "clone")
+        clone = root / "clone"
+
+        def hook(command: str) -> int:
+            payload = json.dumps({"tool_input": {"command": command}, "cwd": str(clone)})
+            return subprocess.run(
+                [sys.executable, str(self_path)], input=payload, text=True,
+                cwd=clone, env=env, capture_output=True,
+            ).returncode
+
+        for description, command, want in [
+            ("e2e: commit on the default branch blocks", "git commit -m x", 2),
+            ("e2e: ff-only pull on the default branch allows", "git pull --ff-only", 0),
+        ]:
+            if (got := hook(command)) != want:
+                failures += 1
+                print(f"FAIL {description}: want_exit={want} got_exit={got}")
+        git("switch", "-q", "-c", "feature", cwd=clone)
+        if (got := hook("git commit -m x")) != 0:
+            failures += 1
+            print(f"FAIL e2e: commit on a feature branch allows: want_exit=0 got_exit={got}")
+    return failures
+
+
+def selftest() -> int:
+    failures = 0
+    for command, state, should_block in CASES:
+        blocked = refusal(command, lambda: state) is not None
+        if blocked != should_block:
+            failures += 1
+            print(f"FAIL want_block={should_block} got_block={blocked} :: {command}")
+
+    def unreachable() -> BranchState:
+        raise AssertionError("branch state read for a command that needs none")
+
+    for command in ["git status", "git commit --no-verify -m x", "git rebase --abort"]:
+        try:
+            refusal(command, unreachable)
+        except AssertionError as error:
+            failures += 1
+            print(f"FAIL {error} :: {command}")
+
+    failures += end_to_end_cases(Path(__file__).resolve())
+    if not failures:
+        print("claude-git-commit-check: all self-tests passed")
+    return 1 if failures else 0
+
+
+def main() -> int:
+    if os.environ.get("CLAUDE_HOOK_SELFTEST"):
+        return selftest()
+    try:
+        data = json.load(sys.stdin)
+        command = (data.get("tool_input") or {}).get("command") or ""
+        cwd = data.get("cwd") or os.getcwd()
+        cached: list[BranchState] = []
+
+        def state() -> BranchState:
+            if not cached:
+                cached.append(read_state(cwd))
+            return cached[0]
+
+        message = refusal(command, state)
+    except Exception:
+        return 0
+    if message is None:
+        return 0
+    sys.stderr.write(message)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

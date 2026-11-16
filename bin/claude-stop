@@ -3,143 +3,211 @@
 # only if none blocked, so an announcement means Claude is actually stopping rather
 # than retrying after a block. (Hooks within a single Stop group run in parallel, so a
 # separate announcing hook can't know whether a sibling is about to block this attempt.)
+#
+# A question gate runs first: a reply that ends asking Josh something ends the stop with
+# no checks, so the question is the last thing he reads. It lives here rather than in a
+# prompt-based Stop hook because those run in parallel with command hooks and couldn't
+# keep `claude-stop` from running.
 
 set -uo pipefail
 
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
 # line is how `claude-hook-selftests` discovers participating hooks. This hook decides
-# what happens at stop time (defer while an agent runs, run a check that blocks,
-# propagate a check's error, or announce after every check passes) from branches real
-# Claude output never exercises directly; run these with `CLAUDE_HOOK_SELFTEST=1 claude-stop`.
+# what happens at stop time (defer while an agent runs, end on a question, run a check
+# that blocks, propagate a check's error, or announce after every check passes) from
+# branches real Claude output never exercises directly; run these with
+# `CLAUDE_HOOK_SELFTEST=1 claude-stop`.
 if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   SELF=$(realpath "$0")
   fails=0
   stubs=$(realpath "$(mktemp -d)")
-  trap 'rm -rf "$stubs"' EXIT
+  repo=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$stubs" "$repo"' EXIT
+  # The cheap read looks at the tree, so every case runs in a clean throwaway repo, with git's own
+  # environment unset: during a `git commit` it points at the outer repo.
+  for var in $(git rev-parse --local-env-vars); do unset "$var"; done
+  git init -q "$repo"
 
-  # Fixed stub scripts, driven by env vars set per-call in t(), so no test's expected
-  # JSON output has to survive being spliced into a generated script's own quoting.
+  # Fixed stub scripts, driven by env vars set per call, so no test's expected JSON output has to
+  # survive being spliced into a generated script's own quoting. Each check records being called,
+  # prints STUB_<NAME>_OUT, and exits STUB_<NAME>_EXIT.
+  for check in precommit finish plan-artifact commit land summary; do
+    name=$(printf '%s' "$check" | tr 'a-z-' 'A-Z_')
+    cat >"$stubs/claude-stop-$check" <<EOF
+#!/bin/sh
+cat >/dev/null
+: > "\$STUB_DIR/$check.called"
+printf '%s' "\${STUB_${name}_OUT:-}"
+exit "\${STUB_${name}_EXIT:-0}"
+EOF
+  done
   cat >"$stubs/claude-sound" <<'EOF'
 #!/bin/sh
 : > "$STUB_DIR/sound.called"
-exit 0
 EOF
   cat >"$stubs/claude-tab-status" <<'EOF'
 #!/bin/sh
 cat >/dev/null
 : > "$STUB_DIR/tab-$1.called"
-exit 0
 EOF
-  cat >"$stubs/claude-stop-precommit" <<'EOF'
+  # The snapshot: `changed` answers STUB_CHANGED (0 = changed), `asked` is yes for each check
+  # named in STUB_ASKED, and `stop` records its arguments.
+  cat >"$stubs/claude-prompt-snapshot" <<'EOF'
+#!/bin/sh
+case "$1" in
+  changed) exit "${STUB_CHANGED:-1}" ;;
+  asked) case " ${STUB_ASKED:-} " in *" $3 "*) exit 0 ;; *) exit 1 ;; esac ;;
+  stop) shift; printf '%s\n' "$*" >> "$STUB_DIR/stops" ;;
+esac
+EOF
+  cat >"$stubs/git-land" <<'EOF'
+#!/bin/sh
+[ -n "${STUB_LAND_STATE:-}" ] || exit 1
+printf '%s\n' "$STUB_LAND_STATE"
+EOF
+  # The small model that reads the reply: records the call, answers STUB_CLAUDE_OUT.
+  cat >"$stubs/claude" <<'EOF'
 #!/bin/sh
 cat >/dev/null
-: > "$STUB_DIR/precommit.called"
-printf '%s' "$STUB_PRECOMMIT_OUT"
-exit "$STUB_PRECOMMIT_EXIT"
+: > "$STUB_DIR/gate.called"
+printf '%s\n' "${STUB_CLAUDE_OUT:-NO}"
+exit "${STUB_CLAUDE_EXIT:-0}"
 EOF
-  cat >"$stubs/claude-stop-finish" <<'EOF'
-#!/bin/sh
-cat >/dev/null
-: > "$STUB_DIR/finish.called"
-printf '%s' "$STUB_FINISH_OUT"
-exit "$STUB_FINISH_EXIT"
-EOF
-  cat >"$stubs/claude-stop-plan-artifact" <<'EOF'
-#!/bin/sh
-cat >/dev/null
-: > "$STUB_DIR/plan.called"
-printf '%s' "$STUB_PLAN_OUT"
-exit 0
-EOF
-  chmod +x "$stubs"/claude-sound "$stubs"/claude-tab-status "$stubs"/claude-stop-precommit "$stubs"/claude-stop-finish \
-    "$stubs"/claude-stop-plan-artifact
+  chmod +x "$stubs"/*
 
+  ALL="precommit,finish,plan-artifact,commit,land,summary"
+
+  # t <desc> <payload> <want_exit> <want_out> <want_called> [VAR=value ...]
+  # A want_out of `~text` matches any output containing text, rather than exactly.
   t() {
-    local desc="$1" precommit_exit="$2" precommit_out="$3" finish_exit="$4" finish_out="$5"
-    local message="$6" want_exit="$7" want_out="$8" want_called="$9" plan_out="${10:-}"
-
-    rm -f "$stubs"/*.called
+    local desc="$1" payload="$2" want_exit="$3" want_out="$4" want_called="$5"
+    shift 5
+    find "$stubs" -name '*.called' -delete
+    : >"$stubs/stops"
     local out exit_code=0
-    out=$(env STUB_DIR="$stubs" \
-        STUB_PRECOMMIT_EXIT="$precommit_exit" STUB_PRECOMMIT_OUT="$precommit_out" \
-        STUB_FINISH_EXIT="$finish_exit" STUB_FINISH_OUT="$finish_out" STUB_PLAN_OUT="$plan_out" \
-      PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" <<<"$message" 2>&1) || exit_code=$?
+    out=$(cd "$repo" && env STUB_DIR="$stubs" STUB_CHANGED=0 "$@" PATH="$stubs:$(dirname "$SELF"):$PATH" \
+      CLAUDE_HOOK_SELFTEST= "$SELF" <<<"$payload" 2>&1) || exit_code=$?
 
-    local got=""
-    [[ -e "$stubs/precommit.called" ]] && got+="${got:+,}precommit"
-    [[ -e "$stubs/finish.called" ]] && got+="${got:+,}finish"
-    [[ -e "$stubs/plan.called" ]] && got+="${got:+,}plan"
-    [[ -e "$stubs/sound.called" ]] && got+="${got:+,}sound"
-    [[ -e "$stubs/tab-paused.called" ]] && got+="${got:+,}tab-paused"
-    [[ -e "$stubs/tab-finished.called" ]] && got+="${got:+,}tab-finished"
+    local got="" name
+    for name in gate precommit finish plan-artifact commit land summary sound tab-paused tab-finished; do
+      [[ -e "$stubs/$name.called" ]] && got+="${got:+,}$name"
+    done
+    STOPS=$(cat "$stubs/stops")
 
     [[ "$exit_code" == "$want_exit" ]] ||
     { printf 'FAIL %s: want_exit=%s got_exit=%s :: %s\n' "$desc" "$want_exit" "$exit_code" "$out"; fails=1; }
-    [[ "$out" == "$want_out" ]] ||
+    if [[ "$want_out" == "~"* ]]; then
+      [[ "$out" == *"${want_out#\~}"* ]]
+    else
+      [[ "$out" == "$want_out" ]]
+    fi ||
     { printf 'FAIL %s: want_out=%q got_out=%q\n' "$desc" "$want_out" "$out"; fails=1; }
     [[ "$got" == "$want_called" ]] ||
     { printf 'FAIL %s: want_called=%s got_called=%s\n' "$desc" "$want_called" "${got:-none}"; fails=1; }
   }
+  stopped() {
+    local desc="$1" want="$2"
+    [[ "$STOPS" == "$want" ]] || { printf 'FAIL %s: want_stop_record=%q got=%q\n' "$desc" "$want" "$STOPS"; fails=1; }
+  }
 
-  # --- a question gets no special treatment: the checks run as for any stop ---
-  t "question runs the checks" \
-    0 "" 0 "" \
-    '{"last_assistant_message":"Should I proceed?"}' \
-    0 "" "precommit,finish,plan,sound,tab-finished"
+  P='"prompt_id":"p1"'
+
+  # --- no check blocks: all run in order, then announce, and the stop records HEAD ---
+  t "nothing blocks" "{$P,\"last_assistant_message\":\"Done.\"}" \
+    0 "" "$ALL,sound,tab-finished"
+  stopped "every stop records HEAD" "p1"
+
+  # --- the question gate ---
+  t "a question ends the stop with no checks" \
+    "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "gate,sound,tab-finished" STUB_CLAUDE_OUT=YES
+  stopped "a gate before the finishing pass marks the prompt" "p1 --gated"
+  t "a question after the finishing pass ends the sequence" \
+    "{$P,\"stop_hook_active\":true,\"last_assistant_message\":\"Suppress it?\"}" \
+    0 "" "gate,sound,tab-finished" STUB_CLAUDE_OUT=YES STUB_ASKED=finish
+  stopped "a gate after the finishing pass records no mark" "p1"
+  t "a model call that fails counts as not a question" "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "gate,$ALL,sound,tab-finished" STUB_CLAUDE_OUT=YES STUB_CLAUDE_EXIT=1
+  t "an answer other than YES counts as not a question" "{$P,\"last_assistant_message\":\"Done?\"}" \
+    0 "" "gate,$ALL,sound,tab-finished" STUB_CLAUDE_OUT=maybe
+  t "a reply with no question mark makes no model call" "{$P,\"last_assistant_message\":\"Pick one.\"}" \
+    0 "" "$ALL,sound,tab-finished" STUB_CLAUDE_OUT=YES
+  t "nothing could block: no model call" "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "$ALL,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES
+  t "a never-landed branch with commits needs no gate" "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "$ALL,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES \
+    STUB_LAND_STATE=$'landed=no\nunlanded=3\npr_failed=no\ndefault=no'
+  t "a landed branch with unlanded commits could block" "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "gate,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES \
+    STUB_LAND_STATE=$'landed=yes\nunlanded=1\npr_failed=no\ndefault=no'
+  t "a PR that failed to open could block" "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "gate,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES \
+    STUB_LAND_STATE=$'landed=no\nunlanded=0\npr_failed=yes\ndefault=no'
+  t "a changed prompt whose finishing pass and report have asked needs no gate" \
+    "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "$ALL,sound,tab-finished" STUB_ASKED="finish summary" STUB_CLAUDE_OUT=YES
+  t "a changed prompt whose report hasn't asked could block" \
+    "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "gate,sound,tab-finished" STUB_ASKED="finish" STUB_CLAUDE_OUT=YES
+  t "a landed branch whose land check has asked needs no gate" \
+    "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "$ALL,sound,tab-finished" STUB_CHANGED=1 STUB_ASKED="land" STUB_CLAUDE_OUT=YES \
+    STUB_LAND_STATE=$'landed=yes\nunlanded=1\npr_failed=no\ndefault=no'
+  echo dirty >"$repo/stray"
+  t "a dirty tree could block" "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "gate,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES
+  : >"$repo/stray" && mv "$repo/stray" "$stubs/stray-moved-aside"
+
+  # --- no prompt id: no check can run, so the first stop blocks to say so and the retry passes ---
+  t "no prompt id blocks once" '{"last_assistant_message":"Done."}' \
+    0 "~no prompt_id" ""
+  t "no prompt id lets the retry stop" '{"stop_hook_active":true,"last_assistant_message":"Done."}' \
+    0 "~no prompt_id" "sound,tab-finished"
+  [[ -z "$STOPS" ]] || { printf 'FAIL no prompt id records no stop :: %s\n' "$STOPS"; fails=1; }
 
   # --- a running background agent: the session is paused, so no check runs and no sound plays ---
   t "running agent defers" \
-    0 '{"a":1}' 0 '{"b":2}' \
-    '{"last_assistant_message":"Launched.","background_tasks":[{"type":"subagent","status":"running"}]}' \
+    "{$P,\"last_assistant_message\":\"Launched.\",\"background_tasks\":[{\"type\":\"subagent\",\"status\":\"running\"}]}" \
     0 "" "tab-paused"
+  stopped "a deferred stop still records HEAD" "p1"
 
   # --- a background shell (a Monitor, a build) doesn't defer, or a server would defer forever, but it pauses ---
   t "running shell pauses without deferring" \
-    0 "" 0 "" \
-    '{"last_assistant_message":"Done.","background_tasks":[{"type":"shell","status":"running"}]}' \
-    0 "" "precommit,finish,plan,sound,tab-paused"
+    "{$P,\"last_assistant_message\":\"Done.\",\"background_tasks\":[{\"type\":\"shell\",\"status\":\"running\"}]}" \
+    0 "" "$ALL,sound,tab-paused"
 
   # --- a task that has ended wakes nothing, so the stop is a finish ---
   t "ended shell finishes" \
-    0 "" 0 "" \
-    '{"last_assistant_message":"Done.","background_tasks":[{"type":"shell","status":"completed"}]}' \
-    0 "" "precommit,finish,plan,sound,tab-finished"
+    "{$P,\"last_assistant_message\":\"Done.\",\"background_tasks\":[{\"type\":\"shell\",\"status\":\"completed\"}]}" \
+    0 "" "$ALL,sound,tab-finished"
 
   # --- a scheduled job will wake the session, so the stop is a pause ---
   t "pending cron pauses" \
-    0 "" 0 "" \
-    '{"last_assistant_message":"Done.","background_tasks":[],"session_crons":[{"id":"c1","recurring":false}]}' \
-    0 "" "precommit,finish,plan,sound,tab-paused"
+    "{$P,\"last_assistant_message\":\"Done.\",\"background_tasks\":[],\"session_crons\":[{\"id\":\"c1\",\"recurring\":false}]}" \
+    0 "" "$ALL,sound,tab-paused"
 
-  # --- no check blocks: all run in order, then announce ---
-  t "nothing blocks" \
-    0 "" 0 "" \
-    '{"last_assistant_message":"Done."}' \
-    0 "" "precommit,finish,plan,sound,tab-finished"
-
-  # --- the first check blocks: its JSON surfaces, the second check and announce never run ---
-  t "first check blocks" \
-    0 '{"a":1}' 0 "" \
-    '{"last_assistant_message":"Done."}' \
-    0 '{"a":1}' "precommit"
-
-  # --- the second check blocks: its JSON surfaces, announce never runs ---
-  t "second check blocks" \
-    0 "" 0 '{"b":2}' \
-    '{"last_assistant_message":"Done."}' \
-    0 '{"b":2}' "precommit,finish"
-
-  # --- the plan check blocks last, once both others pass: its JSON surfaces, announce never runs ---
-  t "plan check blocks" \
-    0 "" 0 "" \
-    '{"last_assistant_message":"Done."}' \
-    0 '{"c":3}' "precommit,finish,plan" '{"c":3}'
+  # --- a check that blocks: its JSON surfaces, nothing after it runs, and the stop records HEAD ---
+  t "the first check blocks" "{$P,\"last_assistant_message\":\"Done.\"}" \
+    0 '{"a":1}' "precommit" STUB_PRECOMMIT_OUT='{"a":1}'
+  stopped "a blocked stop records HEAD" "p1"
+  t "the finishing pass blocks" "{$P,\"last_assistant_message\":\"Done.\"}" \
+    0 '{"b":2}' "precommit,finish" STUB_FINISH_OUT='{"b":2}'
+  t "the commit check blocks after the plan page" "{$P,\"last_assistant_message\":\"Done.\"}" \
+    0 '{"c":3}' "precommit,finish,plan-artifact,commit" STUB_COMMIT_OUT='{"c":3}'
+  t "the land check blocks after the commit check" "{$P,\"last_assistant_message\":\"Done.\"}" \
+    0 '{"d":4}' "precommit,finish,plan-artifact,commit,land" STUB_LAND_OUT='{"d":4}'
+  t "the report comes last" "{$P,\"last_assistant_message\":\"Done.\"}" \
+    0 '{"e":5}' "$ALL" STUB_SUMMARY_OUT='{"e":5}'
 
   # --- a check errors outright: its exit status propagates, nothing after it runs ---
-  t "a check errors" \
-    3 "" 0 "" \
-    '{"last_assistant_message":"Done."}' \
-    3 "" "precommit"
+  t "a check errors" "{$P,\"last_assistant_message\":\"Done.\"}" \
+    3 "" "precommit" STUB_PRECOMMIT_EXIT=3
+
+  # --- the default branch: its unlanded commits are Josh's, so the land check can't block there ---
+  t "a landed default branch with unlanded commits needs no gate" \
+    "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "$ALL,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES \
+    STUB_LAND_STATE=$'landed=yes\nunlanded=1\npr_failed=no\ndefault=yes'
 
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
@@ -148,6 +216,17 @@ EOF
 fi
 
 INPUT=$(cat)
+PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")
+
+# Every stop records HEAD in the prompt's snapshot, whichever way it ends, so the next prompt can
+# tell commits that arrived between prompts from ones the session made. The trap reads GATED when
+# it fires, so the gate below sets it just before exiting.
+GATED=""
+record_stop() {
+  [[ -n "$PROMPT_ID" ]] || return 0
+  claude-prompt-snapshot stop "$PROMPT_ID" $GATED >/dev/null 2>&1 || true
+}
+trap record_stop EXIT
 
 # Every announcement, together, so the paused and finished stops below can't drift apart.
 announce() {
@@ -162,6 +241,13 @@ announce() {
 # lists a dev server as the same `shell` as a Monitor, so one started from the session
 # pauses it too; dev servers run by hand, outside it, are what that trade rests on.
 PENDING=$(echo "$INPUT" | jq '[.background_tasks[]? | select(.status == "running")] + [.session_crons[]?] | length')
+announce_stop() {
+  if [[ "$PENDING" -gt 0 ]]; then
+    announce paused
+  else
+    announce finished
+  fi
+}
 
 # A running background agent means the session is paused, not done: the change-set is
 # half-built, and a check that blocks here sends Claude to stage or fix files the agent
@@ -174,9 +260,87 @@ if [[ "$RUNNING_AGENTS" -gt 0 ]]; then
   exit 0
 fi
 
-# The plan page goes last: the finishing pass may itself edit the plan, and the page should be
-# rebuilt from what the plan says once it has settled.
-for check in claude-stop-precommit claude-stop-finish claude-stop-plan-artifact; do
+# Every check keys its once-per-prompt record on the prompt id, so without one none of them can run,
+# and a stop that skipped them silently would look like one they all passed. So it fails closed as
+# far as it can without trapping the session: the first stop blocks to have Claude tell Josh, and the
+# stop that follows (`stop_hook_active`) is let through with a warning, since every stop would block
+# the same way.
+if [[ -z "$PROMPT_ID" ]] && git rev-parse --git-dir >/dev/null 2>&1; then
+  WARNING="[claude-stop] the Stop payload has no prompt_id, so the stop checks (pre-commit, finishing pass, plan page, commit, land, report) did not run"
+  if [[ "$(jq -r '.stop_hook_active // false' <<<"$INPUT")" != true ]]; then
+    jq -n --arg msg "$WARNING" \
+      --arg ctx "The Stop hook payload has no prompt_id, so none of the stop checks ran this turn: nothing was checked by pre-commit, committed, or landed by them. Tell Josh in one line that the stop checks are broken (claude-stop got no prompt_id from Claude Code), then stop." \
+      '{systemMessage: $msg, hookSpecificOutput: {hookEventName: "Stop", additionalContext: $ctx}}'
+    exit 0
+  fi
+  jq -n --arg msg "$WARNING" '{systemMessage: $msg}'
+  announce_stop
+  exit 0
+fi
+
+# Could any check below block? Each clause is a check's own blocking condition, not a broader one:
+# the prompt changed the repo and the finishing pass or the report hasn't asked yet this prompt, the
+# tree has changes (pre-commit, the commit, the plan page), or, on a branch other than the default,
+# the land check hasn't asked yet and either the branch is landed with unlanded commits or its PR
+# failed to open. A branch that has never been landed only earns a reminder, which needs no gate. Without the "hasn't asked yet" half, every
+# reply to a check in a turn that changed the repo would cost a model call, the report included.
+# All of it is local, so a discussion turn costs no model call.
+could_block() {
+  git rev-parse --git-dir >/dev/null 2>&1 || return 1
+  if claude-prompt-snapshot changed "$PROMPT_ID" >/dev/null; then
+    claude-prompt-snapshot asked "$PROMPT_ID" finish || return 0
+    claude-prompt-snapshot asked "$PROMPT_ID" summary || return 0
+  fi
+  [[ -n "$(git status --porcelain 2>/dev/null)" ]] && return 0
+  claude-prompt-snapshot asked "$PROMPT_ID" land && return 1
+  local state
+  state=$(git-land --state 2>/dev/null) || return 1
+  grep -qx 'default=no' <<<"$state" || return 1
+  grep -qx 'pr_failed=yes' <<<"$state" && return 0
+  grep -qx 'landed=yes' <<<"$state" && ! grep -qx 'unlanded=0' <<<"$state"
+}
+
+GATE_PROMPT='You classify the last message an assistant sent its user. Answer YES if it ends by asking the user something: a question they need to answer, or an offer of more work ("Want me to also...?"). Answer NO otherwise, including a report that merely contains a question mark. Answer with exactly YES or NO.'
+
+# Does the reply end by asking Josh something? A reply with no `?` doesn't, since the global
+# CLAUDE.md requires every question and offer to carry one, so most replies (every short answer to a
+# check) cost no model call. Whether a reply with a `?` ends by asking is a model's job: a `?` alone
+# misfires on a report that quotes one. Loading no settings sources keeps the nested session from
+# running this hook recursively, no MCP servers start, and nothing is written to the session archive.
+# A call that fails or times out counts as not a question, so the checks run as they would without
+# the gate.
+ends_on_question() {
+  local message answer
+  message=$(jq -r '.last_assistant_message // ""' <<<"$INPUT")
+  [[ "$message" == *"?"* ]] || return 1
+  local runner=()
+  if command -v timeout >/dev/null 2>&1; then
+    runner=(timeout 30)
+  elif command -v gtimeout >/dev/null 2>&1; then
+    runner=(gtimeout 30)
+  fi
+  answer=$(printf 'Reply to classify:\n\n%s\n' "$message" |
+    "${runner[@]}" claude -p --model haiku --setting-sources "" --tools "" \
+    --strict-mcp-config --no-session-persistence --system-prompt "$GATE_PROMPT" 2>/dev/null) || return 1
+  [[ "$(tr -d '[:space:]' <<<"$answer")" == "YES" ]]
+}
+
+# A reply that ends asking Josh something wants to be the last thing he reads, so no check runs
+# after it: whatever they hadn't reached (the commit, the land) waits for the next turn. When the
+# finishing pass hasn't run yet this prompt (always so on its first stop, and so after pre-commit
+# blocked), the snapshot is marked and the next prompt keeps this one's start, so the pass and the
+# report cover this turn's changes then.
+if could_block && ends_on_question; then
+  claude-prompt-snapshot asked "$PROMPT_ID" finish || GATED=--gated
+  announce_stop
+  exit 0
+fi
+
+# The plan page follows the finishing pass, which may itself edit the plan, so the page is rebuilt
+# from what the plan says once it has settled. The commit follows both, so it holds the turn's final
+# state; the land follows the commit; and the report comes last, so it is what Josh reads.
+for check in claude-stop-precommit claude-stop-finish claude-stop-plan-artifact \
+  claude-stop-commit claude-stop-land claude-stop-summary; do
   STDOUT=$(echo "$INPUT" | "$check")
   STATUS=$?
   if [[ $STATUS -ne 0 ]]; then
@@ -188,9 +352,5 @@ for check in claude-stop-precommit claude-stop-finish claude-stop-plan-artifact;
   fi
 done
 
-if [[ "$PENDING" -gt 0 ]]; then
-  announce paused
-else
-  announce finished
-fi
+announce_stop
 exit 0

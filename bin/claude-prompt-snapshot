@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+# The prompt snapshot: what the repo looked like when a prompt arrived, so the stop checks can ask
+# "did this prompt change the repo?" and mean the same thing.
+#
+#   claude-prompt-snapshot                       UserPromptSubmit hook: record the prompt's start
+#   claude-prompt-snapshot changed <prompt-id>   exit 0, printing what changed, if this prompt changed
+#                                                the repo; exit 1 if it didn't
+#   claude-prompt-snapshot stop <prompt-id> [--gated]
+#                                                record HEAD at a stop; --gated marks that the question
+#                                                gate ended the prompt's first stop, so no check ran
+#   claude-prompt-snapshot ask <prompt-id> <check>
+#                                                exit 0 the first time <check> asks this prompt,
+#                                                recording it, and 1 after
+#   claude-prompt-snapshot asked <prompt-id> <check>
+#                                                exit 0 if <check> has asked this prompt, else 1
+#   claude-prompt-snapshot start <prompt-id>     print HEAD when the prompt started, or nothing
+#   claude-prompt-snapshot fingerprint           print the change-set fingerprint
+#
+# "Changed" means HEAD or the change-set fingerprint (the tracked diff against HEAD plus the list of
+# untracked files) differs from the prompt's start. HEAD counts as well as the tree because a turn
+# that ends in a commit leaves the tree clean. A prompt with no snapshot counts as changed, so a gap
+# costs an extra finishing pass rather than a missing report.
+#
+# Two things carry between prompts, both keyed by session:
+#
+# - A gated prompt ran no checks, so the next prompt keeps its start instead of taking a fresh one,
+#   and its finishing pass and report cover the question turn's edits too.
+# - HEAD at the previous prompt's last stop. When HEAD has moved since, the commits arrived from
+#   outside the session (`sync-branches` fast-forwarding, Josh committing), and the prompt is told
+#   so. When every one of them is a commit `origin` has, a carried start advances past them, so
+#   upstream's work never reads as the turn's own.
+#
+# State lives under the git dir, which is per worktree, one file per prompt.
+
+set -euo pipefail
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker line is how
+# `claude-hook-selftests` discovers participating hooks. Every case is a git state across a sequence
+# of prompts and stops, so each runs against throwaway repositories; run these with
+# `CLAUDE_HOOK_SELFTEST=1 claude-prompt-snapshot`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+  # shellcheck disable=SC2207
+  unset_git=($(git rev-parse --local-env-vars | sed 's/^/-u /'))
+  export GIT_CONFIG_GLOBAL=/dev/null HOME="$workdir" XDG_CONFIG_HOME="$workdir"
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+
+  git init -q -b main "$workdir/origin"
+  git -C "$workdir/origin" commit -q --allow-empty -m "init"
+  git -C "$workdir/origin" config receive.denyCurrentBranch updateInstead
+  git clone -q "$workdir/origin" "$workdir/repo"
+  repo="$workdir/repo"
+  echo base >"$repo/file"
+  git -C "$repo" add file
+  git -C "$repo" commit -q -m "add file"
+
+  SESSION=session-1
+  prompt() {
+    OUT=$(cd "$repo" && jq -cn --arg p "$1" --arg s "$SESSION" '{prompt_id: $p, session_id: $s}' |
+    env "${unset_git[@]}" CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1) ||
+    { printf 'FAIL prompt %s exited non-zero :: %s\n' "$1" "$OUT"; fails=1; }
+  }
+  stop() {
+    (cd "$repo" && env "${unset_git[@]}" CLAUDE_HOOK_SELFTEST= "$SELF" stop "$@") ||
+    { printf 'FAIL stop %s exited non-zero\n' "$1"; fails=1; }
+  }
+  changed() {
+    local desc="$1" id="$2" want="$3" got=yes
+    CHANGED=$(cd "$repo" && env "${unset_git[@]}" CLAUDE_HOOK_SELFTEST= "$SELF" changed "$id") || got=no
+    [[ "$got" == "$want" ]] ||
+    { printf 'FAIL %s: want_changed=%s got=%s :: %s\n' "$desc" "$want" "$got" "$CHANGED"; fails=1; }
+  }
+  says() {
+    [[ "$OUT" == *"$2"* ]] || { printf 'FAIL %s: output missing %q :: %s\n' "$1" "$2" "$OUT"; fails=1; }
+  }
+  silent() {
+    [[ -z "$OUT" ]] || { printf 'FAIL %s: expected no output :: %s\n' "$1" "$OUT"; fails=1; }
+  }
+
+  OUT=$(cd "$workdir" && jq -cn '{prompt_id: "p0", session_id: "s"}' | env "${unset_git[@]}" CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1) ||
+  { printf 'FAIL outside a repo exited non-zero :: %s\n' "$OUT"; fails=1; }
+  silent "outside a repo says nothing"
+
+  prompt p1
+  silent "a first prompt says nothing"
+  changed "a prompt that changed nothing" p1 no
+  stop p1
+
+  prompt p2
+  echo edit >>"$repo/file"
+  changed "a prompt that left uncommitted changes" p2 yes
+  [[ "$CHANGED" == *"file"* ]] || { printf 'FAIL the change is described :: %s\n' "$CHANGED"; fails=1; }
+  git -C "$repo" commit -q -am "turn two"
+  changed "a prompt that ended in a commit with a clean tree" p2 yes
+  START=$(cd "$repo" && env "${unset_git[@]}" CLAUDE_HOOK_SELFTEST= "$SELF" start p2)
+  [[ "$START" == "$(git -C "$repo" rev-parse HEAD~1)" ]] ||
+  { printf 'FAIL start prints the starting HEAD of the prompt :: %s\n' "$START"; fails=1; }
+  [[ "$CHANGED" == *"turn two"* ]] || { printf 'FAIL the commit is described :: %s\n' "$CHANGED"; fails=1; }
+  stop p2
+
+  prompt p3
+  touch "$repo/stray"
+  changed "a new untracked file is a change" p3 yes
+  rm "$repo/stray"
+  changed "removing it again is no change" p3 no
+  stop p3
+
+  changed "a prompt with no snapshot counts as changed" never-recorded yes
+
+  # --- commits that arrived between prompts are reported, and aren't the next prompt's work ---
+  git -C "$repo" push -q origin HEAD:main
+  git -C "$workdir/origin" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "upstream work"
+  git -C "$repo" pull -q --ff-only origin main
+  prompt p4
+  says "arrived commits are named" "upstream work"
+  says "the prompt is told the files moved under it" "changed since you last read them"
+  changed "arrived commits don't count as the prompt's own" p4 no
+  stop p4
+
+  prompt p5
+  silent "nothing arrived, nothing said"
+  stop p5
+
+  # --- a gated prompt's edits carry into the next prompt ---
+  prompt p6
+  echo question-turn >>"$repo/file"
+  stop p6 --gated
+  prompt p7
+  changed "the question turn's edits count for the next prompt" p7 yes
+  stop p7
+  git -C "$repo" checkout -q -- file
+
+  prompt p8
+  changed "a prompt after an ungated one starts fresh" p8 no
+  stop p8
+
+  # --- a carried start advances past commits origin has, but not past the session's own ---
+  prompt p9
+  stop p9 --gated
+  git -C "$workdir/origin" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "more upstream"
+  git -C "$repo" pull -q --ff-only origin main
+  prompt p10
+  says "arrived commits are named after a gated prompt too" "more upstream"
+  changed "a carried start advances past origin's commits" p10 no
+  stop p10 --gated
+  git -C "$repo" commit -q --allow-empty -m "made by hand"
+  prompt p11
+  says "a local commit that arrived is named" "made by hand"
+  changed "a carried start doesn't advance past a commit origin lacks" p11 yes
+  stop p11
+
+  # --- each check asks once per prompt, and the record survives the stop's own rewrite ---
+  ask() {
+    local desc="$1" verb="$2" id="$3" check="$4" want="$5" got=0
+    (cd "$repo" && env "${unset_git[@]}" CLAUDE_HOOK_SELFTEST= "$SELF" "$verb" "$id" "$check") || got=1
+    [[ "$got" == "$want" ]] || { printf 'FAIL %s: want_exit=%s got=%s\n' "$desc" "$want" "$got"; fails=1; }
+  }
+  prompt p20
+  ask "a check that hasn't asked hasn't" asked p20 finish 1
+  ask "the first ask is granted" ask p20 finish 0
+  ask "a second ask is refused" ask p20 finish 1
+  ask "a check that asked has" asked p20 finish 0
+  ask "another check asks independently" ask p20 summary 0
+  stop p20
+  ask "a stop keeps the record" asked p20 finish 0
+  prompt p21
+  ask "a new prompt asks afresh" ask p21 finish 0
+  ask "no prompt id never asks" ask "" finish 1
+  ask "no prompt id counts as having asked" asked "" finish 0
+
+  # --- sessions don't share a previous prompt ---
+  SESSION=session-2
+  prompt p12
+  silent "a new session's first prompt says nothing"
+  changed "a new session's first prompt starts fresh" p12 no
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+fingerprint() {
+  {
+    git diff HEAD 2>/dev/null || git diff --cached
+    git ls-files --others --exclude-standard
+  } | sha1sum | cut -d' ' -f1
+}
+
+head_sha() {
+  git rev-parse --verify --quiet HEAD || true
+}
+
+# One file per prompt, named by a hash so an id never has to be a safe path.
+key() {
+  printf '%s' "$1" | sha1sum | cut -d' ' -f1
+}
+
+field() {
+  local file="$1" name="$2"
+  { sed -n "s/^$name=//p" "$file" 2>/dev/null || true; } | head -n1
+}
+
+# As a hook, read the payload before anything can exit: a writer still sending it would otherwise
+# hit a closed pipe.
+[[ -z "${1:-}" ]] && INPUT=$(cat)
+
+git rev-parse --git-dir >/dev/null 2>&1 || exit "$([[ "${1:-}" == changed ]] && echo 1 || echo 0)"
+STATE_DIR="$(git rev-parse --absolute-git-dir)/claude-prompts"
+
+case "${1:-}" in
+  fingerprint)
+    fingerprint
+    exit 0
+    ;;
+
+  changed)
+    FILE="$STATE_DIR/$(key "$2")"
+    START_HEAD=$(field "$FILE" start_head)
+    START_FP=$(field "$FILE" start_fp)
+    if [[ -n "$START_FP" && "$START_HEAD" == "$(head_sha)" && "$START_FP" == "$(fingerprint)" ]]; then
+      exit 1
+    fi
+    if [[ -n "$START_HEAD" && "$START_HEAD" != "$(head_sha)" ]]; then
+      echo "Commits:"
+      git log --format='  %h %s' "$START_HEAD..HEAD" 2>/dev/null || true
+    fi
+    git status --porcelain
+    exit 0
+    ;;
+
+  start)
+    field "$STATE_DIR/$(key "${2:-}")" start_head
+    exit 0
+    ;;
+
+  ask | asked)
+    # A stop check that asks once per prompt calls `ask`: exit 0 the first time for this prompt
+    # (recording it), 1 after. `asked` only reads. One record for every check, so the question
+    # gate can tell which checks have already spent their ask. With no prompt id there is nothing to
+    # record an ask against. `claude-stop` refuses to run the checks then, and says so, so this covers
+    # a check run some other way: every check counts as having asked, since granting each ask instead
+    # would block on every stop.
+    [[ -n "${2:-}" ]] || exit "$([[ "$1" == ask ]] && echo 1 || echo 0)"
+    FILE="$STATE_DIR/$(key "$2")"
+    if grep -qxF "asked=$3" "$FILE" 2>/dev/null; then
+      [[ "$1" == asked ]] && exit 0 || exit 1
+    fi
+    [[ "$1" == asked ]] && exit 1
+    mkdir -p "$STATE_DIR"
+    printf 'asked=%s\n' "$3" >>"$FILE"
+    exit 0
+    ;;
+
+  stop)
+    mkdir -p "$STATE_DIR"
+    FILE="$STATE_DIR/$(key "$2")"
+    {
+      grep -vE '^(stop_head|gated)=' "$FILE" 2>/dev/null || true
+      printf 'stop_head=%s\n' "$(head_sha)"
+      if [[ "${3:-}" == "--gated" ]]; then
+        echo "gated=yes"
+      else
+        grep -E '^gated=' "$FILE" 2>/dev/null || true
+      fi
+    } >"$FILE.tmp"
+    mv "$FILE.tmp" "$FILE"
+    exit 0
+    ;;
+
+  "") ;;
+
+  *)
+    echo "usage: claude-prompt-snapshot [changed <prompt-id> | stop <prompt-id> [--gated] | ask <prompt-id> <check> | asked <prompt-id> <check> | start <prompt-id> | fingerprint]" >&2
+    exit 2
+    ;;
+esac
+
+PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")
+SESSION_ID=$(jq -r '.session_id // ""' <<<"$INPUT")
+[[ -n "$PROMPT_ID" ]] || exit 0
+
+mkdir -p "$STATE_DIR"
+HEAD_NOW=$(head_sha)
+START_HEAD=$HEAD_NOW
+START_FP=$(fingerprint)
+
+SESSION_FILE="$STATE_DIR/session-$(key "$SESSION_ID")"
+PREVIOUS=$(cat "$SESSION_FILE" 2>/dev/null || true)
+PREVIOUS_FILE="$STATE_DIR/$PREVIOUS"
+if [[ -n "$PREVIOUS" && -f "$PREVIOUS_FILE" ]]; then
+  STOP_HEAD=$(field "$PREVIOUS_FILE" stop_head)
+  ARRIVED_ONLY_FROM_ORIGIN=no
+  if [[ -n "$STOP_HEAD" && -n "$HEAD_NOW" && "$STOP_HEAD" != "$HEAD_NOW" ]]; then
+    if git merge-base --is-ancestor "$STOP_HEAD" HEAD 2>/dev/null; then
+      [[ -z "$(git rev-list "$STOP_HEAD..HEAD" --not --remotes=origin 2>/dev/null)" ]] && ARRIVED_ONLY_FROM_ORIGIN=yes
+      cat <<EOF
+Since your last turn, HEAD moved by commits this session didn't make:
+
+$(git log --format='  %h %s' "$STOP_HEAD..HEAD")
+
+The files they touch have changed since you last read them:
+
+$(git diff --name-only "$STOP_HEAD" HEAD | head -n 50 | sed 's/^/  /')
+EOF
+    else
+      echo "Since your last turn, HEAD moved from $STOP_HEAD to $HEAD_NOW without descending from it (a reset or a branch switch). Re-read any file you rely on before editing it."
+    fi
+  fi
+
+  if [[ "$(field "$PREVIOUS_FILE" gated)" == yes ]]; then
+    START_FP=$(field "$PREVIOUS_FILE" start_fp)
+    START_HEAD=$(field "$PREVIOUS_FILE" start_head)
+    # The fingerprint is relative to HEAD, so advancing the start leaves a carried fingerprint that
+    # may no longer match: that reads as changed, the safe direction.
+    [[ "$ARRIVED_ONLY_FROM_ORIGIN" == yes ]] && START_HEAD=$HEAD_NOW
+  fi
+fi
+
+KEY=$(key "$PROMPT_ID")
+printf 'start_head=%s\nstart_fp=%s\n' "$START_HEAD" "$START_FP" >"$STATE_DIR/$KEY.tmp"
+mv "$STATE_DIR/$KEY.tmp" "$STATE_DIR/$KEY"
+printf '%s\n' "$KEY" >"$SESSION_FILE"
+
+# Keep the record short: only recent prompts are ever read again.
+find "$STATE_DIR" -type f -mtime +7 -delete 2>/dev/null || true
+exit 0

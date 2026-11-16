@@ -198,6 +198,16 @@ tidy
 # and repository (.git) bytes. Also runs as `git disk-usage`, aliased `git du`.
 git-disk-usage [path]
 
+# Land this branch: push it and open or update its draft pull request from the
+# draft at `git land --path`, after a clean-tree check, a gitleaks scan of the
+# unlanded commits, and a refusal on workflow files without --workflows. The one
+# way Claude pushes. Run with --help for the modes.
+git land
+
+# Josh's quick change on a PR-only default branch: refuse on uncommitted or
+# untracked changes, push the branch, open a PR, and auto-merge it.
+git yeet
+
 # Count Claude tokens in files/dirs via the Anthropic count_tokens API
 # (needs ANTHROPIC_API_KEY). Run with --help for usage and flags.
 count-claude-tokens --help
@@ -300,18 +310,33 @@ does. What follows is only what neither source states.
   `claude-stop` is therefore an orchestrator rather than a group: it runs its checks
   in sequence and announces the stop only when none of them blocked, so an
   announcement means Claude is actually stopping rather than retrying after a block.
-- Stop hooks return JSON: `additionalContext` carries a message to Claude without
-  displaying it in the TUI, `systemMessage` shows a brief visible indicator.
+- Stop hooks return JSON: `additionalContext` carries a message to Claude, and the TUI
+  shows it too, while `systemMessage` is a brief indicator for the user alone.
+- Text a hook emits, whether context, a block reason, or a refusal, puts each paragraph on
+  one line. The TUI wraps it to the terminal's width, so a hard wrap at the source's width
+  shows up as ragged lines. In Python, adjacent string literals keep the source wrapped
+  while the output stays unwrapped.
 - A hook that auto-approves has to prove the _whole_ command is safe, while one that
   blocks needs only a single bad segment. `claude-gh-api-check` and
   `claude-awk-check` are both built around that asymmetry: `allow` requires every
   segment to be read-only, and anything unproven emits nothing so the call falls
   through to the normal prompt.
-- `claude-changeset-guard` is the shared helper for firing at most once per
-  change-set. It fingerprints the working diff plus untracked files, keys the result
-  per branch, and stores state under the git directory. Once per change-set is not
-  enough for a nudge that asks for edits, since those edits are themselves a new
-  change-set, so `claude-stop-finish` also fires at most once per `prompt_id`.
+- `claude-prompt-snapshot` is the shared answer to "did this prompt change the
+  repo?". Registered on `UserPromptSubmit`, it records `HEAD` and a change-set
+  fingerprint (the tracked diff against `HEAD` plus the untracked file list) under
+  the git directory, keyed by `prompt_id`, and the stop checks compare against
+  that. Comparing `HEAD` as well matters because a turn that ends in a commit
+  leaves the tree clean, and comparing against the prompt's start rather than the
+  last nudge is what keeps edits made between prompts from counting. It also holds
+  the once-per-prompt record every asking check shares (`ask`), which is what lets
+  the question gate in `claude-stop` skip the model call once no check can still
+  ask. The plan in `plans/letting-claude-commit-and-push.md` diagrams the whole
+  stop sequence.
+- `claude-stop-precommit` records the fingerprint it last passed, and
+  `claude-stop-commit` asks for a commit only over that exact tree. The precommit
+  check reports each failing state once per prompt and then goes quiet, so without
+  the match the sequence would reach the commit check over a state pre-commit
+  never passed.
 - A hook whose only job is a side effect still has to keep all three channels clean:
   the event decides how stdout is read (on `PreToolUse` a JSON object there is a
   permission decision), stderr surfaces in the TUI, and a non-zero exit reads as a

@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Exit 0 when Claude may commit on the current branch, else print why not and exit 1.
+#
+# The one predicate `claude-git-commit-check` (before a commit) and `claude-stop-commit` (before
+# asking for one) share, so they can't disagree about where a commit is allowed. Claude commits on
+# any branch but the repo's default, which is read from `refs/remotes/origin/HEAD`: local, so no
+# network call. A repo with no `origin` has nowhere to push, so every branch is allowed there. A
+# repo with an `origin` but no `origin/HEAD` can't say which branch is the default, so it is refused
+# rather than guessed, with the command that sets it.
+
+set -euo pipefail
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
+# line is how `claude-hook-selftests` discovers participating scripts.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+  export GIT_CONFIG_GLOBAL=/dev/null HOME="$workdir" XDG_CONFIG_HOME="$workdir"
+
+  t() {
+    local desc="$1" cwd="$2" want_exit="$3" want_out="$4" got_exit=0 out
+    out=$(cd "$cwd" && CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1) || got_exit=$?
+    [[ "$got_exit" == "$want_exit" ]] ||
+    { printf 'FAIL %s: want_exit=%s got_exit=%s :: %s\n' "$desc" "$want_exit" "$got_exit" "$out"; fails=1; }
+    [[ "$out" == *"$want_out"* ]] ||
+    { printf 'FAIL %s: output missing %q :: %s\n' "$desc" "$want_out" "$out"; fails=1; }
+  }
+
+  git init -q -b trunk "$workdir/upstream"
+  git -C "$workdir/upstream" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m init
+  git clone -q "$workdir/upstream" "$workdir/clone"
+
+  t "outside any repo is refused" "$workdir" 1 "not in a git repository"
+  t "the default branch is refused" "$workdir/clone" 1 "default branch trunk"
+  git -C "$workdir/clone" checkout -q -b feature
+  t "another branch is allowed" "$workdir/clone" 0 ""
+  git -C "$workdir/clone" checkout -q --detach
+  t "a detached HEAD is refused" "$workdir/clone" 1 "detached"
+  git -C "$workdir/clone" checkout -q feature
+  git -C "$workdir/clone" remote set-head origin --delete
+  t "an origin with no HEAD is refused with the fix" "$workdir/clone" 1 "git remote set-head origin --auto"
+
+  git init -q -b trunk "$workdir/scratch"
+  git -C "$workdir/scratch" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m init
+  t "no origin allows even the would-be default" "$workdir/scratch" 0 ""
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  echo "not in a git repository"
+  exit 1
+fi
+
+if ! BRANCH=$(git symbolic-ref --quiet --short HEAD); then
+  echo "HEAD is detached, so there is no branch to land; create one with \`git switch -c <name>\`"
+  exit 1
+fi
+
+git remote get-url origin >/dev/null 2>&1 || exit 0
+
+if ! DEFAULT=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD); then
+  echo "origin has no HEAD, so the default branch is unknown: Josh needs to run \`git remote set-head origin --auto\`"
+  exit 1
+fi
+DEFAULT=${DEFAULT#origin/}
+
+if [[ "$BRANCH" == "$DEFAULT" ]]; then
+  echo "on the default branch $DEFAULT: Claude commits on a worktree branch, never the default"
+  exit 1
+fi
+exit 0

@@ -132,12 +132,26 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   [[ -e "$stubs_pass/autofix.called" ]] ||
   { printf 'FAIL hooks that pass: the hooks never ran\n'; fails=1; }
 
+  passed() {
+    local desc="$1" dir="$2" want="$3" got=no
+    [[ -s "$dir/.git/claude-precommit-passed" ]] && got=yes
+    if [[ "$got" == yes ]]; then
+      [[ "$(cat "$dir/.git/claude-precommit-passed")" == "$(cd "$dir" && env "${unset_git[@]}" CLAUDE_HOOK_SELFTEST= "$BIN_DIR/claude-prompt-snapshot" fingerprint)" ]] ||
+      { printf 'FAIL %s: the recorded pass is not the current fingerprint\n' "$desc"; fails=1; }
+    fi
+    [[ "$got" == "$want" ]] || { printf 'FAIL %s: want_pass_recorded=%s got=%s\n' "$desc" "$want" "$got"; fails=1; }
+  }
+  passed "a pass records the fingerprint" "$passing" yes
+  passed "a repo without hooks records a pass once staged" "$plain" yes
+  passed "untracked files record no pass" "$gated" no
+
   # --- hooks still failing: the output is carried, not summarised ---
   stubs_fail="$workdir/stubs_fail"
   mkdir "$stubs_fail"
   stub_autofix "$stubs_fail" 1
   call "$passing" "$stubs_fail:$BIN_DIR:$PATH" "" "trailing whitespace failed"
   says "hooks still failing" "pre-commit failing" "trailing whitespace failed"
+  passed "a failure clears the recorded pass" "$passing" no
 
   # --- only the last pass is reported: what the first one said is already out of date ---
   stubs_two="$workdir/stubs_two"
@@ -181,6 +195,16 @@ PROMPT_ID=$(printf '%s' "$INPUT" | jq -r '.prompt_id // ""')
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$ROOT" || exit 1
 
+# The pass fingerprint: the change-set this hook last passed, taken after the autofix pass.
+# `claude-stop-commit` asks for a commit only when the tree still matches it, so it never asks over a
+# state pre-commit didn't pass, which is every state this hook reports once and then goes quiet on.
+# Emptied on every other outcome, and an empty record matches no fingerprint.
+PASSED="$(git rev-parse --absolute-git-dir)/claude-precommit-passed"
+: >"$PASSED"
+record_pass() {
+  claude-prompt-snapshot fingerprint >"$PASSED"
+}
+
 # Read with `read -d ''` rather than `mapfile -d ''`, which macOS's bash 3.2 has no `-d` for. `-z`
 # rather than the readable listing because git quotes and escapes a path with a newline or a
 # non-ASCII byte in it, and a quoted path is not one Claude can open.
@@ -198,12 +222,14 @@ Files:
 $(printf '%s\n' "${STRAYS[@]}")"
 elif ! is-pre-commit-project; then
   git add --update
+  record_pass
   exit 0
   # Stdout only, which is where `pre-commit-autofix` puts its last pass; its first pass goes to stderr
   # and is discarded, both because a failure a hook has since fixed is not something to send Claude
   # back over, and because a hook's stderr shows in the TUI. A runner that cannot start says so on
   # both passes, and the last pass folds its stderr into stdout, so that is not what gets dropped.
 elif OUTPUT=$(pre-commit-autofix 2>/dev/null); then
+  record_pass
   exit 0
 else
   MESSAGE="pre-commit failing"
@@ -218,13 +244,7 @@ fi
 # the tree it was reached on, taken after the autofix pass, since that may have just rewritten it. A
 # new prompt hears about it once more, so a failure is never silently forgotten.
 REPORTED="$(git rev-parse --git-dir)/claude-precommit-reported"
-STATE=$(
-  {
-    printf '%s\n%s\n' "$PROMPT_ID" "$CONTEXT"
-    git diff HEAD
-    git ls-files --others --exclude-standard
-  } | sha1sum | cut -d' ' -f1
-)
+STATE=$(printf '%s\n%s\n%s\n' "$PROMPT_ID" "$CONTEXT" "$(claude-prompt-snapshot fingerprint)" | sha1sum | cut -d' ' -f1)
 [[ "$(cat "$REPORTED" 2>/dev/null)" == "$STATE" ]] && exit 0
 printf '%s' "$STATE" >"$REPORTED"
 

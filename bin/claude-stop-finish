@@ -5,29 +5,38 @@ set -euo pipefail
 
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
 # line is how `claude-hook-selftests` discovers participating hooks. This hook decides
-# whether Claude sees a finishing-pass nudge from a single branch on
-# claude-changeset-guard's exit code; run these with
-# `CLAUDE_HOOK_SELFTEST=1 claude-stop-finish`.
+# whether Claude sees a finishing-pass nudge from whether the prompt changed the repo,
+# stubbed here; run these with `CLAUDE_HOOK_SELFTEST=1 claude-stop-finish`.
 if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   SELF=$(realpath "$0")
+  # The stubbed snapshot answers `changed`; the once-per-prompt record is the real one's.
+  export REAL_SNAPSHOT
+  REAL_SNAPSHOT="$(dirname "$SELF")/claude-prompt-snapshot"
   fails=0
   stubs=$(realpath "$(mktemp -d)")
   repo=$(realpath "$(mktemp -d)")
   trap 'rm -rf "$stubs" "$repo"' EXIT
-  git init -q "$repo"
+  # shellcheck disable=SC2207
+  unset_git=($(git rev-parse --local-env-vars | sed 's/^/-u /'))
+  env "${unset_git[@]}" git init -q "$repo"
   cd "$repo"
 
-  stub_guard() {
-    local exit_code="$1" output="$2"
-    printf '#!/bin/sh\n: > "%s/guard.called"\nprintf %%s "%s"\nexit %s\n' "$stubs" "$output" "$exit_code" >"$stubs/claude-changeset-guard"
-    chmod +x "$stubs/claude-changeset-guard"
-  }
+  # The snapshot answers "did this prompt change the repo", driven by an env var per call.
+  cat >"$stubs/claude-prompt-snapshot" <<'STUB'
+#!/bin/sh
+[ "$1" = changed ] || exec "$REAL_SNAPSHOT" "$@"
+: > "$STUB_DIR/snapshot.called"
+[ "$STUB_CHANGED" = 0 ] && printf '%s' "$STUB_PORCELAIN"
+exit "$STUB_CHANGED"
+STUB
+  chmod +x "$stubs/claude-prompt-snapshot"
 
   call() {
-    local payload="$1"
-    rm -f "$stubs/guard.called"
+    local payload="$1" changed="$2" porcelain="${3:-M some/file.txt}"
+    rm -f "$stubs/snapshot.called"
     EXIT=0
-    OUT=$(PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" <<<"$payload" 2>&1) || EXIT=$?
+    OUT=$(env "${unset_git[@]}" STUB_DIR="$stubs" STUB_CHANGED="$changed" STUB_PORCELAIN="$porcelain" \
+      PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" <<<"$payload" 2>&1) || EXIT=$?
   }
 
   check() {
@@ -43,45 +52,43 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
     { printf 'FAIL %s: want_nudge=%s got_nudge=%s :: %s\n' "$desc" "$want" "$got" "$OUT"; fails=1; }
   }
 
-  # --- no fresh change-set: the guard suppresses, and this hook stays silent ---
-  stub_guard 1 ""
-  call '{}'
-  check "no change-set to nudge about is silent" 0
+  # --- the prompt changed nothing: silent ---
+  call '{"prompt_id":"prompt-0a1b"}' 1
+  check "a prompt that changed nothing is silent" 0
   [[ -z "$OUT" ]] ||
   { printf 'FAIL silent pass-through: expected no output :: %s\n' "$OUT"; fails=1; }
 
-  # --- one pass per prompt: a second fresh change-set in the same prompt is silent,
-  # but the guard still runs so it records the pass's own edits ---
-  stub_guard 0 "M first/prompt.txt"
-  call '{"prompt_id":"prompt-7f3a"}'
-  nudged "first change-set in a prompt nudges" yes
-  call '{"prompt_id":"prompt-7f3a"}'
+  # --- one pass per prompt: a second stop in the same prompt is silent ---
+  call '{"prompt_id":"prompt-7f3a"}' 0
+  nudged "a prompt that changed the repo nudges" yes
+  call '{"prompt_id":"prompt-7f3a"}' 0
   check "same prompt again exits cleanly" 0
-  nudged "a second change-set in the same prompt is silent" no
-  [[ -e "$stubs/guard.called" ]] ||
-  { printf 'FAIL suppressed nudge must still run the guard\n'; fails=1; }
-  call '{"prompt_id":"prompt-91c4"}'
+  nudged "a second stop in the same prompt is silent" no
+  call '{"prompt_id":"prompt-91c4"}' 0
   nudged "a new prompt nudges again" yes
-  call '{"prompt_id":"prompt-7f3a"}'
+  call '{"prompt_id":"prompt-7f3a"}' 0
   nudged "an earlier prompt stays remembered" no
 
-  # --- no prompt id (before the first user input): nudge on every fresh change-set ---
-  call '{}'
-  nudged "no prompt id nudges" yes
-  call '{}'
-  nudged "no prompt id nudges again" yes
+  # --- no prompt id (only before a session's first prompt): nothing to record the pass against ---
+  call '{}' 0
+  nudged "no prompt id never nudges" no
 
-  # --- a fresh change-set: the guard's porcelain surfaces inside the nudge ---
-  stub_guard 0 "M some/file.txt"
-  call '{"prompt_id":"prompt-c208"}'
-  check "a fresh change-set nudges" 0
-  [[ "$OUT" == *"M some/file.txt"* ]] ||
-  { printf 'FAIL nudge: output missing porcelain change-set :: %s\n' "$OUT"; fails=1; }
+  # --- a merge or rebase in progress dominates the tree: no pass ---
+  touch "$(git rev-parse --git-dir)/MERGE_HEAD"
+  call '{"prompt_id":"prompt-e5d6"}' 0
+  nudged "a merge in progress is silent" no
+  [[ ! -e "$stubs/snapshot.called" ]] ||
+  { printf 'FAIL a merge in progress should not consult the snapshot\n'; fails=1; }
+  rm "$(git rev-parse --git-dir)/MERGE_HEAD"
+
+  # --- what changed surfaces inside the nudge, as Stop JSON ---
+  call '{"prompt_id":"prompt-c208"}' 0 "M other/file.txt"
+  check "a changed prompt nudges" 0
+  [[ "$OUT" == *"M other/file.txt"* ]] ||
+  { printf 'FAIL nudge: output missing what changed :: %s\n' "$OUT"; fails=1; }
   EVENT=$(jq -r '.hookSpecificOutput.hookEventName' <<<"$OUT" 2>/dev/null)
   [[ "$EVENT" == "Stop" ]] ||
   { printf 'FAIL nudge: hookEventName is %q, want Stop :: %s\n' "$EVENT" "$OUT"; fails=1; }
-  [[ "$OUT" == *"finishing pass triggered"* ]] ||
-  { printf 'FAIL nudge: output missing systemMessage :: %s\n' "$OUT"; fails=1; }
 
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
@@ -92,37 +99,29 @@ fi
 INPUT=$(cat)
 PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")
 
-# The guard runs even when this prompt was already nudged: it records the fingerprint,
-# so the edits the finishing pass itself makes don't read as a fresh change-set on the
-# next prompt.
-PORCELAIN=$(claude-changeset-guard finish) || exit 0
+GIT_DIR=$(git rev-parse --absolute-git-dir 2>/dev/null) || exit 0
+
+# During a merge or rebase the working tree is dominated by the operation, not session work.
+[[ -f "$GIT_DIR/MERGE_HEAD" || -d "$GIT_DIR/rebase-merge" || -d "$GIT_DIR/rebase-apply" ]] && exit 0
+
+# The question is whether this prompt changed the repo, measured against the snapshot taken when
+# it arrived, so Josh's own edits between prompts don't count and a turn that ended in a commit
+# still does.
+CHANGES=$(claude-prompt-snapshot changed "$PROMPT_ID") || exit 0
 
 # At most one pass per user prompt. Without this, every edit the pass makes is a new
-# change-set, and each one bought another pass that mostly reported nothing to change.
+# change, and each one bought another pass that mostly reported nothing to change.
 # A stop-hook continuation keeps the prompt's id; a new prompt (a task notification
 # included) gets a fresh one.
-if [[ -n "$PROMPT_ID" ]]; then
-  NUDGED="$(git rev-parse --git-dir)/claude-finish-nudged-prompts"
-  grep -qxsF "$PROMPT_ID" "$NUDGED" && exit 0
-  {
-    tail -n 19 "$NUDGED" 2>/dev/null || true
-    printf '%s\n' "$PROMPT_ID"
-  } >"$NUDGED.tmp"
-  mv "$NUDGED.tmp" "$NUDGED"
-fi
+claude-prompt-snapshot ask "$PROMPT_ID" finish || exit 0
 
-MESSAGE="You made these changes this session:
+MESSAGE="You made these changes this prompt:
 
-$PORCELAIN
+$CHANGES
 
-Before stopping, check this change-set for consistency: update anything it requires to stay
-in sync, e.g. CLAUDE.md, docs, changelogs, skills, justfile recipes, or code comments that
-describe what you changed. Keep it scoped to the change you already made (don't start new
-work or expand scope). Don't re-run checks that already passed.
+Before stopping, check this change-set for consistency: update anything it requires to stay in sync, e.g. CLAUDE.md, docs, changelogs, skills, justfile recipes, or code comments that describe what you changed. Keep it scoped to the change you already made (don't start new work or expand scope). Don't re-run checks that already passed.
 
-If you changed something, say in a sentence or two what and why. If nothing needed
-changing, reply with exactly \"Finishing pass: nothing to change.\" and nothing else: your
-previous message already holds the summary, so don't restate it or its results."
+If you changed something, say in a sentence or two what and why. If nothing needed changing, reply with exactly \"Finishing pass: nothing to change.\" and nothing else. Either way, hold the turn's report: the last check asks for it."
 
 jq -n --arg ctx "$MESSAGE" '{"systemMessage":"[claude-stop-finish] finishing pass triggered","hookSpecificOutput":{"hookEventName":"Stop","additionalContext":$ctx}}'
 exit 0

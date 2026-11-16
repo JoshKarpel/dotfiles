@@ -47,6 +47,30 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   call "$workdir"
   [[ -z "$OUT" ]] || { printf 'FAIL outside any repo: expected no output :: %s\n' "$OUT"; fails=1; }
 
+  # --- the land state, from a stubbed `git-land --state` ---
+  stubs="$workdir/stubs"
+  mkdir -p "$stubs"
+  printf '#!/bin/sh\n[ -n "${STUB_LAND_STATE:-}" ] || exit 1\nprintf "%%s\\n" "$STUB_LAND_STATE"\n' >"$stubs/git-land"
+  chmod +x "$stubs/git-land"
+  land() {
+    OUT=$(cd "$repo" && STUB_LAND_STATE="$1" PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1)
+  }
+  land ""
+  check_not_contains "no land state (no origin)" "Landing"
+  land $'path=/g/land/b/pr.md\ndraft=yes\nlanded=no\nstale=no\ndraft_changed=yes\nunlanded=2\npr_failed=no\ndefault=no'
+  check_contains "a branch with a draft" "PR draft: /g/land/b/pr.md (written)"
+  check_contains "a branch with a draft" "Landed before: no"
+  check_contains "a branch with unlanded commits" "Unlanded commits (origin lacks them): 2"
+  land $'path=/g/land/b/pr.md\ndraft=yes\nlanded=yes\nstale=no\ndraft_changed=yes\nunlanded=0\npr_failed=no\ndefault=no'
+  check_contains "a landed draft that changed" "Landed before: yes, and the draft has changed since"
+  land $'path=/g/land/b/pr.md\ndraft=no\nlanded=no\nstale=yes\ndraft_changed=no\nunlanded=1\npr_failed=no\ndefault=no'
+  check_contains "a stale land directory" "an earlier branch's of the same name"
+  check_contains "no draft" "(not written yet)"
+  land $'path=/g/land/b/pr.md\ndraft=yes\nlanded=no\nstale=no\ndraft_changed=yes\nunlanded=0\npr_failed=yes\ndefault=no'
+  check_contains "a PR that failed to open" "the PR failed to open"
+  land $'path=/g/land/b/pr.md\ndraft=yes\nlanded=yes\nstale=no\ndraft_changed=no\nunlanded=2\npr_failed=no\ndefault=yes'
+  check_not_contains "the default branch" "Landing"
+
   call "$repo"
   check_contains "on the default branch" "Current git status:"
   check_not_contains "on the default branch" "Recent commits:"
@@ -84,6 +108,36 @@ Current git status:
 
 $STATUS
 EOF
+
+# Where this branch's landing stands, from `git-land --state`, which owns what each field means.
+# Local only: no network call at session start. Not on the default branch, whose unlanded commits
+# are Josh's, so reporting them would invite a land the stop checks exist to prevent.
+if LAND_STATE=$(git-land --state 2>/dev/null) && grep -qx 'default=no' <<<"$LAND_STATE"; then
+  land_field() { sed -n "s/^$1=//p" <<<"$LAND_STATE"; }
+  if [[ "$(land_field draft)" == yes ]]; then
+    DRAFT="written"
+  else
+    DRAFT="not written yet"
+  fi
+  if [[ "$(land_field landed)" == yes ]]; then
+    LANDED="yes"
+    [[ "$(land_field draft_changed)" == yes ]] && LANDED+=", and the draft has changed since"
+  elif [[ "$(land_field pr_failed)" == yes ]]; then
+    LANDED="no (pushed, but the PR failed to open; \`git land\` again opens it)"
+  elif [[ "$(land_field stale)" == yes ]]; then
+    LANDED="no (the land directory is an earlier branch's of the same name; \`git land --path\` moves it aside)"
+  else
+    LANDED="no"
+  fi
+  cat <<EOF
+
+Landing (\`git land\`):
+
+- PR draft: $(land_field path) ($DRAFT)
+- Landed before: $LANDED
+- Unlanded commits (origin lacks them): $(land_field unlanded)
+EOF
+fi
 
 if [[ -n "$CURRENT_BRANCH" && -n "$DEFAULT_BRANCH" && "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]]; then
   LOG=$(git log "${DEFAULT_BRANCH}..HEAD" --oneline --stat 2>/dev/null)
