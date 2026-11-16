@@ -240,9 +240,10 @@ case "${1:-}" in
   ask | asked)
     # A stop check that asks once per prompt calls `ask`: exit 0 the first time for this prompt
     # (recording it), 1 after. `asked` only reads. One record for every check, so the question
-    # gate can tell which checks have already spent their ask. With no prompt id, which Claude Code
-    # leaves unset only before a session's first prompt, there is nothing to record an ask against,
-    # so every check counts as having asked: granting each ask instead would block on every stop.
+    # gate can tell which checks have already spent their ask. With no prompt id there is nothing to
+    # record an ask against. `claude-stop` refuses to run the checks then, and says so, so this covers
+    # a check run some other way: every check counts as having asked, since granting each ask instead
+    # would block on every stop.
     [[ -n "${2:-}" ]] || exit "$([[ "$1" == ask ]] && echo 1 || echo 0)"
     FILE="$STATE_DIR/$(key "$2")"
     if grep -qxF "asked=$3" "$FILE" 2>/dev/null; then

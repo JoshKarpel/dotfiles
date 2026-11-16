@@ -46,8 +46,8 @@ printf '%s\n' "$STUB_LAND_STATE"
 EOF
   chmod +x "$stubs"/*
 
-  NEVER_LANDED=$'path=/x/pr.md\ndraft=no\nlanded=no\nstale=no\ndraft_changed=no\nunlanded=2'
-  LANDED=$'path=/x/pr.md\ndraft=yes\nlanded=yes\nstale=no\ndraft_changed=no\nunlanded=0'
+  NEVER_LANDED=$'path=/x/pr.md\ndraft=no\nlanded=no\nstale=no\ndraft_changed=no\nunlanded=2\npr_failed=no\ndefault=no'
+  LANDED=$'path=/x/pr.md\ndraft=yes\nlanded=yes\nstale=no\ndraft_changed=no\nunlanded=0\npr_failed=no\ndefault=no'
 
   call() {
     local prompt="$1" changed="$2" land_state="${3:-}"
@@ -76,6 +76,11 @@ EOF
   call p4 0 "$LANDED"
   [[ "$OUT" != *"has not been landed"* ]] || { printf 'FAIL a landed branch gets no reminder :: %s\n' "$OUT"; fails=1; }
 
+  # --- the default branch: its unlanded commits are Josh's, so no reminder to land them ---
+  call p5 0 "${NEVER_LANDED/default=no/default=yes}"
+  asks "the default branch still asks for the report" yes
+  [[ "$OUT" != *"has not been landed"* ]] || { printf 'FAIL the default branch gets no reminder :: %s\n' "$OUT"; fails=1; }
+
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
   fi
@@ -93,8 +98,8 @@ claude-prompt-snapshot ask "$PROMPT_ID" summary || exit 0
 REMINDER=""
 LAND_STATE=$(git-land --state 2>/dev/null || true)
 # Not on the default branch, whose unlanded commits are Josh's rather than this turn's to publish.
-if grep -qx 'landed=no' <<<"$LAND_STATE" && ! grep -qx 'unlanded=0' <<<"$LAND_STATE" &&
-is-claude-commit-branch >/dev/null 2>&1; then
+if grep -qx 'default=no' <<<"$LAND_STATE" && grep -qx 'landed=no' <<<"$LAND_STATE" &&
+! grep -qx 'unlanded=0' <<<"$LAND_STATE"; then
   REMINDER=$'\n\n'"This branch has not been landed yet. If the change is now worth showing (a coherent first version whose checks pass locally), write the PR draft to the path \`git land --path\` prints and run \`git land\` before the report, and say in the report that you did. Otherwise do not mention landing."
 fi
 

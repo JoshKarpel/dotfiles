@@ -496,9 +496,12 @@ there.
 So land also records there the commit it last pushed, and a directory whose
 recorded commit isn't in `HEAD`'s history belongs to an earlier branch of that
 name.
-The record is also what `--state` reads as landed, so on a branch getting its
-first PR it is written only once the PR exists: a push whose PR then fails to
-open leaves the branch never landed, and the next land opens it.
+The record is also what `--state` reads as landed, except where the push's PR
+then failed to open.
+Land leaves a `pr-failed` marker beside it then, cleared by the next push, and
+`--state` reports `pr_failed=yes` rather than landed.
+Without the marker, such a branch would read as never landed with nothing
+unlanded, which no check acts on, and the PR would stay unopened.
 `claude-git-status` and `claude-stop-land` then treat the branch as never
 landed, and land, before using it, moves the directory aside to
 `land/<branch>.old` and refuses, saying the draft may be the earlier branch's
@@ -719,16 +722,21 @@ time, so hooks compute it rather than anyone writing it down:
 - **At session start**, `claude-git-status` adds the branch's land state, all
   local and with no network call: the draft path, whether a draft exists,
   whether it has been landed before (land's saved copy), whether it changed
-  since, and how many unlanded commits it has (decision 2).
+  since, whether the last land's PR failed to open, and how many unlanded
+  commits it has (decision 2).
+- **Every hook reads the default branch from `--state`**, which reports
+  `default=yes`, `no`, or `unknown` (where `origin` has no `HEAD`) from
+  `refs/remotes/origin/HEAD`, and acts only on `no`.
+  Josh's own commits on the default branch are therefore never offered to land,
+  and the predicate lives in one place rather than in each consumer.
 - **At session start**, `claude-gh-status` already reports an open PR. For a
   branch land opened, it adds that Claude's part of the body is the text between
   the land markers, carried from the draft on the next land.
-- **At stop**, a new check `claude-stop-land` runs after `claude-stop-commit`,
-  on a branch `is-claude-commit-branch` accepts, so Josh's own commits on the
-  default branch are never offered to land.
+- **At stop**, a new check `claude-stop-land` runs after `claude-stop-commit`.
   When the branch has been landed before and has unlanded commits,
   it blocks once per prompt and asks Claude to land them, rewriting the draft
-  first if they change what the PR is, or to say in one line why not. A
+  first if they change what the PR is, or to say in one line why not.
+  When the last land's PR failed to open, it asks Claude to land again. A
   branch that has never been landed earns only a reminder that the change
   lands once it's worth showing. A Stop hook's `additionalContext` always
   costs a model turn, so the reminder rides on `claude-stop-summary`'s request
@@ -942,9 +950,12 @@ a declining line under it.
   prompt's snapshot through `claude-prompt-snapshot ask`, rather than in a
   marker file of its own, so the question gate can tell which checks could
   still ask.
-  A payload with no `prompt_id`, which Claude Code leaves unset only before a
-  session's first prompt, has nothing to record an ask against, so every
-  check counts as having asked rather than asking on every stop.
+  A payload with no `prompt_id` has nothing to record an ask against, so no
+  check can run, and a stop that skipped them silently would look like one
+  they all passed.
+  `claude-stop` fails closed as far as it can without trapping the session:
+  the first stop blocks to have Claude tell Josh the checks are broken, and
+  the stop that follows (`stop_hook_active`) passes with a warning.
 - A prompt with no snapshot (a session older than the hook, or a failed write)
   counts as changed, so the cost of a gap is an extra pass rather than a
   missing report.
@@ -975,7 +986,10 @@ flowchart TD
 
   STOP --> AG{background agent<br/>running?}
   AG -->|yes| PAUSE["tab paused; no checks<br/>(Stop fires again on its report)"] --> REC
-  AG -->|no| CB{"could a check block?<br/>• changed and finish or summary not asked<br/>• tree dirty<br/>• landed, unlanded, land not asked"}
+  AG -->|no| PID{prompt_id?}
+  PID -->|"no, first stop"| BLOCK
+  PID -->|"no, stop_hook_active"| ANN
+  PID -->|yes| CB{"could a check block?<br/>• changed and finish or summary not asked<br/>• tree dirty<br/>• not default, land not asked, and<br/>landed with unlanded or PR failed"}
   CB -->|no| PC
   CB -->|yes| QM{"reply contains ?"}
   QM -->|no| PC
@@ -995,7 +1009,7 @@ flowchart TD
   PLAN -->|no| COM
   COM{"commit: staged, allowed branch,<br/>fingerprint = pass, not asked?"} -->|yes| BLOCK
   COM -->|no| LAND
-  LAND{"land: landed before,<br/>unlanded > 0, not asked?"} -->|yes| BLOCK
+  LAND{"land: not default, not asked, and<br/>landed with unlanded > 0 or PR failed?"} -->|yes| BLOCK
   LAND -->|no| SUM
   SUM{"summary: prompt changed,<br/>not asked?"} -->|"yes (plus never-landed reminder)"| BLOCK
   SUM -->|no| ANN

@@ -6,6 +6,9 @@
 # The state comes from `git-land --state` (local, no network), which owns what "landed" and
 # "unlanded" mean, so this check, `claude-git-status`, and land itself count the same commits.
 #
+# A push whose PR failed to open (`pr_failed=yes`) asks too, whatever the count: the branch is on
+# origin, so it has nothing unlanded, and only another land opens the PR.
+#
 # A branch that has never been landed only earns a reminder, and that rides on
 # `claude-stop-summary`'s request for the report rather than costing a model turn here.
 
@@ -32,8 +35,10 @@ printf '%s\n' "$STUB_LAND_STATE"
 EOF
   chmod +x "$stubs/git-land"
 
+  # state <landed> <draft_changed> <unlanded> [pr_failed] [default]
   state() {
-    printf 'path=/x/pr.md\ndraft=yes\nlanded=%s\nstale=no\ndraft_changed=%s\nunlanded=%s' "$1" "$2" "$3"
+    printf 'path=/x/pr.md\ndraft=yes\nlanded=%s\nstale=no\ndraft_changed=%s\nunlanded=%s\npr_failed=%s\ndefault=%s' \
+      "$1" "$2" "$3" "${4:-no}" "${5:-no}"
   }
   asks() {
     local desc="$1" prompt="$2" land_state="$3" want="$4" got=no
@@ -54,13 +59,13 @@ EOF
   [[ "$OUT" == *"draft has changed"* ]] || { printf 'FAIL changed draft not mentioned :: %s\n' "$OUT"; fails=1; }
 
   # --- the default branch: its unlanded commits are Josh's, not Claude's to push ---
-  origin=$(realpath "$(mktemp -d)")
-  trap 'rm -rf "$stubs" "$repo" "$origin"' EXIT
-  env "${unset_git[@]}" git init -q -b trunk "$origin/src"
-  env "${unset_git[@]}" git -C "$origin/src" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m init
-  rm -rf "$repo"
-  env "${unset_git[@]}" git clone -q "$origin/src" "$repo"
-  asks "a landed default branch with new commits is silent" p6 "$(state yes no 2)" no
+  asks "a landed default branch with new commits is silent" p6 "$(state yes no 2 no yes)" no
+  asks "an unknown default branch is silent" p7 "$(state yes no 2 no unknown)" no
+
+  # --- a push whose PR failed to open: nothing unlanded, but land again ---
+  asks "a PR that failed to open asks" p8 "$(state no no 0 yes)" yes
+  [[ "$OUT" == *"failed to open"* ]] || { printf 'FAIL the failed PR is named :: %s\n' "$OUT"; fails=1; }
+  asks "a PR that failed to open on the default branch is silent" p9 "$(state no no 0 yes yes)" no
 
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
@@ -71,11 +76,20 @@ fi
 INPUT=$(cat)
 PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")
 
-GIT_DIR=$(git rev-parse --absolute-git-dir 2>/dev/null) || exit 0
+git rev-parse --git-dir >/dev/null 2>&1 || exit 0
+STATE=$(git-land --state 2>/dev/null) || exit 0
 # Unlanded commits on the default branch aren't Claude's (it can't commit there), so landing them
 # would publish Josh's work without a PR on his behalf.
-is-claude-commit-branch >/dev/null || exit 0
-STATE=$(git-land --state 2>/dev/null) || exit 0
+grep -qx 'default=no' <<<"$STATE" || exit 0
+
+if grep -qx 'pr_failed=yes' <<<"$STATE"; then
+  claude-prompt-snapshot ask "$PROMPT_ID" land || exit 0
+  CONTEXT="The last land pushed this branch, but its PR failed to open, so the branch is on origin with no PR: run \`git land\` again to open it, or say in one line why not. If land refuses, say so and stop: don't look for another route. Hold the turn's report: the last check asks for it."
+  jq -n --arg ctx "$CONTEXT" \
+    '{systemMessage: "[claude-stop-land] open the PR", hookSpecificOutput: {hookEventName: "Stop", additionalContext: $ctx}}'
+  exit 0
+fi
+
 grep -qx 'landed=yes' <<<"$STATE" || exit 0
 UNLANDED=$(sed -n 's/^unlanded=//p' <<<"$STATE")
 [[ "$UNLANDED" =~ ^[0-9]+$ && "$UNLANDED" -gt 0 ]] || exit 0

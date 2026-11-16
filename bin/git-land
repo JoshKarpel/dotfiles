@@ -10,8 +10,11 @@
 # resolves per worktree and per branch inside the git directory, so it is never committed. Beside it
 # land keeps the copy it last landed (`landed.md`), which is how it knows whether the draft changed,
 # and the commit it last pushed (`pushed`), which is how it knows a directory belongs to an earlier
-# branch of the same name: one whose recorded commit isn't in `HEAD`'s history. Claude's part of the
-# live PR body sits between the land markers, so text Josh writes outside them is never touched.
+# branch of the same name: one whose recorded commit isn't in `HEAD`'s history. A push whose PR then
+# fails to open leaves `pr-failed` there too, until a land gets past that point, so `--state` can say
+# the branch is on origin with no PR rather than looking like a branch with nothing to land. Claude's
+# part of the live PR body sits between the land markers, so text Josh writes outside them is never
+# touched.
 #
 # "Unlanded" means the commits `origin` lacks (`HEAD --not --remotes=origin`): exactly what a push
 # publishes, and the range the stop hooks and `claude-git-status` count through `--state`.
@@ -57,7 +60,7 @@ case "$1 $2" in
   "repo view") printf '{"isFork":%s,"defaultBranchRef":{"name":"main"}}' "${GH_FORK:-false}" ;;
   "pr list") if [[ -f "$STUB_DIR/prs.json" ]]; then cat "$STUB_DIR/prs.json"; else echo '[]'; fi ;;
   "pr create" | "pr edit")
-    [[ "$1 $2" == "pr create" ]] && { exit_code="${GH_CREATE_EXIT:-0}"; [[ "$exit_code" == 0 ]] || exit "$exit_code"; }
+    [[ "$1 $2" == "pr create" && "${GH_CREATE_EXIT:-0}" != 0 ]] && exit "$GH_CREATE_EXIT"
     rm -f "$STUB_DIR/title" "$STUB_DIR/body"
     while [[ $# -gt 0 ]]; do
       case "$1" in
@@ -138,7 +141,18 @@ EOF
   want_out "--state stale" "stale=no"
   want_out "--state draft_changed" "draft_changed=no"
   want_out "--state unlanded" "unlanded=1"
+  want_out "--state pr_failed" "pr_failed=no"
+  want_out "--state default" "default=no"
   want_out "--state path" "path=$(git rev-parse --absolute-git-dir)/land/feature/pr.md"
+  git checkout -q main
+  run --state
+  want_out "--state on the default branch" "default=yes"
+  git remote set-head origin --delete
+  run --state
+  want_out "--state with no origin/HEAD" "default=unknown"
+  git checkout -q feature
+  run --state
+  want_out "--state off the default with no origin/HEAD" "default=unknown"
   git checkout -q --detach
   run --state
   want_exit "--state on a detached HEAD" 1
@@ -178,15 +192,8 @@ EOF
   want_out "misshapen draft" "blank line"
   not_pushed "misshapen draft"
 
-  # --- a PR that fails to open: pushed, but not landed, so landing again opens it ---
-  draft "Add feature" "Why and how."
-  GH_CREATE_EXIT=1 run
-  want_exit "the PR fails to open" 1
-  pushed "the PR fails to open"
-  run --state
-  want_out "the PR fails to open, --state" "landed=no"
-
   # --- first land: push, then a draft PR from the draft, wrapped in markers ---
+  draft "Add feature" "Why and how."
   run
   want_exit "first land" 0
   pushed "first land"
@@ -390,6 +397,25 @@ EOF
   want_exit "non-fast-forward" 1
   want_out "non-fast-forward" "git pull --ff"
 
+  # --- a PR that fails to open: pushed, but not landed, so landing again opens it ---
+  fresh
+  draft "Add feature" "Why and how."
+  GH_CREATE_EXIT=1 run
+  want_exit "the PR fails to open" 1
+  pushed "the PR fails to open"
+  run --state
+  want_out "the PR fails to open, --state" "landed=no"
+  want_out "the PR fails to open, --state pr_failed" "pr_failed=yes"
+  want_out "the PR fails to open, --state unlanded" "unlanded=0"
+  want_out "the PR fails to open, --state stale" "stale=no"
+  rm -f "$stubs/calls"
+  run
+  want_exit "the PR opens on the retry" 0
+  called "the PR opens on the retry" "pr create"
+  run --state
+  want_out "the PR opens on the retry, --state" "landed=yes"
+  want_out "the PR opens on the retry, --state pr_failed" "pr_failed=no"
+
   # --- the default branch: push, open no PR ---
   fresh
   git checkout -q main
@@ -414,7 +440,7 @@ die() {
   exit 1
 }
 
-# Sets BRANCH, LAND_DIR, DRAFT, LANDED, and PUSHED for the current branch, from the worktree's
+# Sets BRANCH, LAND_DIR, DRAFT, LANDED, PUSHED, and PR_FAILED for the current branch, from the worktree's
 # toplevel. Returns non-zero, saying nothing, where there is no branch to land.
 resolve() {
   local top path
@@ -429,6 +455,7 @@ resolve() {
   DRAFT="$LAND_DIR/pr.md"
   LANDED="$LAND_DIR/landed.md"
   PUSHED="$LAND_DIR/pushed"
+  PR_FAILED="$LAND_DIR/pr-failed"
 }
 
 # The directory belongs to an earlier branch of this name when the commit it last pushed isn't in
@@ -447,11 +474,22 @@ unlanded_count() {
   git rev-list --count HEAD --not --remotes=origin
 }
 
+# Whether this is the default branch, from `refs/remotes/origin/HEAD` (local, unlike the `gh repo view`
+# land itself asks): `unknown` where origin has no HEAD. Every consumer acts only on `no`, since
+# unlanded commits on the default branch are Josh's rather than Claude's to publish.
+default_state() {
+  local default
+  default=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || { echo unknown; return; }
+  [[ "$BRANCH" == "${default#origin/}" ]] && echo yes || echo no
+}
+
 print_state() {
-  local draft=no landed=no stale=no changed=no
+  local draft=no landed=no stale=no changed=no pr_failed=no
   [[ -f "$DRAFT" ]] && draft=yes
   if is_stale; then
     stale=yes
+  elif [[ -f "$PR_FAILED" ]]; then
+    pr_failed=yes
   elif [[ -f "$PUSHED" ]]; then
     landed=yes
   fi
@@ -460,8 +498,8 @@ print_state() {
       changed=yes
     fi
   fi
-  printf 'path=%s\ndraft=%s\nlanded=%s\nstale=%s\ndraft_changed=%s\nunlanded=%s\n' \
-    "$DRAFT" "$draft" "$landed" "$stale" "$changed" "$(unlanded_count)"
+  printf 'path=%s\ndraft=%s\nlanded=%s\nstale=%s\ndraft_changed=%s\nunlanded=%s\npr_failed=%s\ndefault=%s\n' \
+    "$DRAFT" "$draft" "$landed" "$stale" "$changed" "$(unlanded_count)" "$pr_failed" "$(default_state)"
 }
 
 # `<host>/<owner>/<repo>` from a remote URL: https, `ssh://`, scp-style `user@host:owner/repo`, or a
@@ -654,11 +692,8 @@ $push_output"
   fi
   mkdir -p "$LAND_DIR"
   printf '%s\n' "$push_output"
-  # `--state` reads `pushed` as landed, so a branch that is about to get its first PR records it only
-  # once the PR exists: a failed create leaves the branch never landed, and the next land opens it.
-  if [[ "$opens_prs" == no || -n "$number" ]]; then
-    git rev-parse HEAD >"$PUSHED"
-  fi
+  git rev-parse HEAD >"$PUSHED"
+  rm -f "$PR_FAILED"
 
   if [[ "$is_fork" == true ]]; then
     echo "git land: pushed $BRANCH to origin, a fork. Josh opens the upstream PR himself."
@@ -677,9 +712,10 @@ $push_output"
   if [[ -z "$number" ]]; then
     printf '%s\n%s\n%s' "$START_MARKER" "$(draft_body "$DRAFT")" "$END_MARKER" >"$body_file"
     gh pr create --repo "$repo" --head "$BRANCH" --base "$default" --draft \
-      --title "$(draft_title "$DRAFT")" --body-file "$body_file" ||
-    die "pushed, but opening the PR failed. Claude: land again to retry."
-    git rev-parse HEAD >"$PUSHED"
+      --title "$(draft_title "$DRAFT")" --body-file "$body_file" || {
+      : >"$PR_FAILED"
+      die "pushed, but opening the PR failed. Claude: land again to retry."
+    }
     cp "$DRAFT" "$LANDED"
     return
   fi

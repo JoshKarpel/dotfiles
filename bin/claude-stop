@@ -78,6 +78,7 @@ EOF
   ALL="precommit,finish,plan-artifact,commit,land,summary"
 
   # t <desc> <payload> <want_exit> <want_out> <want_called> [VAR=value ...]
+  # A want_out of `~text` matches any output containing text, rather than exactly.
   t() {
     local desc="$1" payload="$2" want_exit="$3" want_out="$4" want_called="$5"
     shift 5
@@ -95,7 +96,11 @@ EOF
 
     [[ "$exit_code" == "$want_exit" ]] ||
     { printf 'FAIL %s: want_exit=%s got_exit=%s :: %s\n' "$desc" "$want_exit" "$exit_code" "$out"; fails=1; }
-    [[ "$out" == "$want_out" ]] ||
+    if [[ "$want_out" == "~"* ]]; then
+      [[ "$out" == *"${want_out#\~}"* ]]
+    else
+      [[ "$out" == "$want_out" ]]
+    fi ||
     { printf 'FAIL %s: want_out=%q got_out=%q\n' "$desc" "$want_out" "$out"; fails=1; }
     [[ "$got" == "$want_called" ]] ||
     { printf 'FAIL %s: want_called=%s got_called=%s\n' "$desc" "$want_called" "${got:-none}"; fails=1; }
@@ -131,10 +136,13 @@ EOF
     0 "" "$ALL,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES
   t "a never-landed branch with commits needs no gate" "{$P,\"last_assistant_message\":\"Which one?\"}" \
     0 "" "$ALL,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES \
-    STUB_LAND_STATE=$'landed=no\nunlanded=3'
+    STUB_LAND_STATE=$'landed=no\nunlanded=3\npr_failed=no\ndefault=no'
   t "a landed branch with unlanded commits could block" "{$P,\"last_assistant_message\":\"Which one?\"}" \
     0 "" "gate,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES \
-    STUB_LAND_STATE=$'landed=yes\nunlanded=1'
+    STUB_LAND_STATE=$'landed=yes\nunlanded=1\npr_failed=no\ndefault=no'
+  t "a PR that failed to open could block" "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "gate,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES \
+    STUB_LAND_STATE=$'landed=no\nunlanded=0\npr_failed=yes\ndefault=no'
   t "a changed prompt whose finishing pass and report have asked needs no gate" \
     "{$P,\"last_assistant_message\":\"Which one?\"}" \
     0 "" "$ALL,sound,tab-finished" STUB_ASKED="finish summary" STUB_CLAUDE_OUT=YES
@@ -144,11 +152,18 @@ EOF
   t "a landed branch whose land check has asked needs no gate" \
     "{$P,\"last_assistant_message\":\"Which one?\"}" \
     0 "" "$ALL,sound,tab-finished" STUB_CHANGED=1 STUB_ASKED="land" STUB_CLAUDE_OUT=YES \
-    STUB_LAND_STATE=$'landed=yes\nunlanded=1'
+    STUB_LAND_STATE=$'landed=yes\nunlanded=1\npr_failed=no\ndefault=no'
   echo dirty >"$repo/stray"
   t "a dirty tree could block" "{$P,\"last_assistant_message\":\"Which one?\"}" \
     0 "" "gate,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES
   : >"$repo/stray" && mv "$repo/stray" "$stubs/stray-moved-aside"
+
+  # --- no prompt id: no check can run, so the first stop blocks to say so and the retry passes ---
+  t "no prompt id blocks once" '{"last_assistant_message":"Done."}' \
+    0 "~no prompt_id" ""
+  t "no prompt id lets the retry stop" '{"stop_hook_active":true,"last_assistant_message":"Done."}' \
+    0 "~no prompt_id" "sound,tab-finished"
+  [[ -z "$STOPS" ]] || { printf 'FAIL no prompt id records no stop :: %s\n' "$STOPS"; fails=1; }
 
   # --- a running background agent: the session is paused, so no check runs and no sound plays ---
   t "running agent defers" \
@@ -187,6 +202,12 @@ EOF
   # --- a check errors outright: its exit status propagates, nothing after it runs ---
   t "a check errors" "{$P,\"last_assistant_message\":\"Done.\"}" \
     3 "" "precommit" STUB_PRECOMMIT_EXIT=3
+
+  # --- the default branch: its unlanded commits are Josh's, so the land check can't block there ---
+  t "a landed default branch with unlanded commits needs no gate" \
+    "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "$ALL,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES \
+    STUB_LAND_STATE=$'landed=yes\nunlanded=1\npr_failed=no\ndefault=yes'
 
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
@@ -239,11 +260,29 @@ if [[ "$RUNNING_AGENTS" -gt 0 ]]; then
   exit 0
 fi
 
+# Every check keys its once-per-prompt record on the prompt id, so without one none of them can run,
+# and a stop that skipped them silently would look like one they all passed. So it fails closed as
+# far as it can without trapping the session: the first stop blocks to have Claude tell Josh, and the
+# stop that follows (`stop_hook_active`) is let through with a warning, since every stop would block
+# the same way.
+if [[ -z "$PROMPT_ID" ]] && git rev-parse --git-dir >/dev/null 2>&1; then
+  WARNING="[claude-stop] the Stop payload has no prompt_id, so the stop checks (pre-commit, finishing pass, plan page, commit, land, report) did not run"
+  if [[ "$(jq -r '.stop_hook_active // false' <<<"$INPUT")" != true ]]; then
+    jq -n --arg msg "$WARNING" \
+      --arg ctx "The Stop hook payload has no prompt_id, so none of the stop checks ran this turn: nothing was checked by pre-commit, committed, or landed by them. Tell Josh in one line that the stop checks are broken (claude-stop got no prompt_id from Claude Code), then stop." \
+      '{systemMessage: $msg, hookSpecificOutput: {hookEventName: "Stop", additionalContext: $ctx}}'
+    exit 0
+  fi
+  jq -n --arg msg "$WARNING" '{systemMessage: $msg}'
+  announce_stop
+  exit 0
+fi
+
 # Could any check below block? Each clause is a check's own blocking condition, not a broader one:
 # the prompt changed the repo and the finishing pass or the report hasn't asked yet this prompt, the
-# tree has changes (pre-commit, the commit, the plan page), or a landed branch other than the
-# default has unlanded commits and the land check hasn't asked yet. A branch that has never been
-# landed only earns a reminder, which needs no gate. Without the "hasn't asked yet" half, every
+# tree has changes (pre-commit, the commit, the plan page), or, on a branch other than the default,
+# the land check hasn't asked yet and either the branch is landed with unlanded commits or its PR
+# failed to open. A branch that has never been landed only earns a reminder, which needs no gate. Without the "hasn't asked yet" half, every
 # reply to a check in a turn that changed the repo would cost a model call, the report included.
 # All of it is local, so a discussion turn costs no model call.
 could_block() {
@@ -254,9 +293,10 @@ could_block() {
   fi
   [[ -n "$(git status --porcelain 2>/dev/null)" ]] && return 0
   claude-prompt-snapshot asked "$PROMPT_ID" land && return 1
-  is-claude-commit-branch >/dev/null 2>&1 || return 1
   local state
   state=$(git-land --state 2>/dev/null) || return 1
+  grep -qx 'default=no' <<<"$state" || return 1
+  grep -qx 'pr_failed=yes' <<<"$state" && return 0
   grep -qx 'landed=yes' <<<"$state" && ! grep -qx 'unlanded=0' <<<"$state"
 }
 
