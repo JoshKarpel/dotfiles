@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Stop check, last in `claude-stop`'s sequence: when this prompt changed the repo, ask for the
+# turn's report, once per prompt.
+#
+# Claude holds its report on a turn that changed tracked files (the global CLAUDE.md says so),
+# because every check that blocks makes Claude reply, and a report written before them ends up
+# buried under the replies. Running last means the report is written once the commit, the land, and
+# every other check have settled, so it is the last thing Josh reads. A turn that ends asking Josh
+# something never gets here: the question gate in `claude-stop` ends the sequence first.
+#
+# It keys on whether the prompt changed the repo (`claude-prompt-snapshot changed`), not on whether
+# another check fired, since a check that fires once per prompt can skip, and the report would go
+# missing on that turn.
+#
+# It also carries the reminder for a branch that has never been landed: that reminder must not
+# cost a model turn of its own, and this is the one turn that is spent anyway.
+
+set -euo pipefail
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker line is how
+# `claude-hook-selftests` discovers participating hooks. Whether it asks depends on what the
+# snapshot and land state say, both stubbed on PATH; run these with
+# `CLAUDE_HOOK_SELFTEST=1 claude-stop-summary`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  # The stubbed snapshot answers `changed`; the once-per-prompt record is the real one's.
+  export REAL_SNAPSHOT
+  REAL_SNAPSHOT="$(dirname "$SELF")/claude-prompt-snapshot"
+  fails=0
+  stubs=$(realpath "$(mktemp -d)")
+  repo=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$stubs" "$repo"' EXIT
+  # shellcheck disable=SC2207
+  unset_git=($(git rev-parse --local-env-vars | sed 's/^/-u /'))
+  env "${unset_git[@]}" git init -q "$repo"
+
+  cat >"$stubs/claude-prompt-snapshot" <<'EOF'
+#!/bin/sh
+[ "$1" = changed ] || exec "$REAL_SNAPSHOT" "$@"
+exit "$STUB_CHANGED"
+EOF
+  cat >"$stubs/git-land" <<'EOF'
+#!/bin/sh
+[ -n "$STUB_LAND_STATE" ] || exit 1
+printf '%s\n' "$STUB_LAND_STATE"
+EOF
+  chmod +x "$stubs"/*
+
+  NEVER_LANDED=$'path=/x/pr.md\ndraft=no\nlanded=no\nstale=no\ndraft_changed=no\nunlanded=2'
+  LANDED=$'path=/x/pr.md\ndraft=yes\nlanded=yes\nstale=no\ndraft_changed=no\nunlanded=0'
+
+  call() {
+    local prompt="$1" changed="$2" land_state="${3:-}"
+    OUT=$(cd "$repo" && jq -cn --arg p "$prompt" '{prompt_id: $p}' |
+      env "${unset_git[@]}" STUB_CHANGED="$changed" STUB_LAND_STATE="$land_state" PATH="$stubs:$PATH" \
+      CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1) ||
+    { printf 'FAIL exited non-zero :: %s\n' "$OUT"; fails=1; }
+  }
+  asks() {
+    local desc="$1" want="$2" got=no
+    [[ "$OUT" == *"write the turn's report"* ]] && got=yes
+    [[ "$got" == "$want" ]] || { printf 'FAIL %s: want_ask=%s got=%s :: %s\n' "$desc" "$want" "$got" "$OUT"; fails=1; }
+  }
+
+  call p1 1
+  asks "a prompt that changed nothing is silent" no
+  call p2 0
+  asks "a prompt that changed the repo asks" yes
+  [[ "$(jq -r .hookSpecificOutput.hookEventName <<<"$OUT")" == Stop ]] ||
+  { printf 'FAIL the ask is Stop JSON :: %s\n' "$OUT"; fails=1; }
+  call p2 0
+  asks "the same prompt is asked once" no
+  call p3 0 "$NEVER_LANDED"
+  asks "a never-landed branch with commits still asks" yes
+  [[ "$OUT" == *"has not been landed"* ]] || { printf 'FAIL never-landed reminder missing :: %s\n' "$OUT"; fails=1; }
+  call p4 0 "$LANDED"
+  [[ "$OUT" != *"has not been landed"* ]] || { printf 'FAIL a landed branch gets no reminder :: %s\n' "$OUT"; fails=1; }
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+INPUT=$(cat)
+PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")
+
+git rev-parse --git-dir >/dev/null 2>&1 || exit 0
+claude-prompt-snapshot changed "$PROMPT_ID" >/dev/null || exit 0
+
+claude-prompt-snapshot ask "$PROMPT_ID" summary || exit 0
+
+REMINDER=""
+LAND_STATE=$(git-land --state 2>/dev/null || true)
+if grep -qx 'landed=no' <<<"$LAND_STATE" && ! grep -qx 'unlanded=0' <<<"$LAND_STATE"; then
+  REMINDER=$'\n\n'"This branch has not been landed yet. If the change is now worth showing (a coherent first version whose checks pass locally), write the PR draft to the path \`git land --path\` prints and run \`git land\` before the report, and say in the report that you did. Otherwise do not mention landing."
+fi
+
+CONTEXT="The checks have settled. Now write the turn's report: what changed, why, and how you checked it, as the reply Josh reads last. Don't restate replies you gave to the checks, and don't end on a question you didn't need to ask.${REMINDER}"
+
+jq -n --arg ctx "$CONTEXT" \
+  '{systemMessage: "[claude-stop-summary] report", hookSpecificOutput: {hookEventName: "Stop", additionalContext: $ctx}}'

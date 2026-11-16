@@ -42,6 +42,7 @@ STUB
 
   REPO_JSON='{"url":"https://github.com/example/repo","defaultBranchRef":{"name":"main"}}'
   PR_JSON_OPEN='{"number":7,"title":"Add widget","state":"OPEN","isDraft":false}'
+  PR_JSON_LANDED='{"number":7,"title":"Add widget","state":"OPEN","isDraft":true,"body":"Mine.\\n<!-- land:start -->\\nDraft.\\n<!-- land:end -->"}'
   PR_JSON_MERGED='{"number":7,"title":"Add widget","state":"MERGED","isDraft":false}'
   RUN_JSON_FAILED='[{"databaseId":123,"status":"completed","conclusion":"failure","workflowName":"CI","displayTitle":"Add widget"}]'
   RUN_JSON_SUCCESS='[{"databaseId":123,"status":"completed","conclusion":"success","workflowName":"CI","displayTitle":"Add widget"}]'
@@ -87,6 +88,11 @@ STUB
 
   call "$repo" GH_REPO_JSON="$REPO_JSON" GH_PR_JSON="$PR_JSON_OPEN"
   check_contains "open PR" "This branch has an open PR #7: Add widget"
+
+  check_not_contains "a PR land didn't open" "opened this PR"
+
+  call "$repo" GH_REPO_JSON="$REPO_JSON" GH_PR_JSON="$PR_JSON_LANDED"
+  check_contains "a PR land opened" "\`git land\` opened this PR"
 
   call "$repo" GH_REPO_JSON="$REPO_JSON" GH_PR_JSON="$PR_JSON_MERGED"
   check_not_contains "merged PR" "open PR"
@@ -136,7 +142,7 @@ EOF
 fi
 
 # If the current branch has an open PR, surface it
-PR_JSON=$(gh pr view --json number,title,state,isDraft 2>/dev/null) || PR_JSON=""
+PR_JSON=$(gh pr view --json number,title,state,isDraft,body 2>/dev/null) || PR_JSON=""
 if [[ -n "$PR_JSON" && "$(echo "$PR_JSON" | jq -r '.state')" == "OPEN" ]]; then
   PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
   PR_TITLE=$(echo "$PR_JSON" | jq -r '.title')
@@ -147,6 +153,9 @@ This branch has an open PR #${PR_NUMBER}${PR_DRAFT}: ${PR_TITLE}
 You can inspect it with: gh pr view ${PR_NUMBER}, gh pr checks ${PR_NUMBER}, gh pr diff ${PR_NUMBER}
 The handle-pr-review skill can fetch and address its review comments.
 EOF
+  if [[ "$(echo "$PR_JSON" | jq -r '.body // ""')" == *"<!-- land:start -->"* ]]; then
+    echo "\`git land\` opened this PR. Your part of its description is the text between the <!-- land:start --> and <!-- land:end --> markers, carried from the draft at \`git land --path\` on the next land: edit the draft, never the PR, and leave the text outside the markers alone."
+  fi
 fi
 
 # Surface the latest CI run for the current branch, but only if it failed

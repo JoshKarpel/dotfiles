@@ -10,12 +10,65 @@
   summaries or replies; they go stale on the next change. Say "tests pass" or "mypy clean",
   not "238 tests across 68 files".
 
+## Committing and Landing
+
+This is a durable authorization: you don't need to ask before any of it, and approval
+doesn't need repeating per session.
+
+- Commit on any branch but the default without waiting to be asked, once pre-commit
+  passes. The `claude-git-commit-check` hook refuses a commit on the default branch or a
+  detached `HEAD`, and `--no-verify`.
+- Commit at the end of each turn that changed files, unless the turn ends on a question
+  or an offer to me. The `claude-stop-commit` check asks for it once pre-commit has
+  passed; write a message describing the step.
+- Bring a branch up to date by merging the base branch in, never by rebasing, and don't
+  amend a commit that has been pushed, unless I ask for it explicitly. `git land` never
+  force-pushes, so pushing a rewritten branch is mine.
+- Once the change is worth showing (a coherent first version whose checks pass locally),
+  write the PR draft to the path `git land --path` prints, and run `git land`. The draft
+  is shaped like a commit message: the title, a blank line, then the body. Put what you
+  wrote (the problem, the change, how it was checked) inside a `<details>` fold whose
+  `<summary>` names your model and effort level, such as
+  `<summary>Claude Opus 5.5, high effort</summary>`. After that, land again at the end of
+  each turn that committed, so the PR and its CI stay current.
+- Rewrite the draft whenever what the PR is has changed. It is the only way to change your
+  part of the PR description; the next land carries it.
+- After landing, wait for the PR's checks without polling: run
+  `gh pr checks --watch --fail-fast` in the background, which re-invokes you when it
+  exits. If it exits at once with "no checks reported", GitHub hasn't registered the
+  runs for the new commit yet; start it again. Then read what failed
+  (`gh run view --log-failed`) and fix it.
+- Push only through `git land`, and never pass it `--workflows` without my approving that
+  run. Never open or edit a pull request directly, merge, approve, enable auto-merge, or
+  publish a release, even when I ask in the moment: say that I have to, and stop.
+- When a guard or a land refusal blocks something, say so and stop. Don't look for another
+  route to the same effect.
+- Committing and landing are what put text in the record: a land publishes the commits
+  and the PR description at once. So when unsure whether something belongs there, ask
+  before committing (the public-record rule).
+
+## The Stop Sequence
+
+- After a turn that changed files in the session's repo (the scratchpad and other clones
+  don't count), `claude-stop` runs checks (pre-commit, the finishing pass, the plan page,
+  the commit, the land), and the last of them asks for the turn's report. End the work
+  with one line and hold the report; keep replies to checks short; write the report
+  when asked.
+- When a reply ends on a question or an offer to me, put the report in that same reply,
+  with the question last. A small model reads each reply as the turn tries to stop, and
+  one that ends by asking me something ends the turn on the spot: no later check runs,
+  so nothing will ask for the report, and the commit and the land wait for the next
+  turn. A reply to a check counts too: if pre-commit flags something you'd rather ask
+  me about than fix (whether to suppress a lint, say), that reply is the report followed
+  by the question.
+- Make that question unmistakable: one direct question or offer, at the end. Don't close
+  with one out of habit: a turn that ends on an offer leaves its work uncommitted and
+  unlanded until I reply.
+- In a turn that changed nothing in the session's repo, such as a discussion, answer
+  normally: no check fires, so a held report would never arrive.
+
 ## How to Work
 
-- Don't create git commits or push changes on my behalf. The one exception is completing
-  a merge that needs no judgment: a fast-forward, or a merge commit for a merge git applied
-  without conflicts, is fine. A merge whose conflicts you resolved stays uncommitted for
-  me to review, and pushing is never yours to do.
 - Auto-memory is off, so nothing persists automatically between sessions. When something
   is worth keeping past this one, put it in a committed artifact (the harness-context
   rule says which mechanism), and ask where it belongs when that isn't obvious, rather

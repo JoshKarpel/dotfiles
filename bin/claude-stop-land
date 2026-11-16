@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Stop check: once a branch has been landed, ask Claude to land its new commits, once per prompt.
+#
+# After the first land, the PR and its CI should track the branch, so a turn that committed lands
+# again. It runs after `claude-stop-commit`, so the turn's own commit is among the unlanded ones.
+# The state comes from `git-land --state` (local, no network), which owns what "landed" and
+# "unlanded" mean, so this check, `claude-git-status`, and land itself count the same commits.
+#
+# A branch that has never been landed only earns a reminder, and that rides on
+# `claude-stop-summary`'s request for the report rather than costing a model turn here.
+
+set -euo pipefail
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker line is how
+# `claude-hook-selftests` discovers participating hooks. The land state is stubbed on PATH; run
+# these with `CLAUDE_HOOK_SELFTEST=1 claude-stop-land`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  stubs=$(realpath "$(mktemp -d)")
+  repo=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$stubs" "$repo"' EXIT
+  # shellcheck disable=SC2207
+  unset_git=($(git rev-parse --local-env-vars | sed 's/^/-u /'))
+  env "${unset_git[@]}" git init -q "$repo"
+
+  cat >"$stubs/git-land" <<'EOF'
+#!/bin/sh
+[ "$1" = --state ] || exit 2
+[ -n "$STUB_LAND_STATE" ] || exit 1
+printf '%s\n' "$STUB_LAND_STATE"
+EOF
+  chmod +x "$stubs/git-land"
+
+  state() {
+    printf 'path=/x/pr.md\ndraft=yes\nlanded=%s\nstale=no\ndraft_changed=%s\nunlanded=%s' "$1" "$2" "$3"
+  }
+  asks() {
+    local desc="$1" prompt="$2" land_state="$3" want="$4" got=no
+    OUT=$(cd "$repo" && jq -cn --arg p "$prompt" '{prompt_id: $p}' |
+    env "${unset_git[@]}" STUB_LAND_STATE="$land_state" PATH="$stubs:$(dirname "$SELF"):$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1) ||
+    { printf 'FAIL %s: exited non-zero :: %s\n' "$desc" "$OUT"; fails=1; }
+    [[ "$OUT" == *"run \`git land\`"* ]] && got=yes
+    [[ "$got" == "$want" ]] || { printf 'FAIL %s: want_ask=%s got=%s :: %s\n' "$desc" "$want" "$got" "$OUT"; fails=1; }
+  }
+
+  asks "no land state (no origin, detached) is silent" p1 "" no
+  asks "a never-landed branch is silent" p2 "$(state no no 3)" no
+  asks "a landed branch with nothing new is silent" p3 "$(state yes no 0)" no
+  asks "a landed branch with new commits asks" p4 "$(state yes no 2)" yes
+  [[ "$OUT" == *"2 commits"* ]] || { printf 'FAIL the count is named :: %s\n' "$OUT"; fails=1; }
+  asks "the same prompt is asked once" p4 "$(state yes no 2)" no
+  asks "a changed draft is mentioned" p5 "$(state yes yes 1)" yes
+  [[ "$OUT" == *"draft has changed"* ]] || { printf 'FAIL changed draft not mentioned :: %s\n' "$OUT"; fails=1; }
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+INPUT=$(cat)
+PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")
+
+GIT_DIR=$(git rev-parse --absolute-git-dir 2>/dev/null) || exit 0
+STATE=$(git-land --state 2>/dev/null) || exit 0
+grep -qx 'landed=yes' <<<"$STATE" || exit 0
+UNLANDED=$(sed -n 's/^unlanded=//p' <<<"$STATE")
+[[ "$UNLANDED" =~ ^[0-9]+$ && "$UNLANDED" -gt 0 ]] || exit 0
+
+claude-prompt-snapshot ask "$PROMPT_ID" land || exit 0
+
+DRAFT_PATH=$(sed -n 's/^path=//p' <<<"$STATE")
+DRAFT_NOTE="If these commits change what the PR is, rewrite the draft at $DRAFT_PATH first, since it is the only way to change your part of the PR description."
+grep -qx 'draft_changed=yes' <<<"$STATE" &&
+DRAFT_NOTE="The draft has changed since the last land, so this land carries it to the PR. $DRAFT_NOTE"
+
+COMMITS="$UNLANDED commits"
+[[ "$UNLANDED" == 1 ]] && COMMITS="1 commit"
+
+CONTEXT="This branch has been landed, and $COMMITS on it $([[ "$UNLANDED" == 1 ]] && echo "isn't" || echo "aren't") on origin yet. ${DRAFT_NOTE} Then run \`git land\` so the PR and its CI stay current, or say in one line why not. If land refuses, say so and stop: don't look for another route. Hold the turn's report: the last check asks for it."
+
+jq -n --arg ctx "$CONTEXT" \
+  '{systemMessage: "[claude-stop-land] land the new commits", hookSpecificOutput: {hookEventName: "Stop", additionalContext: $ctx}}'

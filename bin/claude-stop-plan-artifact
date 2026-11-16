@@ -36,9 +36,11 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   git -C "$repo" commit -q -m init
 
   SESSION=session-a1
+  PROMPT=""
+  BIN_DIR=$(dirname "$SELF")
   call() {
-    OUT=$(cd "$repo" && printf '{"session_id":"%s"}' "$SESSION" |
-    env "${unset_git[@]}" CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1) ||
+    OUT=$(cd "$repo" && jq -cn --arg s "$SESSION" --arg p "$PROMPT" '{session_id: $s, prompt_id: $p}' |
+    env "${unset_git[@]}" PATH="$BIN_DIR:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1) ||
     { printf 'FAIL exited non-zero :: %s\n' "$OUT"; fails=1; }
   }
   silent() {
@@ -77,6 +79,18 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   printf '# Notes\n\nArtifact: https://claude.ai/code/artifact/ghi\n' >"$repo/docs/notes.md"
   names "any file with an Artifact line is a plan" "docs/notes.md (published at"
 
+  # --- a plan committed during the turn changed all the same ---
+  printf '# Later\n\nStep one.\n' >"$repo/plans/later.md"
+  git -C "$repo" add plans/later.md
+  env "${unset_git[@]}" git -C "$repo" commit -q -m "add later"
+  SESSION=session-d4
+  PROMPT=prompt-d4
+  (cd "$repo" && jq -cn '{prompt_id: "prompt-d4", session_id: "session-d4"}' |
+  env "${unset_git[@]}" CLAUDE_HOOK_SELFTEST= "$BIN_DIR/claude-prompt-snapshot")
+  printf 'Step two.\n' >>"$repo/plans/later.md"
+  env "${unset_git[@]}" git -C "$repo" commit -q -am "edit later"
+  names "a plan committed since the prompt started is named" "plans/later.md"
+
   rm "$repo/plans/ship.md"
   silent "a deleted plan has no page to rebuild"
 
@@ -86,7 +100,9 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   exit "$fails"
 fi
 
-SESSION_ID=$(jq -r '.session_id // ""')
+INPUT=$(cat)
+SESSION_ID=$(jq -r '.session_id // ""' <<<"$INPUT")
+PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")
 
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$ROOT"
@@ -94,11 +110,14 @@ NUDGED="$(git rev-parse --git-dir)/claude-plan-artifact-nudged"
 
 ARTIFACT_LINE='^Artifact:[[:space:]]*[^[:space:]]+[[:space:]]*$'
 
-# Markdown changed against HEAD or new and untracked; a repository with no commits yet has no HEAD to
-# diff against, so only the untracked files count there.
+# Markdown changed since the prompt started, or new and untracked. The base is the prompt's starting
+# HEAD rather than HEAD, since Claude commits during a turn and a plan committed before the stop
+# changed all the same; a prompt with no snapshot falls back to HEAD. A repository with no commits
+# yet has nothing to diff against, so only the untracked files count there.
+BASE=$(claude-prompt-snapshot start "$PROMPT_ID" 2>/dev/null || true)
 CHANGED=$(
   {
-    git diff --name-only HEAD -- '*.md' 2>/dev/null || true
+    git diff --name-only "${BASE:-HEAD}" -- '*.md' 2>/dev/null || true
     git ls-files --others --exclude-standard -- '*.md'
   } | sort -u
 )

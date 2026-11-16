@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# git yeet: Josh's quick change on a repo whose default branch takes PRs only. Push the branch, open
+# a PR from its commits, and squash-merge it once the required checks pass. Auto-merge has to be
+# allowed in the repo's settings. Claude's settings deny it, since merging is never Claude's.
+#
+# It refuses on any uncommitted or untracked change, since `gh pr create` only warns about those and
+# the PR would ship without them. It pushes before `gh pr create` because gh has no flag to push
+# unprompted: with the remote branch already at HEAD, gh skips its "where should we push" prompt.
+
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+usage: git yeet   push this branch, open a PR from its commits, and auto-merge it
+
+Refuses when the working tree has any uncommitted or untracked change.
+EOF
+}
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
+# line is how `claude-hook-selftests` discovers participating scripts. Every case is a
+# working-tree state against a throwaway bare `origin`, with `gh` stubbed on PATH.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+  # shellcheck disable=SC2046
+  unset $(git rev-parse --local-env-vars)
+  export GIT_CONFIG_GLOBAL=/dev/null HOME="$workdir" XDG_CONFIG_HOME="$workdir"
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+  mkdir -p "$workdir/stubs"
+  export STUB_DIR="$workdir/stubs"
+  cat >"$STUB_DIR/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$STUB_DIR/calls"
+[[ "$1 $2" == "pr create" ]] && exit "${GH_CREATE_EXIT:-0}"
+exit 0
+EOF
+  chmod +x "$STUB_DIR/gh"
+  export PATH="$STUB_DIR:$PATH"
+
+  git init -q --bare -b main "$workdir/origin.git"
+  git clone -q "$workdir/origin.git" "$workdir/repo" 2>/dev/null
+  cd "$workdir/repo"
+  echo base >file && git add file && git commit -q -m init && git push -q origin HEAD:main
+  git switch -q -c quick
+  echo change >>file && git commit -q -am change
+
+  # check <name> <want-exit> <want-gh-calls> <want-pushed: yes|no>
+  check() {
+    local name="$1" want_exit="$2" want_calls="$3" want_pushed="$4" got_exit=0 calls pushed=no
+    : >"$STUB_DIR/calls"
+    git push -q origin --delete quick 2>/dev/null || true
+    CLAUDE_HOOK_SELFTEST= "$SELF" >/dev/null 2>&1 || got_exit=$?
+    calls=$(paste -sd ';' "$STUB_DIR/calls")
+    git ls-remote --exit-code origin refs/heads/quick >/dev/null 2>&1 && pushed=yes
+    if [[ "$got_exit" == "$want_exit" && "$calls" == "$want_calls" && "$pushed" == "$want_pushed" ]]; then
+      echo "ok   $name"
+    else
+      echo "FAIL $name: exit $got_exit (want $want_exit), gh '$calls' (want '$want_calls'), pushed $pushed (want $want_pushed)"
+      fails=$((fails + 1))
+    fi
+  }
+
+  echo untracked >new
+  check "an untracked file refuses before pushing" 1 "" no
+  rm new
+  echo dirty >>file
+  check "a modified tracked file refuses before pushing" 1 "" no
+  git checkout -q -- file
+  check "a clean tree pushes, opens the PR, and arms auto-merge" 0 "pr create --fill;pr merge --squash --auto" yes
+  GH_CREATE_EXIT=1 check "a failed PR create skips the merge" 1 "pr create --fill" yes
+
+  [[ "$fails" -eq 0 ]] && echo "all passed" && exit 0
+  exit 1
+fi
+
+case "${1:-}" in
+  "") ;;
+  -h | --help) usage; exit 0 ;;
+  *) usage >&2; exit 2 ;;
+esac
+
+changes=$(git status --porcelain)
+if [[ -n "$changes" ]]; then
+  echo "git yeet: these changes aren't committed, so the PR would leave them out:" >&2
+  git status --short >&2
+  exit 1
+fi
+
+git push -u origin HEAD
+gh pr create --fill
+gh pr merge --squash --auto

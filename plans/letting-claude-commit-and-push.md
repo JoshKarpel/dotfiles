@@ -135,6 +135,9 @@ probes in phase 0.
   `git -c k=v commit`, `git -C . push`, and `bash -c 'git push …'` all get
   past them, while `env git push`, `VAR=x git push`, and `cd . && git push`
   are caught. That's a level-2 gap, which no deny rule closes.
+  `claude-git-dash-c-check` happens to refuse `git -C` aimed at the current
+  repo, so in the real config only `-C` with a path to another clone gets
+  through; `git -c` and `bash -c` are unaffected.
 - `defaultMode` is `auto`. The auto-mode classifier's defaults (from
   `claude auto-mode defaults`) treat a push to _any_
   branch of the session's repo as ordinary, the default branch included. It
@@ -311,8 +314,7 @@ Two details shape what the closed guards can do here:
   than an action.
 
 The harness tools are the only ones available on every machine, which is what
-pushed the first version of this plan toward a parser
-(alternative A below).
+makes a parser tempting (alternative A below).
 They are the right tools for level 1 and the wrong ones for level 2.
 
 ## Requirements this plan doesn't have
@@ -377,11 +379,19 @@ The hook, `claude-git-commit-check`, is a level-1 guard:
   run `git remote set-head origin --auto`.
 - Deny a commit on a detached `HEAD`, which has no branch to land.
 - Deny `--no-verify` and `-n`, so pre-commit runs.
-- Treat the other commands that create commits (`git merge`, `git pull`,
-  `git cherry-pick`, `git revert`, `git am`) the same way for the branch check.
-  `git merge --ff-only`, `git pull --ff-only`, and a bare `git pull` while
-  `pull.ff` resolves to `only` (Josh's gitconfig sets it) can't create a
-  commit, so they're allowed anywhere.
+- Treat the other commands that create or rewrite commits (`git merge`,
+  `git pull`, `git cherry-pick`, `git revert`, `git am`, `git rebase`) the same
+  way for the branch check.
+  What the check asks about a pull or a merge is where the branch ends up, not
+  which command moved it.
+  One that only fast-forwards the branch to its own upstream is allowed
+  anywhere: `git pull` and `git pull --ff-only` naming no ref (with `pull.ff`
+  at `only`, as Josh's gitconfig sets it), and `git merge --ff-only` naming
+  `@{u}` or `origin/<this branch>`, which is how a branch syncs after a fetch.
+  A pull or merge naming any other ref gets the branch check, `--ff-only` or
+  not: `git pull --ff-only origin feature` on the default branch fast-forwards
+  it to `feature`, and `git land` would then push that without a PR wherever
+  there's no PR rule.
 - Allow `--amend` and a commit that concludes a merge, conflicts resolved by
   Claude included. A messy merge on a branch is reviewed with the rest of the
   PR and squashed away on merge. Not amending a pushed commit is guidance:
@@ -392,7 +402,8 @@ It deliberately doesn't parse `git -c`, `GIT_CONFIG*`, `SKIP`, `bash -c`, or
 step that matters.
 
 **When Claude commits: at the end of each turn that changed files**, unless the
-turn ends on a question whose answer could change those files.
+turn ends on a question or an offer to Josh, where decision 7's question gate runs no
+checks at all and the next turn's commit picks the changes up.
 The alternative, committing when Josh says so, puts a step on Josh that he'd
 take after nearly every turn anyway, typed on a phone, and lets uncommitted
 work pile up across turns where a later turn can't tell what's settled.
@@ -405,41 +416,53 @@ pre-commit and after the finishing pass and the plan page have settled, so the
 commit holds the turn's final state, and before `claude-stop-land` and the
 report (decision 7):
 
-- When tracked changes are staged on a branch decision 1 allows, it blocks once
-  per prompt (keyed on `prompt_id`, as `claude-stop-finish` is) and asks Claude
-  to commit them with a message describing the step. If Claude's last message
-  is waiting on Josh's answer about those changes, it replies with exactly
-  "Not committing: waiting on your answer above." instead.
-- It fires after a question like after any other stop, as every check in
-  `claude-stop` does. The cost is one line under the question.
+- `claude-stop-precommit` records a **pass fingerprint** under the git
+  directory whenever it passes: no untracked files, tracked changes staged,
+  and pre-commit green (or no pre-commit config). It's the change-set
+  fingerprint the prompt snapshot uses (decision 7), taken after the autofix
+  pass.
+- When tracked changes are staged on a branch decision 1 allows, and the
+  current fingerprint matches the recorded pass, `claude-stop-commit` blocks
+  once per prompt (keyed on `prompt_id`, as `claude-stop-finish` is) and asks
+  Claude to commit them with a message describing the step.
+- The pass condition matters because `claude-stop-precommit` reports each state
+  once per prompt and is silent after that, whether the state is a pre-commit
+  failure or an untracked file, and on an untracked file it neither stages nor
+  runs pre-commit. Without it the sequence would reach this check over a state
+  pre-commit never passed, and ask for a commit the git hook refuses or one
+  that leaves the stray out unsettled. Reading the record, rather than running
+  pre-commit again, keeps a stop to one pre-commit run. A state with no pass
+  carries its changes to the next turn, as a question turn does.
 - After a commit the working tree is clean, so the stop that follows finds
-  nothing for any check and ends.
-
-Who judges "is Claude waiting on Josh" is the part with a history.
-`claude-stop` skipped its checks when the last message contained `?` from
-`2fe1dc0` until `4cbc74c` removed it, because a text heuristic misfired too
-often in both directions; a question now runs the checks like any stop.
-A [prompt-based Stop hook](https://code.claude.com/docs/en/hooks.md#prompt-based-hooks)
-(`type: "prompt"`, a small model returning `ok`/`reason`) is a better reader
-of the last message, and still the wrong place for this:
-
-- It's a handler of its own, so it runs in parallel with `claude-stop` and loses
-  the ordering `claude-stop` exists to enforce (commit after the finishing pass
-  and the pre-commit run).
-- It can't see git state, so it costs a model call on every stop, including
-  the many with nothing to commit.
-- It sees only the hook input, chiefly the last message, while the main model
-  knows what it asked and whether the answer bears on the uncommitted files.
-
-So the main model judges, inside the nudge, at the price of that one line.
-If the small model's judgment turns out to be wanted, `claude-stop-commit` can
-call one itself, only when there are staged changes, keeping the order.
+  nothing for the checks before this one or for this one;
+  `claude-stop-land` and `claude-stop-summary` decide whether it ends.
 
 The cost lands on review. The diff review tool Josh uses reads uncommitted
 changes, and turn-end commits leave nothing uncommitted between turns, so the
 commit-range view ("Reviewing pushed commits" below) is needed from phase 2,
 not later. Until it exists, `git diff <default>...HEAD` in a terminal, or the
 PR's diff on GitHub once landed, is the review surface.
+
+Turn-end commits also change what `sync-branches` does. It leaves a worktree
+alone only while a tracked file has changes, so a worktree Claude committed in
+is clean between turns, and once the branch has an upstream (after the first
+land) the hourly run fast-forwards it to whatever pre-commit.ci or Josh pushed,
+moving files under an idle session. That's what Claude would have done with
+`git pull --ff` anyway, so neither `sync-branches` nor the stop checks change
+for it.
+Commits that arrive from `origin` between prompts are never a turn's work: a
+fresh snapshot (decision 7) starts after them, and a carried-forward one
+advances its starting `HEAD` past them whenever every commit between the two is
+one `origin` has.
+Nothing already tells Claude they arrived, since `claude-git-status` runs only
+at session start, so `claude-prompt-snapshot` does: it compares `HEAD` with the
+one the previous prompt's last stop recorded, and when they differ it adds the
+new commits' subjects to the prompt's context, with a line saying the files
+they touch have changed since Claude last read them.
+A session that's idle for good never looks again, and loses nothing.
+A run that lands mid-turn, while the tree is clean and the branch isn't ahead
+of its upstream, counts as the turn changing `HEAD`, which costs at most one
+extra report.
 
 Cost: spikes that took direct pushes to their default branch now get Claude's
 work as a PR from a branch. Josh can still commit on a default branch himself,
@@ -461,9 +484,24 @@ which flag.
 
 **Where the title and body come from.** Claude writes a draft in the shape of a
 commit message: the title on the first line, a blank line, then the body.
-It lives at `git rev-parse --git-path land/pr.md`, which resolves per worktree
-inside the git directory, so it's never committed, needs no ignore entry, and
-goes away with the worktree.
+It lives at `git rev-parse --git-path land/<branch>/pr.md`, which resolves per
+worktree inside the git directory, so it's never committed, needs no ignore
+entry, and goes away with a linked worktree.
+The branch in the path, and in the path of the last-landed copy beside it,
+keeps a branch switch within one worktree (the main clone's especially) from
+opening the next branch's PR with the last one's draft.
+A branch name can outlive its branch, though: in the main clone, a branch
+deleted after its PR merged and later recreated finds the old directory still
+there.
+So land also records there the commit it last pushed, and a directory whose
+recorded commit isn't in `HEAD`'s history belongs to an earlier branch of that
+name.
+`claude-git-status` and `claude-stop-land` then treat the branch as never
+landed, and land, before using it, moves the directory aside to
+`land/<branch>.old` and refuses, saying the draft may be the earlier branch's
+and Claude should write one for this branch.
+When Claude had already written this branch's draft, that costs one rewrite,
+in a case that needs a reused name in the main clone.
 `git land --path` prints that path, so Claude never derives it.
 The body holds everything Claude wrote (the problem, the change, how it was
 checked) inside a `<details>` fold, with the model and effort level as the
@@ -478,10 +516,24 @@ it ran at.
    commits.
 2. `git fetch origin`, so the range below and the fast-forward check use fresh
    refs.
-3. Run [gitleaks](https://github.com/gitleaks/gitleaks) over the commits
-   `origin` doesn't have (`git rev-list HEAD --not --remotes=origin`) and stop
-   on a finding. That covers commits pre-commit never saw, such as a merge or a
-   cherry-pick. The exact flags get probed when the script is written.
+3. Run [gitleaks](https://github.com/gitleaks/gitleaks) over the
+   **unlanded commits**, the ones `origin` lacks
+   (`git rev-list HEAD --not --remotes=origin`), and stop on a finding.
+   That range is exactly what the push publishes, so it covers commits
+   pre-commit never saw, such as a merge or a cherry-pick, and commits that
+   exist on another remote but not on `origin`, such as a private one's.
+   It's also the range `claude-git-status`, `claude-stop-land`, and the
+   question gate (decision 7) count, so land and the hooks agree on what's
+   unlanded.
+   In a fork whose `origin` lags `upstream`, it includes upstream's commits,
+   which is right: the push publishes them to the fork, and a workflow file
+   among them runs there with the fork's token. The cost is a refusal Josh
+   clears with `--workflows` when upstream changed a workflow.
+   The scan is `gitleaks git --log-opts="HEAD --not --remotes=origin" --redact`.
+   It reads `git log -p -U0`, which shows no diff for a merge commit, so
+   content introduced only while resolving a merge's conflicts isn't scanned
+   (the merged branch's own unlanded commits still are), and the workflow-file
+   check below has the same blind spot.
 4. Refuse when that range touches `.github/workflows/` or an
    `action.yml`/`action.yaml`, unless run as `git land --workflows`, and list
    the files: a same-repo branch's `push` and `pull_request` runs get the repo's
@@ -489,7 +541,9 @@ it ran at.
    (decision 3).
 5. `git push -u origin HEAD`, never forced. A non-fast-forward rejection (a
    pre-commit.ci autofix, Josh pressing "Update branch", a push from another
-   machine) stops land with a message, and Claude runs `git pull`, which merges.
+   machine) stops land with a message, and Claude runs `git pull --ff`, which
+   merges. A bare `git pull` doesn't: with `pull.ff` at `only` it aborts on a
+   diverged branch.
 
 **When the branch has no pull request:**
 
@@ -510,7 +564,15 @@ it ran at.
 **When the branch already has a pull request** (from
 `gh pr view <branch> --repo … --json state,title,body,autoMergeRequest`):
 
-- Merged or closed: stop and say so, since commits pushed there land nowhere.
+- Merged or closed, and this branch's: stop and say so, since commits pushed
+  there land nowhere.
+  A PR is this branch's when its head, fetched from `refs/pull/<N>/head`
+  (which GitHub keeps after the branch is deleted), shares a commit with
+  `HEAD` that the default branch lacks.
+  Asking whether the head is in `HEAD`'s history would misread a PR whose last
+  commit came from pre-commit.ci or another machine and was never pulled.
+  A merged or closed PR that shares nothing with `HEAD` belongs to an earlier
+  branch of the same name, and counts as no PR.
 - Auto-merge armed: refuse before pushing, since the push would merge once CI
   is green. The way through is for Josh to turn auto-merge off on the PR, then
   land again.
@@ -531,8 +593,8 @@ touch, and Claude never needs `gh pr edit` to update its own.
 
 **Land's messages say who acts next.** Claude usually runs it and reads its
 output, and Josh reads the same output in the session, so each refusal names the
-next step and who takes it: "rejected as non-fast-forward: run `git pull`, then
-land again", or "auto-merge is armed on #12: Josh has to turn it off on the PR
+next step and who takes it: "rejected as non-fast-forward: run `git pull --ff`,
+then land again", or "auto-merge is armed on #12: Josh has to turn it off on the PR
 before this branch can land. Claude, stop here and say so."
 
 **When `gh` can't read the host** (a laptop pushing over SSH with no
@@ -552,25 +614,28 @@ worded as one so the harness's "unless durably authorized" clause applies:
 - Commit on a worktree branch without waiting to be asked, once pre-commit
   passes.
 - Bring a branch up to date by merging the base branch in, never by rebasing.
-- Don't amend a commit that has been pushed.
-- Commit at the end of each turn that changed files, unless the turn ends on a
-  question whose answer could change them.
+- Don't amend a commit that has been pushed, unless Josh asks for it
+  explicitly; land never force-pushes, so pushing the rewrite is his.
+- Commit at the end of each turn that changed files, unless the turn ends on
+  a question or an offer to Josh.
 - Once the change is worth showing (a coherent first version whose checks pass
   locally), write the PR draft to the path `git land --path` prints, and run
   `git land`. After that, land again at the end of each turn that committed, so
   the PR and its CI stay current.
 - Rewrite the draft whenever what the PR is has changed. It's the only way to
   change Claude's part of the PR description.
-- After landing, read the PR's checks (`gh pr checks`, `gh run view
-  --log-failed`) and fix what fails.
+- After landing, wait for the PR's checks without polling, with
+  `gh pr checks --watch --fail-fast` in the background (started again if
+  the runs haven't registered yet), then read what failed
+  (`gh run view --log-failed`) and fix it.
 - Push only through `git land`, and never pass it `--workflows` without Josh
   approving that run. Never open or edit a pull request directly, merge,
   approve, enable auto-merge, or publish a release, even when asked to in the
   moment. Say that Josh has to, and stop.
 - When a guard or a land refusal blocks something, say so and stop. Don't look
   for another route to the same effect.
-- When unsure whether something belongs in the public record, ask
-  (decision 4).
+- Committing and landing are what put text in the public record, so when
+  unsure whether something belongs there, ask before committing (decision 4).
 
 The settings back that with level-1 rules:
 
@@ -651,18 +716,19 @@ time, so hooks compute it rather than anyone writing it down:
 - **At session start**, `claude-git-status` adds the branch's land state, all
   local and with no network call: the draft path, whether a draft exists,
   whether it has been landed before (land's saved copy), whether it changed
-  since, and how many commits `origin` doesn't have yet.
+  since, and how many unlanded commits it has (decision 2).
 - **At session start**, `claude-gh-status` already reports an open PR. For a
   branch land opened, it adds that Claude's part of the body is the text between
   the land markers, carried from the draft on the next land.
 - **At stop**, a new check `claude-stop-land` runs after `claude-stop-commit`.
-  When the branch has been landed before and has commits `origin` doesn't have,
+  When the branch has been landed before and has unlanded commits,
   it blocks once per prompt and asks Claude to land them, rewriting the draft
-  first if they change what the PR is, or to say in one line why not. When the
-  branch has never been landed, it only reminds, through `additionalContext`,
-  that the change lands once it's worth showing. Like `claude-stop-commit`, it
-  fires after a question too, and Claude declines in one line when it's
-  waiting on Josh.
+  first if they change what the PR is, or to say in one line why not. A
+  branch that has never been landed earns only a reminder that the change
+  lands once it's worth showing. A Stop hook's `additionalContext` always
+  costs a model turn, so the reminder rides on `claude-stop-summary`'s request
+  for the report, the one turn spent anyway. Like every check, neither runs on
+  a turn that ends on a question or an offer to Josh (decision 7).
 
 ### 4. What stays out of the record
 
@@ -678,12 +744,16 @@ what Claude writes.
 It says, in short:
 
 - Anything that lands in a repo or on GitHub (commit messages, PR and issue
-  text, code comments, docs, plans) is public as far as Claude knows, even in a
-  private repo, since visibility can change.
-- What belongs there is what a stranger reading the repo needs: the change, the
-  reason, the evidence. Context from the conversation that isn't about the
-  change stays in the conversation.
-- Name another project only if it's public and the change depends on it.
+  text, code comments, docs, plans) is written for everyone who can read the
+  repo, and context goes in only if all of them could already see it. A public
+  repo's readers are everyone; a private work repo's are the organization, so
+  naming another of its repos passes there. Readers widen, so an uncertain
+  audience is treated as the wider one.
+- What belongs there is what those readers need: the change, the reason, the
+  evidence. Context from the conversation they couldn't already see stays in
+  the conversation.
+- In a public repo, name another project only if it's public and the change
+  depends on it.
 - When unsure, ask before committing, rather than writing it and hoping.
 
 Nobody rereads every commit message before it lands, so the rule carries the
@@ -698,11 +768,12 @@ increment:
   as a required status check, so a broken hook self-test blocks the merge.
   GitHub names a workflow's check after its job, so the required check is
   `pre-commit`, as the `pull_request` run reports it.
-  A one-command alias (`gh pr create --fill && gh pr merge --squash --auto`)
-  keeps Josh's own quick changes cheap, which needs auto-merge allowed in the
-  repo settings; squash merging already is. The alias lives in `sources/`, so
-  it reaches Claude's shell too; `deny` lists its name alongside
-  `gh pr merge`.
+  One command, `git yeet` (`bin/git-yeet`), keeps Josh's own quick changes
+  cheap: it refuses on any uncommitted or untracked change, pushes the branch,
+  then runs `gh pr create --fill && gh pr merge --squash --auto`. That needs
+  auto-merge allowed in the repo settings; squash merging already is. It is on
+  `PATH`, so it reaches Claude's shell too; `deny` lists both of its spellings
+  alongside `gh pr merge`.
 - Secret scanning and push protection on for every public repo. Push
   protection rejects a push containing a recognized secret before it lands.
 - Default workflow permissions read-only in every repo, and "Allow GitHub
@@ -725,7 +796,7 @@ still append a `Claude-Session:` trailer and a PR-body link. Setting
 `"attribution": false` turns all three off.
 The details-summary fold (decision 2) is where a PR says what Claude wrote.
 
-### 7. The stop sequence ends with the report
+### 7. The stop sequence ends with the report or the question
 
 Each stop check that blocks makes Claude reply, and that reply becomes the last
 thing Josh sees. Today a turn's report is often buried under
@@ -736,28 +807,106 @@ without a fix the report sinks further on exactly the turns that matter most.
 That makes this a prerequisite for the rest of phase 2, not a separate
 nicety: it's what makes adding stop checks practical.
 
-Two parts, both needed. Guidance alone would at best shorten the replies to
-checks, with the report still above them; a final check alone would get the
-report written twice.
+A question has the same problem from the other side. A turn that ends asking
+Josh something, whether a question it needs answered or an offer of more work
+("Want me to also…?"), wants that to be the last thing he reads, and every
+check that fires after it buries it, or makes Claude answer the check with a
+line declining it. Offers count: Josh often takes them up, and ending on one
+says Claude isn't done with the work yet.
 
-- **Guidance in the global `CLAUDE.md`**: stop checks run when a turn changes
-  the repo, and the last of them asks for the turn's report. In a turn that
-  changed tracked files, end the work with one line and hold the report; keep
-  replies to checks short; write the report when asked. In a turn that changed
-  nothing, such as a question or a discussion, answer normally, since no check
-  fires and a held report would never arrive. The guidance says only this
-  much; the summary check's own message carries the specifics, so the
-  convention isn't stated in full in two places.
+Three parts, all needed. Guidance alone would at best shorten the replies to
+checks, with the report still above them; a final check alone would get the
+report written twice; and without the gate, every check after a question needs
+a declining line under it.
+
+- **Guidance in the global `CLAUDE.md`**, so Claude knows the shape of what
+  follows its reply before any check fires:
+  - After a turn that changed tracked files, `claude-stop` runs checks, and the
+    last of them asks for the turn's report. End the work with one line and
+    hold the report; keep replies to checks short; write the report when asked.
+  - When a reply ends on a question or an offer to Josh, write the report and
+    the question together, now, with the question last. That holds for a
+    reply to a check too, such as asking whether to suppress what pre-commit
+    flags. A small model reads every reply, and when it ends asking Josh
+    something no further check runs, so this message is what Josh reads, and
+    whatever the checks hadn't reached yet (the commit, the land) waits for the
+    next turn.
+  - Make that question unmistakable: one direct question or offer to Josh, at
+    the end. Don't close with one out of habit: a turn that ends on an offer
+    leaves its work uncommitted and unlanded until Josh replies.
+  - In a turn that changed nothing, such as a discussion, answer normally,
+    since no check fires and a held report would never arrive.
+
+  The checks' own messages carry their specifics, so the guidance doesn't
+  repeat them. The gate is the exception: it acts by staying silent, so it has
+  no message, and its whole contract lives in the guidance.
+- **A question gate at the head of `claude-stop`**, before any check, with the
+  cheap read first:
+  1. Could any check block? The read is each check's own blocking condition,
+     not a broader one: this prompt changed the repo (below), which the
+     finishing pass and the report block on; tracked changes, which the
+     pre-commit and commit checks block on; or unlanded commits on a branch
+     that has been landed before, which `claude-stop-land` blocks on. A branch
+     that has never been landed only earns a reminder, which needs no gate.
+     If nothing could block, the sequence runs with no model call, which
+     covers most discussion turns.
+  2. Otherwise, hand `last_assistant_message` from the `Stop` payload to
+     Haiku, asking whether the reply ends by asking Josh something, a question
+     or an offer of more work. If it does, end without running any check.
+
+     ```bash
+     claude -p --model haiku --setting-sources "" --tools "" \
+       --strict-mcp-config --no-session-persistence
+     ```
+
+     `--strict-mcp-config` with no `--mcp-config` starts no MCP servers, and
+     `--no-session-persistence` keeps every gated stop from writing a
+     one-message transcript into the session archive.
+
+  It runs on every stop, including the ones after a check blocked, so a reply
+  to a check that turns into a question ends the sequence there; the guidance
+  above is what puts the report in that reply. A call that fails or exceeds its
+  timeout counts as not a question, so the checks run as they would without
+  the gate.
+- **Why a small model, and why inside `claude-stop`**: `claude-stop` skipped
+  its checks when the last message contained `?` from `2fe1dc0` until
+  `4cbc74c` removed it, because a text heuristic misfired too often in both
+  directions, and the main model has no structured way to say it's asking.
+  Reading the reply is a model's job. A
+  [prompt-based Stop hook](https://code.claude.com/docs/en/hooks.md#prompt-based-hooks)
+  would be the obvious place, but phase 0 found it runs in parallel with
+  command hooks in the same event, so it can't stop `claude-stop` from running;
+  calling the model from inside `claude-stop` keeps the gate ahead of the
+  checks, and lets the cheap read skip the call.
+- **A gated turn's changes carry forward.** When the gate ends a stop before
+  the finishing pass has asked this prompt (always so on the first stop, and
+  so when pre-commit blocked first), it records in the prompt's snapshot that
+  the prompt is gated.
+  `claude-prompt-snapshot`, finding the previous prompt so marked, keeps that
+  prompt's starting point instead of taking a fresh one, so the next turn's
+  finishing pass and report cover the question turn's edits too. When `HEAD`
+  moved after that prompt's last stop onto commits `origin` has (decision 1),
+  the kept starting point advances to the new `HEAD`, so upstream's commits
+  never read as the turn's own. `sync-branches` only fast-forwards a branch
+  with no unlanded commits, so nothing the session committed is skipped
+  except work already landed, whose report the question turn's reply carried.
+  A gate that ends a stop after the finishing pass asked records nothing:
+  the pass covered the turn's edits, and the reply it ended carries the report.
+  `claude-stop-commit` and `claude-stop-land` need nothing either way, since
+  they read state now.
+- **Every stop records `HEAD`** in the prompt's snapshot, whichever way it
+  ends, so the next prompt's snapshot can tell commits that arrived between
+  prompts from ones the session made (decision 1).
 - **A last stop check, `claude-stop-summary`**, at the end of `claude-stop`'s
   sequence. It blocks once per prompt when this prompt changed the repo, and
-  asks for the report, ending with any question Claude is waiting on, so a
-  question stays the last thing Josh reads.
+  asks for the report. A turn that ends asking Josh something never reaches
+  it, so the report it asks for ends without a question.
 - **What "this prompt changed the repo" means**, which the guidance and the
   check must agree on: `HEAD` or the change-set fingerprint differs from when
   the prompt arrived. A new `UserPromptSubmit` hook, `claude-prompt-snapshot`,
   records both under the git directory, keyed by `prompt_id`, with the
-  fingerprint `claude-changeset-guard` computes today (the tracked diff against
-  `HEAD` plus the untracked file list). Comparing `HEAD` as well matters
+  fingerprint the retired `claude-changeset-guard` computed (the tracked diff
+  against `HEAD` plus the untracked file list). Comparing `HEAD` as well matters
   because turn-end commits leave the tree clean.
 - It keys on the repo, not on whether another check fired: a check that fires
   once per prompt can skip, and the report would go missing on that turn.
@@ -769,17 +918,100 @@ report written twice.
   question rather than the one wanted: Josh's own edits between prompts
   trigger it, and a turn that ended in a commit leaves it nothing to see. "Did
   this prompt change the repo" is the question both checks ask, so it's
-  computed once. The guard's skip during a merge or rebase moves to the
-  snapshot's comparison.
+  computed once. The guard's skip during a merge or rebase moves into
+  `claude-stop-finish` alone, since the report must still be asked for on a
+  turn that resolved a merge.
+- **One once-per-prompt record.** Every check that asks once per prompt
+  (`claude-stop-finish`, `-commit`, `-land`, `-summary`) records its ask in the
+  prompt's snapshot through `claude-prompt-snapshot ask`, rather than in a
+  marker file of its own, so the question gate can tell which checks could
+  still ask.
 - A prompt with no snapshot (a session older than the hook, or a failed write)
   counts as changed, so the cost of a gap is an extra pass rather than a
   missing report.
 - `claude-stop-commit` and `claude-stop-land` don't use it: they ask about
-  state now (staged changes, commits `origin` lacks), whichever prompt left
+  state now (staged changes, unlanded commits), whichever prompt left
   them, once per prompt.
 
-Costs: one more model turn on every turn that changes the repo. An interrupt
-or a check that errors leaves no report, since Claude held it. Changes outside
+#### The stop sequence, end to end
+
+Every stop runs `claude-stop` from the top. A check that blocks makes Claude
+reply, and that reply is another stop, so the diagram is a loop that ends only
+at an announcement. Each check asks at most once per prompt (recorded through
+`claude-prompt-snapshot ask`), except pre-commit, which reports each failing
+state once per prompt, so the loop ends once the tree stops changing.
+
+<figure class="wide">
+
+```mermaid
+flowchart TD
+  UP([UserPromptSubmit]) --> SNAP["claude-prompt-snapshot<br/>start = HEAD + fingerprint"]
+  SNAP --> PREV{previous prompt<br/>gated?}
+  PREV -->|yes| CARRY["keep its start; advance start_head<br/>past commits origin has"]
+  PREV -->|no| FRESH[fresh start]
+  SNAP -.->|HEAD moved since last stop| ARR[/"context: arrived commits<br/>and the files they touch"/]
+  CARRY --> TURN
+  FRESH --> TURN
+  TURN[Claude works, replies] --> STOP([Stop])
+
+  STOP --> AG{background agent<br/>running?}
+  AG -->|yes| PAUSE["tab paused; no checks<br/>(Stop fires again on its report)"] --> REC
+  AG -->|no| CB{"could a check block?<br/>• changed and finish or summary not asked<br/>• tree dirty<br/>• landed, unlanded, land not asked"}
+  CB -->|no| PC
+  CB -->|yes| Q{"Haiku: does the reply end<br/>asking Josh something?"}
+  Q -->|"no, or the call failed"| PC
+  Q -->|yes| QG{finish asked<br/>this prompt?}
+  QG -->|no| MARK[mark prompt gated] --> ANN
+  QG -->|yes| ANN
+
+  PC{"precommit: untracked files,<br/>or pre-commit failing?"}
+  PC -->|"yes, new state this prompt"| BLOCK
+  PC -->|"yes, already reported"| FIN
+  PC -->|"no: stage, record pass fingerprint"| FIN
+  FIN{"finish: prompt changed,<br/>no merge, not asked?"} -->|yes| BLOCK
+  FIN -->|no| PLAN
+  PLAN{"plan-artifact: a plan changed since<br/>the prompt's start HEAD, new this session?"} -->|yes| BLOCK
+  PLAN -->|no| COM
+  COM{"commit: staged, allowed branch,<br/>fingerprint = pass, not asked?"} -->|yes| BLOCK
+  COM -->|no| LAND
+  LAND{"land: landed before,<br/>unlanded > 0, not asked?"} -->|yes| BLOCK
+  LAND -->|no| SUM
+  SUM{"summary: prompt changed,<br/>not asked?"} -->|"yes (plus never-landed reminder)"| BLOCK
+  SUM -->|no| ANN
+
+  BLOCK[/"print the check's JSON;<br/>Claude replies"/] --> REC
+  ANN["announce: sound, tab<br/>finished or paused"] --> REC
+  REC["record HEAD in the snapshot<br/>(every exit, via trap)"] --> END{blocked?}
+  END -->|yes| STOP
+  END -->|no| DONE([turn over])
+```
+
+</figure>
+
+Three details the loop depends on, each easy to get wrong:
+
+- "This prompt changed the repo" stays true for the whole prompt, so the cheap
+  read pairs it with whether the finishing pass or the report could still ask.
+  Without that, every reply to a check (the finishing pass, the commit, the
+  land, the report itself) would pay for a Haiku call after every check had
+  spent its one ask.
+- The gated mark goes on whenever the finishing pass hasn't asked yet this
+  prompt, not only on the first stop. A question in reply to a pre-commit
+  failure would otherwise leave that turn's edits with no finishing pass at
+  all.
+- `claude-stop-plan-artifact` diffs against the prompt's starting `HEAD`, not
+  `HEAD`, since a plan Claude committed mid-turn changed all the same.
+
+Costs: one more model turn on every turn that changes the repo, and a Haiku
+call of about 2s on every stop where a check could block. An
+interrupt or a check that errors leaves no report, since Claude held it.
+A question turn's edits wait a turn for their finishing pass, commit, and
+land, and edits Josh makes while answering count as the next turn's. Because
+offers count, that's a common case rather than a rare one, and work that ends
+on an offer Josh never answers stays uncommitted on the box.
+A misread either way stays recoverable: a question read as a plain report runs
+the checks, as `claude-stop` does today, and a plain report read as a question
+skips them, with the carry-forward bringing its edits into the next turn. Changes outside
 the session's repo (the scratchpad, another clone) don't count, so a turn that
 changed only those gets its report without the check asking, which the
 guidance's "tracked files" wording has to match.
@@ -803,10 +1035,10 @@ not CPU.
 
 **What the box can reach is the allow list.** Attach only the GitHub
 integration for the repo the task is in, act-as-user, and nothing else that
-holds a credential: no SimpleFIN, Cloudflare, or Fly. Decision 7 of the earlier
-design (a per-machine YAML allow list keyed by remote) reimplemented exactly
-this, as a fail-open file the harness consulted; exe.dev's attachment does it
-at the proxy. The box has no SSH key or `gh` token of Josh's to read, which is
+holds a credential: no SimpleFIN, Cloudflare, or Fly. Alternative A's
+per-machine YAML allow list of remotes would reimplement exactly this, as a
+fail-open file the harness consulted; exe.dev's attachment does it at the
+proxy. The box has no SSH key or `gh` token of Josh's to read, which is
 what makes the narrower credential a boundary rather than a default.
 
 **What Claude may do there.** The same workflow as the first increment, through
@@ -935,7 +1167,9 @@ apply or check:
   required reviewers.
 - [ ] No workflow triggered by `issue_comment` or `pull_request_review_comment`
   can write, and no installed app merges or pushes on a comment command.
-- [ ] pre-commit runs gitleaks and `detect-private-key`.
+- [ ] pre-commit runs gitleaks and `detect-private-key`. Dotfiles runs gitleaks
+  as a `language: system` hook from mise's install, skipped on pre-commit.ci
+  and in the workflow, which have no mise and run after the push anyway.
 - [ ] The local clone has `origin/HEAD` set.
 
 A `check-repo-setup` skill that reads these through `gh` belongs with agent
@@ -971,9 +1205,29 @@ calls.
   scope separates them.
 - [x] The exe.dev integration is a GitHub App user token without
   `Administration` or `Secrets` read, so it can't change rulesets.
-- [ ] `Bash(git land)` in `allow` matches only the bare command, not
-  `git land --workflows`, and `Bash(git land --workflows*)` in `ask` gives a
-  real prompt in auto mode that reaches a claude.ai client.
+- [x] `Bash(git land)` in `allow` matches only the bare command: in `manual`
+  mode with no other rule, `git land` ran and `git land --workflows` was
+  denied for want of a prompt.
+- [x] In auto mode the `ask` rule is load-bearing, not belt and braces: with
+  `Bash(git land --workflows*)` in `ask`, the flagged form was denied for want
+  of a prompt; without it, the classifier ran it.
+- [ ] Needs Josh: `Bash(git land --workflows*)` in `ask` gives a prompt that
+  reaches a claude.ai client in auto mode.
+- [x] `UserPromptSubmit` and `Stop` payloads carry the same `prompt_id` for a
+  turn, and `Stop`'s carries `last_assistant_message`, so stop checks can read
+  Claude's reply without parsing the transcript.
+- [x] A `type: "prompt"` Stop hook receives the same payload, can block once
+  and pass on `stop_hook_active`, and runs in parallel with a command hook in
+  the same event: it decided about 2s in, while an 8s command hook was still
+  sleeping. It can't gate `claude-stop`.
+- [x] A command hook can call a small model itself:
+  `claude -p --model haiku --setting-sources "" --tools ""` classified a reply
+  in about 2s, and loading no settings sources keeps the nested session from
+  running `claude-stop` recursively. That probe ran without
+  `--strict-mcp-config` and `--no-session-persistence`; phase 2 times the call
+  with both and confirms it leaves no transcript.
+- [x] `claude-git-dash-c-check` refuses `git -C . push` (exit 2), and is
+  registered in `claude/settings.json`.
 - [x] `!` doesn't run from claude.ai clients: the docs say so, and `! echo hi`
   sent from one arrived as a message.
 - [x] Skill shell injection from a claude.ai client, with user-only probe
@@ -985,7 +1239,10 @@ calls.
   `disable-model-invocation` skill was refused as "reserved for explicit user
   invocation".
 - [ ] Needs Josh: are secret scanning and push protection on for each public
-  repo, and what are each repo's default workflow permissions?
+  repo, and what are each repo's default workflow permissions? The exe.dev
+  integration can't say: `security_and_analysis` reads back `null` and the
+  workflow permissions endpoint returns 403, as "Repo setup checklist"
+  predicts.
 - [ ] Needs Josh: does the `CLAUDE.md` authorization to commit and land hold in
   a claude.ai or Remote Control session at the `default` proactivity level?
 
@@ -1000,32 +1257,48 @@ calls.
 
 ### Phase 2: the harness and `git land`, on this branch
 
-- [ ] First, the decision-7 report ordering: write
+- [x] First, the decision-7 report ordering: write
   `bin/claude-prompt-snapshot` (registered on `UserPromptSubmit`) and
   `bin/claude-stop-summary` (last in `claude-stop`), with self-tests covering a
-  prompt that changed nothing, one that left uncommitted changes, and one that
-  ended in a commit with a clean tree; add the stop-check guidance to
-  `claude/CLAUDE.md`. Move `claude-stop-finish` onto the snapshot, delete
-  `claude-changeset-guard`, and rewrite the repo `CLAUDE.md`'s paragraph about
-  it. Use it for a while with today's checks before adding more.
-- [ ] Add gitleaks to mise, and to dotfiles' pre-commit.
-- [ ] Write `bin/git-land`, with a self-test against sandbox repos: a fake
-  `origin`, a fork, an existing PR stubbed through a `gh` on PATH (open, closed,
-  and with auto-merge armed), a `gh` that can't read the host, and a range with
-  a secret and with a workflow file, with and without `--workflows`.
-- [ ] Write `bin/claude-git-commit-check` with its self-test, and register it.
-- [ ] Write `bin/claude-stop-commit` and `bin/claude-stop-land` with their
+  prompt that changed nothing, one that left uncommitted changes, one that
+  ended in a commit with a clean tree, and one that starts after `HEAD` moved
+  onto commits `origin` has (reported in context, not counted as the turn's).
+  Add the question gate at the head of `claude-stop`, extending its self-test
+  with a `claude` stub on PATH that answers each way, fails, and isn't called
+  when nothing could block (a never-landed branch with commits included); a
+  gated first stop whose edits carry into the next prompt; and a gate after a
+  blocked check, which carries nothing.
+  Add the stop-check guidance, the question convention included, to
+  `claude/CLAUDE.md`.
+  Move `claude-stop-finish` onto the snapshot, delete `claude-changeset-guard`,
+  and rewrite the repo `CLAUDE.md`'s paragraph about it.
+  Josh chose to build all of phase 2 at once rather than soak this first.
+- [x] Add gitleaks to mise, and to dotfiles' pre-commit.
+- [x] Write `bin/git-land`, with a self-test against sandbox repos: a fake
+  `origin`, a fork whose `origin` lags `upstream`, an existing PR stubbed
+  through a `gh` on PATH (open, closed, closed with a head the clone never
+  pulled, closed from an earlier branch of the same name, and with auto-merge
+  armed), a land directory left by an earlier branch of the same name, a `gh`
+  that can't read the host, and a range with a secret and with a workflow file,
+  with and without `--workflows`.
+- [x] Write `bin/claude-git-commit-check` with its self-test, and register it.
+  Cover the fast-forward cases both ways: a pull or merge to the branch's own
+  upstream allowed on the default branch, and one naming another ref refused.
+- [x] Record the pass fingerprint in `claude-stop-precommit`, with self-test
+  cases for a pass, a failure, and an untracked file.
+- [x] Write `bin/claude-stop-commit` and `bin/claude-stop-land` with their
   self-tests, add them to `claude-stop`'s sequence in that order, after
   `claude-stop-plan-artifact` and before `claude-stop-summary`, and extend
   `claude-stop`'s self-test to cover them.
-- [ ] Extend `claude-git-status` and `claude-gh-status` with the land state, and
+- [x] Extend `claude-git-status` and `claude-gh-status` with the land state, and
   their self-tests with a branch that has a draft, a landed draft, and unlanded
   commits.
-- [ ] Add the commit-range view to the diff review tool, tracked in its repo.
-- [ ] Move `Bash(git commit*)` out of `deny`, and add the decision-3 rules.
-- [ ] Set `"attribution": false` in `claude/settings.json`.
-- [ ] Add `claude/rules/public-record.md`.
-- [ ] Rewrite the commit bullet in `claude/CLAUDE.md` as the decision-3
+- [ ] Add the commit-range view to the diff review tool, tracked in its repo
+  (not done here: the tool's repo is private).
+- [x] Move `Bash(git commit*)` out of `deny`, and add the decision-3 rules.
+- [x] Set `"attribution": false` in `claude/settings.json`.
+- [x] Add `claude/rules/public-record.md`.
+- [x] Rewrite the commit bullet in `claude/CLAUDE.md` as the decision-3
   authorization.
 
 ### Phase 3: use it

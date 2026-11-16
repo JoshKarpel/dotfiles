@@ -38,6 +38,14 @@ repos:
 
   - repo: local
     hooks:
+      # The gitleaks binary comes from mise (config/mise/config.toml) rather than from
+      # pre-commit's own environment, so one version serves this hook and `git land`.
+      # It scans what is staged, which is everything by the time the stop hook runs it.
+      - id: gitleaks
+        name: gitleaks
+        entry: gitleaks git --pre-commit --staged --redact --no-banner --verbose
+        language: system
+        pass_filenames: false
       - id: claude-hook-selftests
         name: claude hook self-tests
         entry: bin/claude-hook-selftests
@@ -50,5 +58,7 @@ repos:
 ci:
   # The self-tests shell out to hooks that expect a real dev environment
   # (jq, python3, git state); skip them on pre-commit.ci and rely on the
-  # GitHub workflow, which has one.
-  skip: [claude-hook-selftests]
+  # GitHub workflow, which has one. gitleaks is installed by mise, which neither
+  # runner has; it guards the commit and `git land`, both before anything is
+  # published, so a scan after the push would catch nothing in time.
+  skip: [claude-hook-selftests, gitleaks]

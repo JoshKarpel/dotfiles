@@ -1,0 +1,728 @@
+#!/usr/bin/env bash
+# git land: push the current branch and open or update its draft pull request, and nothing else.
+#
+# The one route by which Claude publishes work. It takes no input once it starts: every check passes,
+# refuses with a message naming the next step and who takes it, or is overridden by a flag given up
+# front (`--workflows`, which is Josh's to approve). Every check is deterministic and runs the same
+# whoever invokes it; what it can't check is whether someone went around it.
+#
+# The PR description's title and body come from a draft Claude writes at `git land --path`, which
+# resolves per worktree and per branch inside the git directory, so it is never committed. Beside it
+# land keeps the copy it last landed (`landed.md`), which is how it knows whether the draft changed,
+# and the commit it last pushed (`pushed`), which is how it knows a directory belongs to an earlier
+# branch of the same name: one whose recorded commit isn't in `HEAD`'s history. Claude's part of the
+# live PR body sits between the land markers, so text Josh writes outside them is never touched.
+#
+# "Unlanded" means the commits `origin` lacks (`HEAD --not --remotes=origin`): exactly what a push
+# publishes, and the range the stop hooks and `claude-git-status` count through `--state`.
+
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+usage: git land [--workflows]   push this branch and open or update its draft PR
+       git land --path          print the path of this branch's PR draft
+       git land --state         print this branch's land state, local only (for hooks)
+
+The draft is a commit-message-shaped file: the PR title on the first line, a blank
+line, then the body. --workflows lets the push carry changes to .github/workflows/
+or an action.yml, which run with the repo's secrets and token once pushed.
+EOF
+}
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
+# line is how `claude-hook-selftests` discovers participating scripts. Every case is a
+# git state against a throwaway bare `origin`, with `gh` and `gitleaks` stubbed on PATH;
+# run these with `CLAUDE_HOOK_SELFTEST=1 git-land`.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+  # shellcheck disable=SC2046
+  unset $(git rev-parse --local-env-vars)
+  export GIT_CONFIG_GLOBAL=/dev/null HOME="$workdir" XDG_CONFIG_HOME="$workdir"
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+  stubs="$workdir/stubs"
+  mkdir -p "$stubs"
+  export STUB_DIR="$stubs"
+
+  # A `gh` that records every call, answers `pr list` from prs.json, and keeps the title and
+  # body of the last create or edit so cases can read what land sent.
+  cat >"$stubs/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$STUB_DIR/calls"
+case "$1 $2" in
+  "auth status") exit "${GH_AUTH_EXIT:-0}" ;;
+  "repo view") printf '{"isFork":%s,"defaultBranchRef":{"name":"main"}}' "${GH_FORK:-false}" ;;
+  "pr list") if [[ -f "$STUB_DIR/prs.json" ]]; then cat "$STUB_DIR/prs.json"; else echo '[]'; fi ;;
+  "pr create" | "pr edit")
+    rm -f "$STUB_DIR/title" "$STUB_DIR/body"
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --title) printf '%s' "$2" >"$STUB_DIR/title"; shift ;;
+        --body-file) cp "$2" "$STUB_DIR/body"; shift ;;
+      esac
+      shift
+    done
+    echo "https://example.com/pull/1"
+    ;;
+  *) exit 1 ;;
+esac
+EOF
+  # A `gitleaks` that scans the range it is handed through --log-opts for a marker, so a case
+  # proves land passes the unlanded range rather than whatever the stub would pick.
+  cat >"$stubs/gitleaks" <<'EOF'
+#!/usr/bin/env bash
+opts=""
+for arg in "$@"; do
+  case "$arg" in --log-opts=*) opts="${arg#--log-opts=}" ;; esac
+done
+# shellcheck disable=SC2086
+if git log -p -U0 $opts | grep -q LEAKME; then
+  echo "Finding: LEAKME"
+  exit 1
+fi
+EOF
+  chmod +x "$stubs/gh" "$stubs/gitleaks"
+  export PATH="$stubs:$PATH"
+
+  # A fresh origin and clone per case, on a feature branch one commit ahead, as $clone and $origin.
+  case_number=0
+  fresh() {
+    case_number=$((case_number + 1))
+    local base="$workdir/case$case_number"
+    origin="$base/owner/repo.git"
+    clone="$base/clone"
+    git init -q --bare -b main "$origin"
+    git init -q -b main "$base/seed"
+    echo base >"$base/seed/file"
+    git -C "$base/seed" add file
+    git -C "$base/seed" commit -q -m init
+    git -C "$base/seed" push -q "$origin" main
+    git clone -q "$origin" "$clone"
+    git -C "$clone" checkout -q -b feature
+    echo feature >>"$clone/file"
+    git -C "$clone" commit -q -am "feature work"
+    rm -f "$stubs/calls" "$stubs/prs.json" "$stubs/title" "$stubs/body"
+    cd "$clone"
+  }
+
+  run() {
+    EXIT=0
+    OUT=$(CLAUDE_HOOK_SELFTEST= "$SELF" "$@" 2>&1) || EXIT=$?
+  }
+  fail() { printf 'FAIL %s\n' "$*"; fails=1; }
+  want_exit() { [[ "$EXIT" == "$2" ]] || fail "$1: want_exit=$2 got_exit=$EXIT :: $OUT"; }
+  want_out() { [[ "$OUT" == *"$2"* ]] || fail "$1: output missing $(printf %q "$2") :: $OUT"; }
+  called() { grep -q "^$2" "$stubs/calls" 2>/dev/null || fail "$1: gh $2 was not called :: $(cat "$stubs/calls" 2>/dev/null)"; }
+  not_called() { ! grep -q "^$2" "$stubs/calls" 2>/dev/null || fail "$1: gh $2 was called :: $(cat "$stubs/calls")"; }
+  pushed() { [[ "$(git -C "$origin" rev-parse -q --verify refs/heads/feature)" == "$(git rev-parse HEAD)" ]] || fail "$1: origin's feature is not HEAD"; }
+  not_pushed() { [[ "$(git -C "$origin" rev-parse -q --verify refs/heads/feature || true)" != "$(git rev-parse HEAD)" ]] || fail "$1: origin's feature was pushed"; }
+  draft() { printf '%s\n\n%s\n' "$1" "$2" >"$(CLAUDE_HOOK_SELFTEST= "$SELF" --path)"; }
+  # A PR record as `gh pr list` would print it, in prs.json.
+  prs() { printf '%s' "$1" >"$stubs/prs.json"; }
+
+  # --- --state, and where it declines to answer ---
+  cd "$workdir"
+  run --state
+  want_exit "--state outside a repo" 1
+  [[ -z "$OUT" ]] || fail "--state outside a repo printed :: $OUT"
+
+  fresh
+  run --state
+  want_exit "--state on a fresh branch" 0
+  want_out "--state draft" "draft=no"
+  want_out "--state landed" "landed=no"
+  want_out "--state stale" "stale=no"
+  want_out "--state draft_changed" "draft_changed=no"
+  want_out "--state unlanded" "unlanded=1"
+  want_out "--state path" "path=$(git rev-parse --absolute-git-dir)/land/feature/pr.md"
+  git checkout -q --detach
+  run --state
+  want_exit "--state on a detached HEAD" 1
+  git checkout -q feature
+  git remote rename origin elsewhere
+  run --state
+  want_exit "--state with no origin" 1
+  git remote rename elsewhere origin
+
+  # --- --path creates the directory and prints an absolute path ---
+  run --path
+  want_exit "--path" 0
+  [[ "$OUT" == /*/land/feature/pr.md && -d "$(dirname "$OUT")" ]] || fail "--path printed $OUT"
+
+  # --- refusals before anything is pushed ---
+  run
+  want_exit "no PR and no draft" 1
+  want_out "no PR and no draft names --path" "git land --path"
+  not_pushed "no PR and no draft"
+
+  draft "Add feature" "Why and how."
+  echo dirty >>file
+  run
+  want_exit "dirty tree" 1
+  want_out "dirty tree" "uncommitted changes"
+  not_pushed "dirty tree"
+  git checkout -q -- file
+
+  GH_AUTH_EXIT=1 run
+  want_exit "gh can't read the host" 1
+  want_out "gh can't read the host" "Josh pushes by hand"
+  not_pushed "gh can't read the host"
+
+  printf 'just a title\nno blank line\n' >"$(CLAUDE_HOOK_SELFTEST= "$SELF" --path)"
+  run
+  want_exit "misshapen draft" 1
+  want_out "misshapen draft" "blank line"
+  not_pushed "misshapen draft"
+
+  # --- first land: push, then a draft PR from the draft, wrapped in markers ---
+  draft "Add feature" "Why and how."
+  run
+  want_exit "first land" 0
+  pushed "first land"
+  called "first land" "pr create --repo localhost/owner/repo --head feature --base main --draft"
+  [[ "$(cat "$stubs/title")" == "Add feature" ]] || fail "first land title: $(cat "$stubs/title")"
+  [[ "$(cat "$stubs/body")" == $'<!-- land:start -->\nWhy and how.\n<!-- land:end -->' ]] ||
+  fail "first land body: $(cat "$stubs/body")"
+  run --state
+  want_out "--state after landing" "landed=yes"
+  want_out "--state after landing, draft" "draft_changed=no"
+  want_out "--state after landing, unlanded" "unlanded=0"
+
+  # --- an open PR: the draft decides what is edited, and Josh's text survives ---
+  prs '[{"number":7,"state":"OPEN","title":"Josh retitled","autoMergeRequest":null,"body":"Josh opener\r\n<!-- land:start -->\r\nWhy and how.\r\n<!-- land:end -->\r\nJosh footer"}]'
+  echo more >>file
+  git commit -q -am more
+  rm -f "$stubs/calls"
+  run
+  want_exit "unchanged draft" 0
+  pushed "unchanged draft"
+  not_called "unchanged draft" "pr edit"
+  not_called "unchanged draft" "pr create"
+
+  draft "Add feature" "A better body."
+  echo again >>file
+  git commit -q -am again
+  rm -f "$stubs/calls"
+  run
+  want_exit "body changed" 0
+  called "body changed" "pr edit 7 --repo localhost/owner/repo"
+  [[ ! -e "$stubs/title" ]] || fail "body changed: title was sent :: $(cat "$stubs/title")"
+  body=$(tr -d '\r' <"$stubs/body")
+  [[ "$body" == $'Josh opener\n<!-- land:start -->\nA better body.\n<!-- land:end -->\nJosh footer' ]] ||
+  fail "body changed: body was :: $body"
+
+  draft "Add the feature properly" "A better body."
+  rm -f "$stubs/calls"
+  run
+  want_exit "title changed" 0
+  [[ "$(cat "$stubs/title" 2>/dev/null)" == "Add the feature properly" ]] || fail "title changed: title not sent"
+
+  prs '[{"number":7,"state":"OPEN","title":"T","autoMergeRequest":null,"body":"Josh only"}]'
+  draft "Add the feature properly" "Body three."
+  rm -f "$stubs/calls"
+  run
+  want_exit "no markers in the live body" 0
+  [[ "$(cat "$stubs/body")" == $'Josh only\n\n<!-- land:start -->\nBody three.\n<!-- land:end -->' ]] ||
+  fail "no markers: body was :: $(cat "$stubs/body")"
+
+  # --- no local draft: the PR's own text becomes the draft, and the PR is left alone ---
+  prs '[{"number":7,"state":"OPEN","title":"From elsewhere","autoMergeRequest":null,"body":"x\n<!-- land:start -->\nLive text.\n<!-- land:end -->"}]'
+  path=$(CLAUDE_HOOK_SELFTEST= "$SELF" --path)
+  rm -f "$path" "$(dirname "$path")/landed.md"
+  echo yet >>file
+  git commit -q -am yet
+  rm -f "$stubs/calls"
+  run
+  want_exit "no local draft" 0
+  not_called "no local draft" "pr edit"
+  [[ "$(cat "$path")" == $'From elsewhere\n\nLive text.' ]] || fail "no local draft: wrote :: $(cat "$path")"
+  run --state
+  want_out "no local draft, then --state" "draft_changed=no"
+
+  # --- auto-merge armed: refuse before pushing ---
+  prs '[{"number":7,"state":"OPEN","title":"T","autoMergeRequest":{"enabledAt":"x"},"body":""}]'
+  echo armed >>file
+  git commit -q -am armed
+  run
+  want_exit "auto-merge armed" 1
+  want_out "auto-merge armed" "turn it off"
+  not_pushed "auto-merge armed"
+
+  # --- a closed PR that is this branch's: its head is in HEAD's history ---
+  fresh
+  draft "T" "B"
+  git push -q -u origin feature
+  git -C "$origin" update-ref refs/pull/3/head "$(git rev-parse HEAD)"
+  prs '[{"number":3,"state":"MERGED","title":"T","autoMergeRequest":null,"body":""}]'
+  echo after >>file
+  git commit -q -am after
+  run
+  want_exit "merged PR of this branch" 1
+  want_out "merged PR of this branch" "#3 is merged"
+  not_pushed "merged PR of this branch"
+
+  # --- a closed PR whose last commit this clone never pulled still counts as this branch's ---
+  fresh
+  draft "T" "B"
+  git push -q -u origin feature
+  git clone -q -b feature "$origin" "$workdir/other$case_number"
+  echo bot >>"$workdir/other$case_number/file"
+  git -C "$workdir/other$case_number" commit -q -am "autofix"
+  git -C "$workdir/other$case_number" push -q origin feature
+  git -C "$origin" update-ref refs/pull/4/head "$(git -C "$workdir/other$case_number" rev-parse HEAD)"
+  prs '[{"number":4,"state":"CLOSED","title":"T","autoMergeRequest":null,"body":""}]'
+  run
+  want_exit "closed PR with an unpulled head" 1
+  want_out "closed PR with an unpulled head" "#4 is closed"
+
+  # --- a closed PR from an earlier branch of the same name shares nothing, so it counts as no PR ---
+  fresh
+  git -C "$workdir/case$case_number/seed" checkout -q -b old
+  echo old >>"$workdir/case$case_number/seed/file"
+  git -C "$workdir/case$case_number/seed" commit -q -am old
+  git -C "$workdir/case$case_number/seed" push -q "$origin" old
+  git -C "$origin" update-ref refs/pull/2/head "$(git -C "$workdir/case$case_number/seed" rev-parse HEAD)"
+  git -C "$origin" update-ref -d refs/heads/old
+  prs '[{"number":2,"state":"MERGED","title":"Old","autoMergeRequest":null,"body":""}]'
+  draft "New" "Fresh body."
+  run
+  want_exit "closed PR from an earlier branch" 0
+  called "closed PR from an earlier branch" "pr create"
+
+  # --- a land directory left by an earlier branch of the same name ---
+  fresh
+  path=$(CLAUDE_HOOK_SELFTEST= "$SELF" --path)
+  git checkout -q -b scratch main
+  echo unrelated >other
+  git add other
+  git commit -q -m unrelated
+  git rev-parse HEAD >"$(dirname "$path")/pushed"
+  git checkout -q feature
+  printf 'Old title\n\nOld body.\n' >"$path"
+  run --state
+  want_out "earlier branch's directory, --state" "stale=yes"
+  want_out "earlier branch's directory, --state landed" "landed=no"
+  want_out "earlier branch's directory, --state draft_changed" "draft_changed=yes"
+  run
+  want_exit "earlier branch's directory" 1
+  want_out "earlier branch's directory" "earlier branch"
+  [[ -f "$(dirname "$path").old/pr.md" && ! -e "$path" ]] || fail "earlier branch's directory was not moved aside"
+  not_pushed "earlier branch's directory"
+
+  # --- a secret in the unlanded range ---
+  fresh
+  draft "T" "B"
+  echo "key LEAKME" >>file
+  git commit -q -am leak
+  echo clean >other
+  git add other
+  git commit -q -m clean
+  run
+  want_exit "secret in range" 1
+  want_out "secret in range" "LEAKME"
+  not_pushed "secret in range"
+
+  # --- a workflow file in the range, with and without --workflows ---
+  fresh
+  draft "T" "B"
+  mkdir -p .github/workflows sub
+  echo "on: push" >.github/workflows/ci.yml
+  echo "runs: {}" >sub/action.yaml
+  git add .github sub
+  git commit -q -m workflows
+  run
+  want_exit "workflow file" 1
+  want_out "workflow file lists ci.yml" ".github/workflows/ci.yml"
+  want_out "workflow file lists action.yaml" "sub/action.yaml"
+  want_out "workflow file names the flag" "git land --workflows"
+  not_pushed "workflow file"
+  run --workflows
+  want_exit "workflow file with --workflows" 0
+  pushed "workflow file with --workflows"
+
+  # --- a fork: push, open nothing ---
+  fresh
+  GH_FORK=true run
+  want_exit "fork" 0
+  pushed "fork"
+  not_called "fork" "pr "
+
+  # --- a fork whose origin lags upstream: upstream's commits are in the range ---
+  fresh
+  upstream="$workdir/case$case_number/upstream.git"
+  git clone -q --bare "$origin" "$upstream"
+  git clone -q "$upstream" "$workdir/case$case_number/up"
+  mkdir -p "$workdir/case$case_number/up/.github/workflows"
+  echo "on: push" >"$workdir/case$case_number/up/.github/workflows/up.yml"
+  git -C "$workdir/case$case_number/up" add .github
+  git -C "$workdir/case$case_number/up" commit -q -m "upstream workflow"
+  git -C "$workdir/case$case_number/up" push -q origin main
+  git remote add upstream "$upstream"
+  git fetch -q upstream
+  git merge -q --no-edit upstream/main
+  GH_FORK=true run
+  want_exit "fork behind upstream" 1
+  want_out "fork behind upstream" ".github/workflows/up.yml"
+
+  # --- non-fast-forward: someone else pushed the branch ---
+  fresh
+  draft "T" "B"
+  git push -q -u origin feature
+  git clone -q -b feature "$origin" "$workdir/other$case_number"
+  echo bot >>"$workdir/other$case_number/file"
+  git -C "$workdir/other$case_number" commit -q -am "autofix"
+  git -C "$workdir/other$case_number" push -q origin feature
+  echo mine >>file
+  git commit -q -am mine
+  prs '[{"number":9,"state":"OPEN","title":"T","autoMergeRequest":null,"body":""}]'
+  run
+  want_exit "non-fast-forward" 1
+  want_out "non-fast-forward" "git pull --ff"
+
+  # --- the default branch: push, open no PR ---
+  fresh
+  git checkout -q main
+  echo direct >>file
+  git commit -q -am direct
+  run
+  want_exit "default branch" 0
+  [[ "$(git -C "$origin" rev-parse main)" == "$(git rev-parse HEAD)" ]] || fail "default branch: not pushed"
+  not_called "default branch" "pr list"
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+START_MARKER='<!-- land:start -->'
+END_MARKER='<!-- land:end -->'
+
+die() {
+  printf 'git land: %s\n' "$*" >&2
+  exit 1
+}
+
+# Sets BRANCH, LAND_DIR, DRAFT, LANDED, and PUSHED for the current branch, from the worktree's
+# toplevel. Returns non-zero, saying nothing, where there is no branch to land.
+resolve() {
+  local top path
+  top=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
+  cd "$top"
+  BRANCH=$(git symbolic-ref --quiet --short HEAD) || return 1
+  git rev-parse --quiet --verify HEAD >/dev/null || return 1
+  git remote get-url origin >/dev/null 2>&1 || return 1
+  path=$(git rev-parse --git-path "land/$BRANCH")
+  [[ "$path" == /* ]] || path="$PWD/$path"
+  LAND_DIR="$path"
+  DRAFT="$LAND_DIR/pr.md"
+  LANDED="$LAND_DIR/landed.md"
+  PUSHED="$LAND_DIR/pushed"
+}
+
+# The directory belongs to an earlier branch of this name when the commit it last pushed isn't in
+# HEAD's history (or no longer exists at all).
+is_stale() {
+  [[ -f "$PUSHED" ]] || return 1
+  ! git merge-base --is-ancestor "$(cat "$PUSHED")" HEAD 2>/dev/null
+}
+
+move_aside() {
+  rm -rf "$LAND_DIR.old"
+  mv "$LAND_DIR" "$LAND_DIR.old"
+}
+
+unlanded_count() {
+  git rev-list --count HEAD --not --remotes=origin
+}
+
+print_state() {
+  local draft=no landed=no stale=no changed=no
+  [[ -f "$DRAFT" ]] && draft=yes
+  if is_stale; then
+    stale=yes
+  elif [[ -f "$PUSHED" ]]; then
+    landed=yes
+  fi
+  if [[ "$draft" == yes ]]; then
+    if [[ "$landed" == no || ! -f "$LANDED" ]] || ! cmp -s "$DRAFT" "$LANDED"; then
+      changed=yes
+    fi
+  fi
+  printf 'path=%s\ndraft=%s\nlanded=%s\nstale=%s\ndraft_changed=%s\nunlanded=%s\n' \
+    "$DRAFT" "$draft" "$landed" "$stale" "$changed" "$(unlanded_count)"
+}
+
+# `<host>/<owner>/<repo>` from a remote URL: https, `ssh://`, scp-style `user@host:owner/repo`, or a
+# local path (host `localhost`, which no `gh` reads, so land refuses there rather than guessing).
+repo_from_url() {
+  local url="$1" host path
+  case "$url" in
+    *://*)
+      url="${url#*://}"
+      url="${url#*@}"
+      host="${url%%/*}"
+      host="${host%%:*}"
+      path="${url#*/}"
+      ;;
+    /*)
+      host=localhost
+      path="$url"
+      ;;
+    *:*)
+      url="${url#*@}"
+      host="${url%%:*}"
+      path="${url#*:}"
+      ;;
+    *) return 1 ;;
+  esac
+  path="${path%/}"
+  path="${path%.git}"
+  local repo="${path##*/}" owner="${path%/*}"
+  owner="${owner##*/}"
+  [[ -n "$host" && -n "$owner" && -n "$repo" && "$owner" != "$path" ]] || return 1
+  printf '%s/%s/%s\n' "$host" "$owner" "$repo"
+}
+
+draft_title() { sed -n 1p "$1"; }
+draft_body() { tail -n +3 "$1"; }
+
+check_draft_shape() {
+  [[ -n "$(draft_title "$DRAFT")" ]] ||
+  die "the draft at $DRAFT has no title. Claude: put the PR title on its first line, then land again."
+  [[ -z "$(sed -n 2p "$DRAFT")" ]] ||
+  die "the draft at $DRAFT needs a blank line after the title, like a commit message. Claude: fix it, then land again."
+  [[ -n "$(draft_body "$DRAFT" | tr -d '[:space:]')" ]] ||
+  die "the draft at $DRAFT has no body. Claude: write the body under the blank line, then land again."
+}
+
+# The live body with the text between the land markers replaced by the draft's body, or with a marked
+# section appended where the body has no markers. Carriage returns, which GitHub's web editor writes,
+# are ignored when finding the markers and kept everywhere else.
+merge_body() {
+  local live="$1" section="$2"
+  if printf '%s\n' "$live" | tr -d '\r' | grep -qxF "$START_MARKER" &&
+  printf '%s\n' "$live" | tr -d '\r' | grep -qxF "$END_MARKER"; then
+    printf '%s' "$live" | SECTION="$section" START="$START_MARKER" END="$END_MARKER" awk '
+      { line = $0; sub(/\r$/, "", line) }
+      line == ENVIRON["START"] && !done { printf "%s\n", ENVIRON["SECTION"]; skipping = 1; next }
+      skipping && line == ENVIRON["END"] { skipping = 0; done = 1; next }
+      !skipping { print }
+    '
+  elif [[ -n "$live" ]]; then
+    printf '%s\n\n%s\n' "$live" "$section"
+  else
+    printf '%s\n' "$section"
+  fi
+}
+
+# The text between the land markers in a live body, or the whole body where it has none.
+marked_text() {
+  local live
+  live=$(printf '%s' "$1" | tr -d '\r')
+  if printf '%s\n' "$live" | grep -qxF "$START_MARKER"; then
+    printf '%s\n' "$live" | START="$START_MARKER" END="$END_MARKER" awk '
+      $0 == ENVIRON["END"] { exit }
+      inside { print }
+      $0 == ENVIRON["START"] { inside = 1 }
+    '
+  else
+    printf '%s\n' "$live"
+  fi
+}
+
+# Whether PR <number> is this branch's: its head, which GitHub keeps at refs/pull/<n>/head after the
+# branch is deleted, shares a commit with HEAD that the default branch lacks. Asking whether the head
+# is in HEAD's history instead would misread a PR whose last commit came from pre-commit.ci or another
+# machine and was never pulled here.
+is_this_branchs() {
+  local number="$1" default="$2" head base
+  git fetch --quiet origin "refs/pull/$number/head" 2>/dev/null || return 1
+  head=$(git rev-parse FETCH_HEAD)
+  for base in $(git merge-base --all "$head" HEAD 2>/dev/null); do
+    git merge-base --is-ancestor "$base" "refs/remotes/origin/$default" 2>/dev/null || return 0
+  done
+  return 1
+}
+
+land() {
+  local allow_workflows="$1"
+
+  if is_stale; then
+    move_aside
+    die "the land directory for $BRANCH was left by an earlier branch of the same name, so its draft may describe that branch. It's moved to $LAND_DIR.old. Claude: write this branch's draft at $DRAFT (git land --path), then land again."
+  fi
+
+  git diff --quiet HEAD -- ||
+  die "tracked files have uncommitted changes, and what lands is the commits. Claude: commit them (or say why not), then land again."
+
+  local url repo host
+  url=$(git remote get-url --push origin)
+  repo=$(repo_from_url "$url") ||
+  die "can't read <host>/<owner>/<repo> from origin's push URL ($url). Josh pushes by hand here. Claude, stop here and say so."
+  host="${repo%%/*}"
+
+  command -v gh >/dev/null 2>&1 && gh auth status --hostname "$host" >/dev/null 2>&1 ||
+  die "gh can't read $host, so land can't check for an armed auto-merge or open the PR. Josh pushes by hand here. Claude, stop here and say so."
+
+  git fetch --quiet origin || die "git fetch origin failed. Claude: say so and stop; Josh checks the remote."
+
+  if [[ "$(unlanded_count)" -gt 0 ]]; then
+    command -v gitleaks >/dev/null 2>&1 ||
+    die "gitleaks isn't installed, so the unlanded commits can't be scanned. Josh installs it (mise install gitleaks). Claude, stop here and say so."
+    local findings
+    if ! findings=$(gitleaks git --log-opts="HEAD --not --remotes=origin" --redact --no-banner --no-color --verbose "$PWD" 2>&1); then
+      die "gitleaks flagged the unlanded commits, so nothing was pushed:
+
+$findings
+
+Claude: stop and tell Josh. Removing a secret means rewriting those commits, which is Josh's call; a false positive takes a gitleaks:allow comment or a .gitleaksignore entry, also Josh's."
+    fi
+
+    local workflows
+    workflows=$(git log --format= --name-only HEAD --not --remotes=origin | sort -u |
+    grep -E '^\.github/workflows/|(^|/)action\.ya?ml$' || true)
+    if [[ -n "$workflows" && "$allow_workflows" != yes ]]; then
+      die "the unlanded commits change files GitHub runs with the repo's secrets and token as soon as they're pushed:
+
+$workflows
+
+Claude: ask Josh to approve running \`git land --workflows\`, and stop until he does."
+    fi
+  fi
+
+  local meta is_fork default
+  meta=$(gh repo view "$repo" --json isFork,defaultBranchRef) ||
+  die "gh couldn't read $repo. Claude: say so and stop."
+  is_fork=$(jq -r '.isFork' <<<"$meta")
+  default=$(jq -r '.defaultBranchRef.name' <<<"$meta")
+
+  local opens_prs=yes
+  [[ "$is_fork" == true || "$BRANCH" == "$default" ]] && opens_prs=no
+
+  local prs="[]" number="" state="" live_title="" live_body=""
+  if [[ "$opens_prs" == yes ]]; then
+    prs=$(gh pr list --repo "$repo" --head "$BRANCH" --state all \
+      --json number,state,title,body,autoMergeRequest --limit 20) ||
+    die "gh couldn't list $repo's pull requests. Claude: say so and stop."
+    number=$(jq -r '[.[] | select(.state == "OPEN")] | sort_by(-.number) | first | .number // empty' <<<"$prs")
+    if [[ -z "$number" ]]; then
+      local candidate
+      for candidate in $(jq -r '[.[] | select(.state != "OPEN")] | sort_by(-.number) | .[].number' <<<"$prs"); do
+        if is_this_branchs "$candidate" "$default"; then
+          state=$(jq -r --argjson n "$candidate" '.[] | select(.number == $n) | .state | ascii_downcase' <<<"$prs")
+          die "#$candidate is $state, and it's this branch's, so commits pushed here land nowhere. Claude: stop and say so; Josh decides whether this work gets a new branch."
+        fi
+      done
+    else
+      [[ "$(jq -r --argjson n "$number" '.[] | select(.number == $n) | .autoMergeRequest != null' <<<"$prs")" == false ]] ||
+      die "auto-merge is armed on #$number, so a push would merge it once CI is green. Josh has to turn it off on the PR before this branch can land. Claude, stop here and say so."
+      live_title=$(jq -r --argjson n "$number" '.[] | select(.number == $n) | .title' <<<"$prs")
+      live_body=$(jq -r --argjson n "$number" '.[] | select(.number == $n) | .body' <<<"$prs")
+    fi
+
+    if [[ -z "$number" ]]; then
+      [[ -f "$DRAFT" ]] ||
+      die "this branch has no PR and no draft to open one with. Claude: write the draft at $DRAFT (git land --path prints it): the title, a blank line, then the body. Then land again."
+      check_draft_shape
+    elif [[ -f "$DRAFT" ]] && ! cmp -s "$DRAFT" "$LANDED" 2>/dev/null; then
+      check_draft_shape
+    fi
+  fi
+
+  local push_output
+  if ! push_output=$(git push -u origin HEAD 2>&1); then
+    if grep -qE 'non-fast-forward|fetch first|\[rejected\]' <<<"$push_output"; then
+      die "rejected as non-fast-forward: the branch on origin has commits this one lacks (a pre-commit.ci autofix, an \"Update branch\", another machine). Claude: run \`git pull --ff\`, then land again.
+
+$push_output"
+    fi
+    die "git push failed. Claude: say so and stop.
+
+$push_output"
+  fi
+  mkdir -p "$LAND_DIR"
+  git rev-parse HEAD >"$PUSHED"
+  printf '%s\n' "$push_output"
+
+  if [[ "$is_fork" == true ]]; then
+    echo "git land: pushed $BRANCH to origin, a fork. Josh opens the upstream PR himself."
+    return
+  fi
+  if [[ "$BRANCH" == "$default" ]]; then
+    echo "git land: pushed $BRANCH, the default branch, so there is no PR to open."
+    return
+  fi
+
+  local body_file
+  body_file=$(mktemp)
+  # shellcheck disable=SC2064
+  trap "rm -f '$body_file'" EXIT
+
+  if [[ -z "$number" ]]; then
+    printf '%s\n%s\n%s' "$START_MARKER" "$(draft_body "$DRAFT")" "$END_MARKER" >"$body_file"
+    gh pr create --repo "$repo" --head "$BRANCH" --base "$default" --draft \
+      --title "$(draft_title "$DRAFT")" --body-file "$body_file" ||
+    die "pushed, but opening the PR failed. Claude: land again to retry."
+    cp "$DRAFT" "$LANDED"
+    return
+  fi
+
+  if [[ ! -f "$DRAFT" ]]; then
+    printf '%s\n\n%s\n' "$live_title" "$(marked_text "$live_body")" >"$DRAFT"
+    cp "$DRAFT" "$LANDED"
+    echo "git land: pushed to #$number, which has no local draft here, so its current text is now the draft at $DRAFT. Claude: edit it there when the PR's description should change; the next land carries it."
+    return
+  fi
+
+  if cmp -s "$DRAFT" "$LANDED" 2>/dev/null; then
+    echo "git land: pushed to #$number; its description is unchanged."
+    return
+  fi
+
+  local section edit_args
+  section=$(printf '%s\n%s\n%s' "$START_MARKER" "$(draft_body "$DRAFT")" "$END_MARKER")
+  merge_body "$live_body" "$section" >"$body_file"
+  edit_args=(--repo "$repo" --body-file "$body_file")
+  if [[ ! -f "$LANDED" || "$(draft_title "$LANDED")" != "$(draft_title "$DRAFT")" ]]; then
+    edit_args+=(--title "$(draft_title "$DRAFT")")
+  fi
+  gh pr edit "$number" "${edit_args[@]}" ||
+  die "pushed, but updating #$number's description failed. Claude: land again to retry."
+  cp "$DRAFT" "$LANDED"
+  echo "git land: pushed to #$number and updated its description from the draft."
+}
+
+case "${1:-}" in
+  -h | --help)
+    usage
+    ;;
+  --state)
+    resolve || exit 1
+    print_state
+    ;;
+  --path)
+    resolve || die "nothing to land here: not on a branch with commits in a repo with an origin."
+    if is_stale; then
+      move_aside
+      echo "git land: moved $LAND_DIR, left by an earlier branch of the same name, to $LAND_DIR.old." >&2
+    fi
+    mkdir -p "$LAND_DIR"
+    printf '%s\n' "$DRAFT"
+    ;;
+  "" | --workflows)
+    [[ $# -le 1 ]] || {
+      usage >&2
+      exit 2
+    }
+    resolve || die "nothing to land here: not on a branch with commits in a repo with an origin."
+    land "$([[ "${1:-}" == --workflows ]] && echo yes || echo no)"
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
