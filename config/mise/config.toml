@@ -66,3 +66,4 @@ uv = { version = "latest", minimum_release_age = "1d" }
 vscode-cli = "latest"
 yq = "latest"
 zellij = "latest"
+gitleaks = "latest"
