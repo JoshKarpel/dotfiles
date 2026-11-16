@@ -496,6 +496,9 @@ there.
 So land also records there the commit it last pushed, and a directory whose
 recorded commit isn't in `HEAD`'s history belongs to an earlier branch of that
 name.
+The record is also what `--state` reads as landed, so on a branch getting its
+first PR it is written only once the PR exists: a push whose PR then fails to
+open leaves the branch never landed, and the next land opens it.
 `claude-git-status` and `claude-stop-land` then treat the branch as never
 landed, and land, before using it, moves the directory aside to
 `land/<branch>.old` and refuses, saying the draft may be the earlier branch's
@@ -720,7 +723,9 @@ time, so hooks compute it rather than anyone writing it down:
 - **At session start**, `claude-gh-status` already reports an open PR. For a
   branch land opened, it adds that Claude's part of the body is the text between
   the land markers, carried from the draft on the next land.
-- **At stop**, a new check `claude-stop-land` runs after `claude-stop-commit`.
+- **At stop**, a new check `claude-stop-land` runs after `claude-stop-commit`,
+  on a branch `is-claude-commit-branch` accepts, so Josh's own commits on the
+  default branch are never offered to land.
   When the branch has been landed before and has unlanded commits,
   it blocks once per prompt and asks Claude to land them, rewriting the draft
   first if they change what the PR is, or to say in one line why not. A
@@ -831,6 +836,10 @@ a declining line under it.
     something no further check runs, so this message is what Josh reads, and
     whatever the checks hadn't reached yet (the commit, the land) waits for the
     next turn.
+  - A reply that asks Josh something must contain a `?`, so an offer is
+    phrased as a question ("Want me to also update the docs?", not "Let me
+    know if you want the docs updated"). A reply with no `?` is never read as
+    asking.
   - Make that question unmistakable: one direct question or offer to Josh, at
     the end. Don't close with one out of habit: a turn that ends on an offer
     leaves its work uncommitted and unlanded until Josh replies.
@@ -850,7 +859,11 @@ a declining line under it.
      that has never been landed only earns a reminder, which needs no gate.
      If nothing could block, the sequence runs with no model call, which
      covers most discussion turns.
-  2. Otherwise, hand `last_assistant_message` from the `Stop` payload to
+  2. Does the reply contain a `?`? The guidance requires one in every reply
+     that asks Josh something, so a reply without one isn't a question, and
+     the sequence runs with no model call. That covers nearly every reply to
+     a check.
+  3. Otherwise, hand `last_assistant_message` from the `Stop` payload to
      Haiku, asking whether the reply ends by asking Josh something, a question
      or an offer of more work. If it does, end without running any check.
 
@@ -872,6 +885,9 @@ a declining line under it.
   its checks when the last message contained `?` from `2fe1dc0` until
   `4cbc74c` removed it, because a text heuristic misfired too often in both
   directions, and the main model has no structured way to say it's asking.
+  The `?` survives only as a filter in front of the model, where each
+  direction is covered: the guidance makes "no `?`" mean "not asking", and
+  the model reads past a `?` in a report that isn't asking anything.
   Reading the reply is a model's job. A
   [prompt-based Stop hook](https://code.claude.com/docs/en/hooks.md#prompt-based-hooks)
   would be the obvious place, but phase 0 found it runs in parallel with
@@ -926,6 +942,9 @@ a declining line under it.
   prompt's snapshot through `claude-prompt-snapshot ask`, rather than in a
   marker file of its own, so the question gate can tell which checks could
   still ask.
+  A payload with no `prompt_id`, which Claude Code leaves unset only before a
+  session's first prompt, has nothing to record an ask against, so every
+  check counts as having asked rather than asking on every stop.
 - A prompt with no snapshot (a session older than the hook, or a failed write)
   counts as changed, so the cost of a gap is an extra pass rather than a
   missing report.
@@ -958,7 +977,9 @@ flowchart TD
   AG -->|yes| PAUSE["tab paused; no checks<br/>(Stop fires again on its report)"] --> REC
   AG -->|no| CB{"could a check block?<br/>• changed and finish or summary not asked<br/>• tree dirty<br/>• landed, unlanded, land not asked"}
   CB -->|no| PC
-  CB -->|yes| Q{"Haiku: does the reply end<br/>asking Josh something?"}
+  CB -->|yes| QM{"reply contains ?"}
+  QM -->|no| PC
+  QM -->|yes| Q{"Haiku: does the reply end<br/>asking Josh something?"}
   Q -->|"no, or the call failed"| PC
   Q -->|yes| QG{finish asked<br/>this prompt?}
   QG -->|no| MARK[mark prompt gated] --> ANN
@@ -992,9 +1013,9 @@ Three details the loop depends on, each easy to get wrong:
 
 - "This prompt changed the repo" stays true for the whole prompt, so the cheap
   read pairs it with whether the finishing pass or the report could still ask.
-  Without that, every reply to a check (the finishing pass, the commit, the
-  land, the report itself) would pay for a Haiku call after every check had
-  spent its one ask.
+  Without that, every reply to a check with a `?` in it (the finishing pass,
+  the commit, the land, the report itself) would pay for a Haiku call after
+  every check had spent its one ask.
 - The gated mark goes on whenever the finishing pass hasn't asked yet this
   prompt, not only on the first stop. A question in reply to a pre-commit
   failure would otherwise leave that turn's edits with no finishing pass at
@@ -1003,7 +1024,9 @@ Three details the loop depends on, each easy to get wrong:
   `HEAD`, since a plan Claude committed mid-turn changed all the same.
 
 Costs: one more model turn on every turn that changes the repo, and a Haiku
-call of about 2s on every stop where a check could block. An
+call of about 2s on every stop where a check could block and the reply
+contains a `?`. An offer phrased without a `?` gets the checks run over it,
+as it did before the gate. An
 interrupt or a check that errors leaves no report, since Claude held it.
 A question turn's edits wait a turn for their finishing pass, commit, and
 land, and edits Josh makes while answering count as the next turn's. Because

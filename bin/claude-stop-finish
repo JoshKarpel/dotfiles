@@ -69,11 +69,9 @@ STUB
   call '{"prompt_id":"prompt-7f3a"}' 0
   nudged "an earlier prompt stays remembered" no
 
-  # --- no prompt id (before the first user input): nudge whenever the repo changed ---
+  # --- no prompt id (only before a session's first prompt): nothing to record the pass against ---
   call '{}' 0
-  nudged "no prompt id nudges" yes
-  call '{}' 0
-  nudged "no prompt id nudges again" yes
+  nudged "no prompt id never nudges" no
 
   # --- a merge or rebase in progress dominates the tree: no pass ---
   touch "$(git rev-parse --git-dir)/MERGE_HEAD"

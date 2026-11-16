@@ -52,7 +52,7 @@ EOF
   call() {
     local prompt="$1" changed="$2" land_state="${3:-}"
     OUT=$(cd "$repo" && jq -cn --arg p "$prompt" '{prompt_id: $p}' |
-      env "${unset_git[@]}" STUB_CHANGED="$changed" STUB_LAND_STATE="$land_state" PATH="$stubs:$PATH" \
+      env "${unset_git[@]}" STUB_CHANGED="$changed" STUB_LAND_STATE="$land_state" PATH="$stubs:$(dirname "$SELF"):$PATH" \
       CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1) ||
     { printf 'FAIL exited non-zero :: %s\n' "$OUT"; fails=1; }
   }
@@ -92,7 +92,9 @@ claude-prompt-snapshot ask "$PROMPT_ID" summary || exit 0
 
 REMINDER=""
 LAND_STATE=$(git-land --state 2>/dev/null || true)
-if grep -qx 'landed=no' <<<"$LAND_STATE" && ! grep -qx 'unlanded=0' <<<"$LAND_STATE"; then
+# Not on the default branch, whose unlanded commits are Josh's rather than this turn's to publish.
+if grep -qx 'landed=no' <<<"$LAND_STATE" && ! grep -qx 'unlanded=0' <<<"$LAND_STATE" &&
+is-claude-commit-branch >/dev/null 2>&1; then
   REMINDER=$'\n\n'"This branch has not been landed yet. If the change is now worth showing (a coherent first version whose checks pass locally), write the PR draft to the path \`git land --path\` prints and run \`git land\` before the report, and say in the report that you did. Otherwise do not mention landing."
 fi
 

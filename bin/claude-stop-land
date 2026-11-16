@@ -53,6 +53,15 @@ EOF
   asks "a changed draft is mentioned" p5 "$(state yes yes 1)" yes
   [[ "$OUT" == *"draft has changed"* ]] || { printf 'FAIL changed draft not mentioned :: %s\n' "$OUT"; fails=1; }
 
+  # --- the default branch: its unlanded commits are Josh's, not Claude's to push ---
+  origin=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$stubs" "$repo" "$origin"' EXIT
+  env "${unset_git[@]}" git init -q -b trunk "$origin/src"
+  env "${unset_git[@]}" git -C "$origin/src" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m init
+  rm -rf "$repo"
+  env "${unset_git[@]}" git clone -q "$origin/src" "$repo"
+  asks "a landed default branch with new commits is silent" p6 "$(state yes no 2)" no
+
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
   fi
@@ -63,6 +72,9 @@ INPUT=$(cat)
 PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")
 
 GIT_DIR=$(git rev-parse --absolute-git-dir 2>/dev/null) || exit 0
+# Unlanded commits on the default branch aren't Claude's (it can't commit there), so landing them
+# would publish Josh's work without a PR on his behalf.
+is-claude-commit-branch >/dev/null || exit 0
 STATE=$(git-land --state 2>/dev/null) || exit 0
 grep -qx 'landed=yes' <<<"$STATE" || exit 0
 UNLANDED=$(sed -n 's/^unlanded=//p' <<<"$STATE")

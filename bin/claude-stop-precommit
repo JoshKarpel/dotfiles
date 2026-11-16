@@ -195,9 +195,6 @@ PROMPT_ID=$(printf '%s' "$INPUT" | jq -r '.prompt_id // ""')
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$ROOT" || exit 1
 
-# Read with `read -d ''` rather than `mapfile -d ''`, which macOS's bash 3.2 has no `-d` for. `-z`
-# rather than the readable listing because git quotes and escapes a path with a newline or a
-# non-ASCII byte in it, and a quoted path is not one Claude can open.
 # The pass fingerprint: the change-set this hook last passed, taken after the autofix pass.
 # `claude-stop-commit` asks for a commit only when the tree still matches it, so it never asks over a
 # state pre-commit didn't pass, which is every state this hook reports once and then goes quiet on.
@@ -208,6 +205,9 @@ record_pass() {
   claude-prompt-snapshot fingerprint >"$PASSED"
 }
 
+# Read with `read -d ''` rather than `mapfile -d ''`, which macOS's bash 3.2 has no `-d` for. `-z`
+# rather than the readable listing because git quotes and escapes a path with a newline or a
+# non-ASCII byte in it, and a quoted path is not one Claude can open.
 STRAYS=()
 while IFS= read -r -d '' stray; do
   STRAYS+=("$stray")
@@ -244,13 +244,7 @@ fi
 # the tree it was reached on, taken after the autofix pass, since that may have just rewritten it. A
 # new prompt hears about it once more, so a failure is never silently forgotten.
 REPORTED="$(git rev-parse --git-dir)/claude-precommit-reported"
-STATE=$(
-  {
-    printf '%s\n%s\n' "$PROMPT_ID" "$CONTEXT"
-    git diff HEAD
-    git ls-files --others --exclude-standard
-  } | sha1sum | cut -d' ' -f1
-)
+STATE=$(printf '%s\n%s\n%s\n' "$PROMPT_ID" "$CONTEXT" "$(claude-prompt-snapshot fingerprint)" | sha1sum | cut -d' ' -f1)
 [[ "$(cat "$REPORTED" 2>/dev/null)" == "$STATE" ]] && exit 0
 printf '%s' "$STATE" >"$REPORTED"
 

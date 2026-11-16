@@ -55,12 +55,16 @@ doesn't need repeating per session.
   with one line and hold the report; keep replies to checks short; write the report
   when asked.
 - When a reply ends on a question or an offer to me, put the report in that same reply,
-  with the question last. A small model reads each reply as the turn tries to stop, and
-  one that ends by asking me something ends the turn on the spot: no later check runs,
-  so nothing will ask for the report, and the commit and the land wait for the next
-  turn. A reply to a check counts too: if pre-commit flags something you'd rather ask
-  me about than fix (whether to suppress a lint, say), that reply is the report followed
-  by the question.
+  with the question last. As the turn tries to stop, a small model reads each reply that
+  contains a `?`, and one that ends by asking me something ends the turn on the spot: no
+  later check runs, so nothing will ask for the report, and the commit and the land wait
+  for the next turn. A reply to a check counts too: if pre-commit flags something you'd
+  rather ask me about than fix (whether to suppress a lint, say), that reply is the
+  report followed by the question.
+- A reply that asks me something must contain a `?`, so phrase an offer as a question:
+  "Want me to also update the docs?", never "Let me know if you want the docs updated."
+  A reply with no `?` anywhere is never read as asking, so the checks run over it and
+  bury the question.
 - Make that question unmistakable: one direct question or offer, at the end. Don't close
   with one out of habit: a turn that ends on an offer leaves its work uncommitted and
   unlanded until I reply.

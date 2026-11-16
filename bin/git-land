@@ -57,6 +57,7 @@ case "$1 $2" in
   "repo view") printf '{"isFork":%s,"defaultBranchRef":{"name":"main"}}' "${GH_FORK:-false}" ;;
   "pr list") if [[ -f "$STUB_DIR/prs.json" ]]; then cat "$STUB_DIR/prs.json"; else echo '[]'; fi ;;
   "pr create" | "pr edit")
+    [[ "$1 $2" == "pr create" ]] && { exit_code="${GH_CREATE_EXIT:-0}"; [[ "$exit_code" == 0 ]] || exit "$exit_code"; }
     rm -f "$STUB_DIR/title" "$STUB_DIR/body"
     while [[ $# -gt 0 ]]; do
       case "$1" in
@@ -177,8 +178,15 @@ EOF
   want_out "misshapen draft" "blank line"
   not_pushed "misshapen draft"
 
-  # --- first land: push, then a draft PR from the draft, wrapped in markers ---
+  # --- a PR that fails to open: pushed, but not landed, so landing again opens it ---
   draft "Add feature" "Why and how."
+  GH_CREATE_EXIT=1 run
+  want_exit "the PR fails to open" 1
+  pushed "the PR fails to open"
+  run --state
+  want_out "the PR fails to open, --state" "landed=no"
+
+  # --- first land: push, then a draft PR from the draft, wrapped in markers ---
   run
   want_exit "first land" 0
   pushed "first land"
@@ -645,8 +653,12 @@ $push_output"
 $push_output"
   fi
   mkdir -p "$LAND_DIR"
-  git rev-parse HEAD >"$PUSHED"
   printf '%s\n' "$push_output"
+  # `--state` reads `pushed` as landed, so a branch that is about to get its first PR records it only
+  # once the PR exists: a failed create leaves the branch never landed, and the next land opens it.
+  if [[ "$opens_prs" == no || -n "$number" ]]; then
+    git rev-parse HEAD >"$PUSHED"
+  fi
 
   if [[ "$is_fork" == true ]]; then
     echo "git land: pushed $BRANCH to origin, a fork. Josh opens the upstream PR himself."
@@ -667,6 +679,7 @@ $push_output"
     gh pr create --repo "$repo" --head "$BRANCH" --base "$default" --draft \
       --title "$(draft_title "$DRAFT")" --body-file "$body_file" ||
     die "pushed, but opening the PR failed. Claude: land again to retry."
+    git rev-parse HEAD >"$PUSHED"
     cp "$DRAFT" "$LANDED"
     return
   fi

@@ -168,8 +168,8 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   ask "a stop keeps the record" asked p20 finish 0
   prompt p21
   ask "a new prompt asks afresh" ask p21 finish 0
-  ask "no prompt id always asks" ask "" finish 0
-  ask "no prompt id never has asked" asked "" finish 1
+  ask "no prompt id never asks" ask "" finish 1
+  ask "no prompt id counts as having asked" asked "" finish 0
 
   # --- sessions don't share a previous prompt ---
   SESSION=session-2
@@ -240,9 +240,10 @@ case "${1:-}" in
   ask | asked)
     # A stop check that asks once per prompt calls `ask`: exit 0 the first time for this prompt
     # (recording it), 1 after. `asked` only reads. One record for every check, so the question
-    # gate can tell which checks have already spent their ask. With no prompt id (before the
-    # first input) every `ask` is a first.
-    [[ -n "${2:-}" ]] || exit "$([[ "$1" == ask ]] && echo 0 || echo 1)"
+    # gate can tell which checks have already spent their ask. With no prompt id, which Claude Code
+    # leaves unset only before a session's first prompt, there is nothing to record an ask against,
+    # so every check counts as having asked: granting each ask instead would block on every stop.
+    [[ -n "${2:-}" ]] || exit "$([[ "$1" == ask ]] && echo 1 || echo 0)"
     FILE="$STATE_DIR/$(key "$2")"
     if grep -qxF "asked=$3" "$FILE" 2>/dev/null; then
       [[ "$1" == asked ]] && exit 0 || exit 1
@@ -272,7 +273,7 @@ case "${1:-}" in
   "") ;;
 
   *)
-    echo "usage: claude-prompt-snapshot [changed <prompt-id> | stop <prompt-id> [--gated] | fingerprint]" >&2
+    echo "usage: claude-prompt-snapshot [changed <prompt-id> | stop <prompt-id> [--gated] | ask <prompt-id> <check> | asked <prompt-id> <check> | start <prompt-id> | fingerprint]" >&2
     exit 2
     ;;
 esac

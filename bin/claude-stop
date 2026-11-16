@@ -84,7 +84,7 @@ EOF
     find "$stubs" -name '*.called' -delete
     : >"$stubs/stops"
     local out exit_code=0
-    out=$(cd "$repo" && env STUB_DIR="$stubs" STUB_CHANGED=0 "$@" PATH="$stubs:$PATH" \
+    out=$(cd "$repo" && env STUB_DIR="$stubs" STUB_CHANGED=0 "$@" PATH="$stubs:$(dirname "$SELF"):$PATH" \
       CLAUDE_HOOK_SELFTEST= "$SELF" <<<"$payload" 2>&1) || exit_code=$?
 
     local got="" name
@@ -109,7 +109,7 @@ EOF
 
   # --- no check blocks: all run in order, then announce, and the stop records HEAD ---
   t "nothing blocks" "{$P,\"last_assistant_message\":\"Done.\"}" \
-    0 "" "gate,$ALL,sound,tab-finished"
+    0 "" "$ALL,sound,tab-finished"
   stopped "every stop records HEAD" "p1"
 
   # --- the question gate ---
@@ -125,6 +125,8 @@ EOF
     0 "" "gate,$ALL,sound,tab-finished" STUB_CLAUDE_OUT=YES STUB_CLAUDE_EXIT=1
   t "an answer other than YES counts as not a question" "{$P,\"last_assistant_message\":\"Done?\"}" \
     0 "" "gate,$ALL,sound,tab-finished" STUB_CLAUDE_OUT=maybe
+  t "a reply with no question mark makes no model call" "{$P,\"last_assistant_message\":\"Pick one.\"}" \
+    0 "" "$ALL,sound,tab-finished" STUB_CLAUDE_OUT=YES
   t "nothing could block: no model call" "{$P,\"last_assistant_message\":\"Which one?\"}" \
     0 "" "$ALL,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES
   t "a never-landed branch with commits needs no gate" "{$P,\"last_assistant_message\":\"Which one?\"}" \
@@ -157,34 +159,34 @@ EOF
   # --- a background shell (a Monitor, a build) doesn't defer, or a server would defer forever, but it pauses ---
   t "running shell pauses without deferring" \
     "{$P,\"last_assistant_message\":\"Done.\",\"background_tasks\":[{\"type\":\"shell\",\"status\":\"running\"}]}" \
-    0 "" "gate,$ALL,sound,tab-paused"
+    0 "" "$ALL,sound,tab-paused"
 
   # --- a task that has ended wakes nothing, so the stop is a finish ---
   t "ended shell finishes" \
     "{$P,\"last_assistant_message\":\"Done.\",\"background_tasks\":[{\"type\":\"shell\",\"status\":\"completed\"}]}" \
-    0 "" "gate,$ALL,sound,tab-finished"
+    0 "" "$ALL,sound,tab-finished"
 
   # --- a scheduled job will wake the session, so the stop is a pause ---
   t "pending cron pauses" \
     "{$P,\"last_assistant_message\":\"Done.\",\"background_tasks\":[],\"session_crons\":[{\"id\":\"c1\",\"recurring\":false}]}" \
-    0 "" "gate,$ALL,sound,tab-paused"
+    0 "" "$ALL,sound,tab-paused"
 
   # --- a check that blocks: its JSON surfaces, nothing after it runs, and the stop records HEAD ---
   t "the first check blocks" "{$P,\"last_assistant_message\":\"Done.\"}" \
-    0 '{"a":1}' "gate,precommit" STUB_PRECOMMIT_OUT='{"a":1}'
+    0 '{"a":1}' "precommit" STUB_PRECOMMIT_OUT='{"a":1}'
   stopped "a blocked stop records HEAD" "p1"
   t "the finishing pass blocks" "{$P,\"last_assistant_message\":\"Done.\"}" \
-    0 '{"b":2}' "gate,precommit,finish" STUB_FINISH_OUT='{"b":2}'
+    0 '{"b":2}' "precommit,finish" STUB_FINISH_OUT='{"b":2}'
   t "the commit check blocks after the plan page" "{$P,\"last_assistant_message\":\"Done.\"}" \
-    0 '{"c":3}' "gate,precommit,finish,plan-artifact,commit" STUB_COMMIT_OUT='{"c":3}'
+    0 '{"c":3}' "precommit,finish,plan-artifact,commit" STUB_COMMIT_OUT='{"c":3}'
   t "the land check blocks after the commit check" "{$P,\"last_assistant_message\":\"Done.\"}" \
-    0 '{"d":4}' "gate,precommit,finish,plan-artifact,commit,land" STUB_LAND_OUT='{"d":4}'
+    0 '{"d":4}' "precommit,finish,plan-artifact,commit,land" STUB_LAND_OUT='{"d":4}'
   t "the report comes last" "{$P,\"last_assistant_message\":\"Done.\"}" \
-    0 '{"e":5}' "gate,$ALL" STUB_SUMMARY_OUT='{"e":5}'
+    0 '{"e":5}' "$ALL" STUB_SUMMARY_OUT='{"e":5}'
 
   # --- a check errors outright: its exit status propagates, nothing after it runs ---
   t "a check errors" "{$P,\"last_assistant_message\":\"Done.\"}" \
-    3 "" "gate,precommit" STUB_PRECOMMIT_EXIT=3
+    3 "" "precommit" STUB_PRECOMMIT_EXIT=3
 
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
@@ -239,11 +241,11 @@ fi
 
 # Could any check below block? Each clause is a check's own blocking condition, not a broader one:
 # the prompt changed the repo and the finishing pass or the report hasn't asked yet this prompt, the
-# tree has changes (pre-commit, the commit, the plan page), or a landed branch has unlanded commits
-# and the land check hasn't asked yet. A branch that has never been landed only earns a reminder,
-# which needs no gate. Without the "hasn't asked yet" half, every reply to a check in a turn that
-# changed the repo would cost a model call, the report included. All of it is local, so a
-# discussion turn costs no model call.
+# tree has changes (pre-commit, the commit, the plan page), or a landed branch other than the
+# default has unlanded commits and the land check hasn't asked yet. A branch that has never been
+# landed only earns a reminder, which needs no gate. Without the "hasn't asked yet" half, every
+# reply to a check in a turn that changed the repo would cost a model call, the report included.
+# All of it is local, so a discussion turn costs no model call.
 could_block() {
   git rev-parse --git-dir >/dev/null 2>&1 || return 1
   if claude-prompt-snapshot changed "$PROMPT_ID" >/dev/null; then
@@ -252,6 +254,7 @@ could_block() {
   fi
   [[ -n "$(git status --porcelain 2>/dev/null)" ]] && return 0
   claude-prompt-snapshot asked "$PROMPT_ID" land && return 1
+  is-claude-commit-branch >/dev/null 2>&1 || return 1
   local state
   state=$(git-land --state 2>/dev/null) || return 1
   grep -qx 'landed=yes' <<<"$state" && ! grep -qx 'unlanded=0' <<<"$state"
@@ -259,14 +262,17 @@ could_block() {
 
 GATE_PROMPT='You classify the last message an assistant sent its user. Answer YES if it ends by asking the user something: a question they need to answer, or an offer of more work ("Want me to also...?"). Answer NO otherwise, including a report that merely contains a question mark. Answer with exactly YES or NO.'
 
-# Does the reply end by asking Josh something? Reading that is a model's job: a text heuristic on
-# `?` misfired in both directions. Loading no settings sources keeps the nested session from running
-# this hook recursively, no MCP servers start, and nothing is written to the session archive. A call
-# that fails or times out counts as not a question, so the checks run as they would without the gate.
+# Does the reply end by asking Josh something? A reply with no `?` doesn't, since the global
+# CLAUDE.md requires every question and offer to carry one, so most replies (every short answer to a
+# check) cost no model call. Whether a reply with a `?` ends by asking is a model's job: a `?` alone
+# misfires on a report that quotes one. Loading no settings sources keeps the nested session from
+# running this hook recursively, no MCP servers start, and nothing is written to the session archive.
+# A call that fails or times out counts as not a question, so the checks run as they would without
+# the gate.
 ends_on_question() {
   local message answer
   message=$(jq -r '.last_assistant_message // ""' <<<"$INPUT")
-  [[ -n "$message" ]] || return 1
+  [[ "$message" == *"?"* ]] || return 1
   local runner=()
   if command -v timeout >/dev/null 2>&1; then
     runner=(timeout 30)
