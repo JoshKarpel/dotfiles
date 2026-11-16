@@ -28,8 +28,8 @@ doesn't need repeating per session.
   write the PR draft to the path `git land --path` prints, and run `git land`. The draft
   is shaped like a commit message: the title, a blank line, then the body. Put what you
   wrote (the problem, the change, how it was checked) inside a `<details>` fold whose
-  `<summary>` names your model and effort level, such as
-  `<summary>Claude Opus 5.5, high effort</summary>`. After that, land again at the end of
+  `<summary>` names your model, such as `<summary>Claude Opus 5.5</summary>`. Leave out
+  the effort level: you can't see it, so a stated one is a guess. After that, land again at the end of
   each turn that committed, so the PR and its CI stay current.
 - Rewrite the draft whenever what the PR is has changed. It is the only way to change your
   part of the PR description; the next land carries it.
