@@ -264,9 +264,10 @@ zellij-custom-keybinds
 # tab of its own, and `wt done` removes the worktree and closes its tab. `wt`
 # alone (Alt+Shift+e in zellij) picks the clone, from ~/projects and ~/work, and
 # the worktree, local branch, or new branch instead of taking them as
-# arguments. `wt new --command CMD` runs CMD as the tab's command in place of a
+# arguments, and `wt clone OWNER/REPO` clones one under those roots, then picks
+# its branch. `wt new --command CMD` runs CMD as the tab's command in place of a
 # shell, and `manage-worktrees serve` is `new` with Claude as that command,
-# behind a web form, for dev boxes to serve on 3002. The
+# behind a web page that can also clone, for dev boxes to serve on 3002. The
 # claude-tab-status hook marks each tab working (●), waiting on you (?), paused
 # on background work or a scheduled job that will wake it (◌), or finished (✓).
 # Run with --help for subcommands and flags.
