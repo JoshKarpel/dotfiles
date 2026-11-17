@@ -790,9 +790,10 @@ EOF
   systemctl --user restart vscode-web.service
 }
 
-# Serves `manage-worktrees serve` at `https://<vm>.exe.xyz:3002/`: a form that
+# Serves `manage-worktrees serve` at `https://<vm>.exe.xyz:3002/`: a page that
 # opens a worktree in a new tab of the work session with Claude running in it,
-# so new work can start from a phone and continue there over Remote Control.
+# so new work can start from a phone and continue there over Remote Control,
+# and that clones a repository to open one in.
 #
 # It starts agents with a shell, so it rests on the same gate as VS Code: the
 # private exe.dev proxy. Never `share set-public` this port.
