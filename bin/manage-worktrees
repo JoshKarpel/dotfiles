@@ -456,8 +456,8 @@ def pick(context: typer.Context) -> None:
     Typing narrows each list to the names containing the text, ignoring case, with one the text names
     exactly first, and Enter takes the highlighted one. Up, Down, Tab, Shift+Tab, Ctrl+N, Ctrl+P and
     Ctrl+K move the highlight, and the query edits as a shell's line does (Left, Right, Ctrl+A, Ctrl+E,
-    Ctrl+W, Ctrl+U and the rest). Escape goes back from the branches to the clones, and leaves from the
-    clones; Ctrl+C leaves from either.
+    Ctrl+W, Ctrl+U and the rest). Escape goes back from the branches or the roots to the clones, and
+    leaves from the clones; Ctrl+C leaves from any of them.
     """
     if context.invoked_subcommand is not None:
         return
@@ -479,7 +479,7 @@ def pick(context: typer.Context) -> None:
                 return
             case Cloning(repository=repository) as cloning:
                 typer.echo(f"cloning {repository.slug} into {cloning.path}")
-                run("gh", "repo", "clone", repository.slug, cloning.path)
+                run("gh", "repo", "clone", "--", repository.slug, cloning.path)
                 picking = ChoosingBranch(clone_search=EMPTY_SEARCH, clone=cloning.path, search=EMPTY_SEARCH)
             case _ as unreachable:
                 assert_never(unreachable)
@@ -487,8 +487,13 @@ def pick(context: typer.Context) -> None:
 
 def read_clones() -> tuple[tuple[Section, ...], dict[Path, Branches]]:
     """Every clone under CLONE_ROOTS, a section per root, and the branches of each that `new` can open."""
-    sections = tuple(Section(root=root, clones=discover_clones(root)) for root in CLONE_ROOTS)
+    sections = read_sections()
     return sections, {clone: read_branches(clone) for section in sections for clone in section.clones}
+
+
+def read_sections() -> tuple[Section, ...]:
+    """Every clone under CLONE_ROOTS, a section per root, without the git calls `read_clones` makes for branches."""
+    return tuple(Section(root=root, clones=discover_clones(root)) for root in CLONE_ROOTS)
 
 
 def discover_clones(root: Path) -> tuple[Path, ...]:
@@ -557,6 +562,10 @@ class Section:
         """The root as the heading names it, relative to the home directory every root is directly under."""
         return f"~/{self.root.name}"
 
+    def has_clone_named(self, name: str) -> bool:
+        """Whether a clone already sits where cloning a repository called NAME under this root would put it."""
+        return any(clone.name == name for clone in self.clones)
+
 
 @dataclass(frozen=True, slots=True)
 class Opening:
@@ -580,10 +589,13 @@ class Repository:
 
 
 # OWNER/REPO, alone or as a github.com URL (HTTPS or SSH), which may go on past the
-# repository (/tree/main, /pull/12) when copied from a browser. GitHub limits an owner
-# to letters, digits, and hyphens, and a repository to those plus `.` and `_`.
+# repository (/tree/main, /pull/12, ?tab=readme, #readme) when copied from a browser.
+# GitHub limits an owner to letters, digits, and hyphens, never leading, and a
+# repository to those plus `.` and `_`. The leading hyphen matters beyond GitHub's
+# rule: an owner starting with one would reach `gh repo clone` as a flag.
 REPOSITORY = re.compile(
-    r"(?:https?://github\.com/|git@github\.com:)?(?P<owner>[A-Za-z0-9-]+)/(?P<name>[A-Za-z0-9._-]+?)(?:\.git)?(?:/.*)?"
+    r"(?:https?://(?:www\.)?github\.com/|git@github\.com:)?"
+    r"(?P<owner>[A-Za-z0-9][A-Za-z0-9-]*)/(?P<name>[A-Za-z0-9._-]+?)(?:\.git)?(?:[/?#].*)?"
 )
 
 
@@ -653,7 +665,7 @@ def clone_rows(sections: tuple[Section, ...], query: str) -> tuple[Row[Path | Re
 
 def root_rows(sections: tuple[Section, ...], repository: Repository, query: str) -> tuple[Row[Path], ...]:
     """The roots whose heading contains QUERY that have no clone named for REPOSITORY yet."""
-    free = [section for section in sections if repository.name not in {clone.name for clone in section.clones}]
+    free = [section for section in sections if not section.has_clone_named(repository.name)]
     return tuple(Option(section.title, section.root) for section in substring_matches(query, free, key=lambda section: section.title))
 
 
@@ -1036,7 +1048,7 @@ def parse_target(repo: str, clone: str, root: str, sections: tuple[Section, ...]
     by_root = {str(section.root): section for section in sections}
     if (section := by_root.get(root)) is None:
         return Rejection(HTTPStatus.BAD_REQUEST, "That is not one of the places listed to clone into.")
-    if repository.name in {path.name for path in section.clones}:
+    if section.has_clone_named(repository.name):
         return Rejection(
             HTTPStatus.CONFLICT, f"{section.title} already has a clone named {repository.name}; pick it from the list instead."
         )
@@ -1314,25 +1326,29 @@ class OpeningHandler(BaseHTTPRequestHandler):
             return
         body = self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode()
         headers = {key.lower(): value for key, value in self.headers.items()}
-        sections, _ = read_clones()
-        match parse_opening(headers, body, sections):
+        match parse_opening(headers, body, read_sections()):
             case Rejection(status=status, message=message):
                 self.send_page(status, Notice(message, is_error=True), remote_sessions(read_session_records(CLAUDE_SESSIONS)))
             case Opening(clone=clone, branch=branch):
                 self.open_with_claude(clone, branch)
             case CloneAndOpen(cloning=cloning, branch=branch):
-                result = subprocess.run(
-                    ["gh", "repo", "clone", cloning.repository.slug, str(cloning.path)],
-                    capture_output=True,
-                    text=True,
-                    timeout=timedelta(minutes=10).total_seconds(),
-                )
-                if result.returncode != 0:
-                    self.send_failure(result.stderr.strip() or f"gh repo clone exited {result.returncode}")
-                    return
-                self.open_with_claude(cloning.path, branch)
+                command = ["gh", "repo", "clone", "--", cloning.repository.slug, str(cloning.path)]
+                if self.run_or_fail("gh repo clone", command, timedelta(minutes=10)):
+                    self.open_with_claude(cloning.path, branch)
             case _ as unreachable:
                 assert_never(unreachable)
+
+    def run_or_fail(self, label: str, command: list[str], timeout: timedelta) -> bool:
+        """Run COMMAND, called LABEL in errors, and when it fails or outlasts TIMEOUT, send the form again under why and return False."""
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=timeout.total_seconds())
+        except subprocess.TimeoutExpired:
+            self.send_failure(f"{label} took longer than {timeout} and was stopped.")
+            return False
+        if result.returncode != 0:
+            self.send_failure(result.stderr.strip() or f"{label} exited {result.returncode}")
+            return False
+        return True
 
     def open_with_claude(self, clone: Path, branch: str) -> None:
         """Run `new` with Claude as the tab's command, and redirect to the page that waits for it to connect."""
@@ -1341,14 +1357,8 @@ class OpeningHandler(BaseHTTPRequestHandler):
         # /resume show, and `--remote-control` is what the Claude app lists.
         claude = shlex.join(["claude", "--name", name, "--remote-control", name])
         # The script's own interpreter already has its dependencies, so this skips uv entirely.
-        result = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve()), "new", "--command", claude, "--no-focus", "--", str(clone), branch],
-            capture_output=True,
-            text=True,
-            timeout=timedelta(minutes=2).total_seconds(),
-        )
-        if result.returncode != 0:
-            self.send_failure(result.stderr.strip() or f"manage-worktrees new exited {result.returncode}")
+        command = [sys.executable, str(Path(__file__).resolve()), "new", "--command", claude, "--no-focus", "--", str(clone), branch]
+        if not self.run_or_fail("manage-worktrees new", command, timedelta(minutes=2)):
             return
         # Post/redirect/get, so reloading the page that says it opened does not open it again.
         self.send_response(HTTPStatus.SEE_OTHER)
@@ -1507,6 +1517,9 @@ def _selftest() -> int:
         ("a name without an owner names no repository", parse_repository("new.repo_2") is None),
         ("another host's URL names no repository", parse_repository("https://gitlab.com/octo-org/new.repo_2") is None),
         ("a repository of .. names none", parse_repository("octo-org/..") is None),
+        ("an owner with a leading hyphen, which gh would read as a flag, names none", parse_repository("-u/new.repo_2") is None),
+        ("a URL with a fragment names its repository", parse_repository("https://github.com/octo-org/new.repo_2#readme") == fresh),
+        ("a URL with a query names its repository", parse_repository("https://www.github.com/octo-org/new.repo_2?tab=x") == fresh),
         (
             "a repository not cloned anywhere is offered to clone, after nothing matched",
             clone_rows(sections, "octo-org/new.repo_2") == (Option("+ clone octo-org/new.repo_2", fresh),),
