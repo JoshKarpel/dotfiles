@@ -262,8 +262,9 @@ zellij-custom-keybinds
 # One git worktree per zellij tab, each running its own agent, aliased `wt`:
 # `wt new` opens a branch in <repo>.worktrees/<branch> beside the clone, in a
 # tab of its own, and `wt done` removes the worktree and closes its tab. `wt`
-# alone (Alt+Shift+e in zellij) picks the clone, from ~/projects and ~/work, and
-# the worktree, local branch, or new branch instead of taking them as
+# alone (Alt+Shift+e in zellij) picks the clone, from ~/projects and ~/work (or
+# clones OWNER/REPO under the one you pick), and the worktree, local branch, or
+# new branch instead of taking them as
 # arguments. `wt new --command CMD` runs CMD as the tab's command in place of a
 # shell, and `manage-worktrees serve` is `new` with Claude as that command,
 # behind a web form, for dev boxes to serve on 3002. The

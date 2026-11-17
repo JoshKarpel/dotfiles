@@ -23,6 +23,7 @@ import html
 import json
 import os
 import pty
+import re
 import shlex
 import socket
 import struct
@@ -448,6 +449,10 @@ def pick(context: typer.Context) -> None:
 
     The local branches listed are those checked out nowhere, most recent first; picking one gives it a worktree.
 
+    Typing OWNER/REPO, or pasting a github.com URL, offers to clone that repository with `gh repo clone`, which then
+    asks which root it goes under (one that already holds a clone of that name is not offered) before going on to its
+    branches as for any other clone.
+
     Typing narrows each list to the names containing the text, ignoring case, with one the text names
     exactly first, and Enter takes the highlighted one. Up, Down, Tab, Shift+Tab, Ctrl+N, Ctrl+P and
     Ctrl+K move the highlight, and the query edits as a shell's line does (Left, Right, Ctrl+A, Ctrl+E,
@@ -459,18 +464,30 @@ def pick(context: typer.Context) -> None:
     if not os.environ.get("ZELLIJ"):
         raise fail("not inside a zellij session")
 
-    # Read up front, all of them, so stepping the picker never waits on git; it takes milliseconds.
-    sections, branches = read_clones()
-    opening = asyncio.run(choose_opening(sections, branches, title="worktrees"))
-    if opening is None:
-        return
-    typer.echo(f"opening {tab_name(opening.clone, opening.branch)}")
-    new(opening.clone, opening.branch)
+    # A clone is made between two runs of the picker, the second starting at the
+    # new clone's branches, since its branches can only be read once it exists.
+    picking: Choosing = ChoosingClone(search=EMPTY_SEARCH)
+    while True:
+        # Read up front, all of them, so stepping the picker never waits on git; it takes milliseconds.
+        sections, branches = read_clones()
+        match asyncio.run(run_chooser(sections, branches, picking, title="worktrees")):
+            case None:
+                return
+            case Opening(clone=clone, branch=branch):
+                typer.echo(f"opening {tab_name(clone, branch)}")
+                new(clone, branch)
+                return
+            case Cloning(repository=repository) as cloning:
+                typer.echo(f"cloning {repository.slug} into {cloning.path}")
+                run("gh", "repo", "clone", repository.slug, cloning.path)
+                picking = ChoosingBranch(clone_search=EMPTY_SEARCH, clone=cloning.path, search=EMPTY_SEARCH)
+            case _ as unreachable:
+                assert_never(unreachable)
 
 
 def read_clones() -> tuple[tuple[Section, ...], dict[Path, Branches]]:
     """Every clone under CLONE_ROOTS, a section per root, and the branches of each that `new` can open."""
-    sections = tuple(Section(title=f"~/{root.name}", clones=discover_clones(root)) for root in CLONE_ROOTS)
+    sections = tuple(Section(root=root, clones=discover_clones(root)) for root in CLONE_ROOTS)
     return sections, {clone: read_branches(clone) for section in sections for clone in section.clones}
 
 
@@ -532,8 +549,13 @@ def read_branches(clone: Path) -> Branches:
 class Section:
     """The clones under one root, listed under its heading."""
 
-    title: str
+    root: Path
     clones: tuple[Path, ...]
+
+    @property
+    def title(self) -> str:
+        """The root as the heading names it, relative to the home directory every root is directly under."""
+        return f"~/{self.root.name}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -542,6 +564,53 @@ class Opening:
 
     clone: Path
     branch: str
+
+
+@dataclass(frozen=True, slots=True)
+class Repository:
+    """A GitHub repository named in the clone picker's query, to clone."""
+
+    owner: str
+    name: str
+
+    @property
+    def slug(self) -> str:
+        """OWNER/NAME, as `gh repo clone` takes it."""
+        return f"{self.owner}/{self.name}"
+
+
+# OWNER/REPO, alone or as a github.com URL (HTTPS or SSH), which may go on past the
+# repository (/tree/main, /pull/12) when copied from a browser. GitHub limits an owner
+# to letters, digits, and hyphens, and a repository to those plus `.` and `_`.
+REPOSITORY = re.compile(
+    r"(?:https?://github\.com/|git@github\.com:)?(?P<owner>[A-Za-z0-9-]+)/(?P<name>[A-Za-z0-9._-]+?)(?:\.git)?(?:/.*)?"
+)
+
+
+def parse_repository(query: str) -> Repository | None:
+    """The repository QUERY names, or None when it names none.
+
+    `.` and `..` match the pattern but would put the clone at its root or above it.
+    """
+    if (match := REPOSITORY.fullmatch(query.strip())) is None or match["name"] in (".", ".."):
+        return None
+    return Repository(owner=match["owner"], name=match["name"])
+
+
+@dataclass(frozen=True, slots=True)
+class Cloning:
+    """What the picker chose instead of an opening: a repository to clone under ROOT, before choosing its branch."""
+
+    repository: Repository
+    root: Path
+
+    @property
+    def path(self) -> Path:
+        """Where the clone lands, which is where `discover_clones` will find it."""
+        return self.root / self.repository.name
+
+
+type Choice = Opening | Cloning
 
 
 @dataclass(frozen=True, slots=True)
@@ -562,13 +631,30 @@ class Option[T]:
 type Row[T] = Heading | Option[T]
 
 
-def clone_rows(sections: tuple[Section, ...], query: str) -> tuple[Row[Path], ...]:
-    """The clones whose name contains QUERY, under the heading of each section that has any."""
-    rows: list[Row[Path]] = []
+def clone_rows(sections: tuple[Section, ...], query: str) -> tuple[Row[Path | Repository], ...]:
+    """The clones whose name contains QUERY, under the heading of each section that has any, then QUERY's repository to clone.
+
+    A query naming a repository matches the clones by the repository's name, so
+    one already cloned is listed above the offer to clone it again. The offer is
+    left out when every root already has a clone of that name.
+    """
+    repository = parse_repository(query)
+    rows: list[Row[Path | Repository]] = []
     for section in sections:
-        if matched := substring_matches(query, section.clones, key=lambda clone: clone.name):
+        matched = substring_matches(
+            repository.name if repository is not None else query, section.clones, key=lambda clone: clone.name
+        )
+        if matched:
             rows += [Heading(section.title), *(Option(clone.name, clone) for clone in matched)]
+    if repository is not None and root_rows(sections, repository, ""):
+        rows.append(Option(f"+ clone {repository.slug}", repository))
     return tuple(rows)
+
+
+def root_rows(sections: tuple[Section, ...], repository: Repository, query: str) -> tuple[Row[Path], ...]:
+    """The roots whose heading contains QUERY that have no clone named for REPOSITORY yet."""
+    free = [section for section in sections if repository.name not in {clone.name for clone in section.clones}]
+    return tuple(Option(section.title, section.root) for section in substring_matches(query, free, key=lambda section: section.title))
 
 
 def branch_rows(branches: Branches, query: str) -> tuple[Row[str], ...]:
@@ -652,17 +738,27 @@ class ChoosingBranch:
 
 
 @dataclass(frozen=True, slots=True)
+class ChoosingRoot:
+    """The second step when the first chose a repository to clone, holding the first step's search as `ChoosingBranch` does."""
+
+    clone_search: Search
+    repository: Repository
+    search: Search
+
+
+@dataclass(frozen=True, slots=True)
 class Finished:
-    """The picker is done, having chosen OPENING, or nothing if it was left."""
+    """The picker is done, having chosen CHOSEN, or nothing if it was left."""
 
-    opening: Opening | None
+    chosen: Choice | None
 
 
-type Picking = ChoosingClone | ChoosingBranch | Finished
+type Choosing = ChoosingClone | ChoosingBranch | ChoosingRoot
+type Picking = Choosing | Finished
 
 
 def step(
-    picking: ChoosingClone | ChoosingBranch,
+    picking: Choosing,
     event: InputEvent,
     sections: tuple[Section, ...],
     branches: Mapping[Path, Branches],
@@ -673,15 +769,17 @@ def step(
     while the picker starts, say) land as if each had been seen.
     """
     if event == KeyPressed(key=Key.ControlC):
-        return Finished(opening=None)
+        return Finished(chosen=None)
 
     match picking:
         case ChoosingClone(search=search):
             match navigate(search, clone_rows(sections, search.query), event):
-                case Chosen(value=clone):
+                case Chosen(value=Path() as clone):
                     return ChoosingBranch(clone_search=search, clone=clone, search=EMPTY_SEARCH)
+                case Chosen(value=Repository() as repository):
+                    return ChoosingRoot(clone_search=search, repository=repository, search=EMPTY_SEARCH)
                 case Back():
-                    return Finished(opening=None)
+                    return Finished(chosen=None)
                 case Search() as moved:
                     return ChoosingClone(search=moved)
                 case None:
@@ -691,7 +789,19 @@ def step(
         case ChoosingBranch(clone_search=clone_search, clone=clone, search=search):
             match navigate(search, branch_rows(branches[clone], search.query), event):
                 case Chosen(value=branch):
-                    return Finished(opening=Opening(clone=clone, branch=branch))
+                    return Finished(chosen=Opening(clone=clone, branch=branch))
+                case Back():
+                    return ChoosingClone(search=clone_search)
+                case Search() as moved:
+                    return replace(picking, search=moved)
+                case None:
+                    return None
+                case _ as unreachable:
+                    assert_never(unreachable)
+        case ChoosingRoot(clone_search=clone_search, repository=repository, search=search):
+            match navigate(search, root_rows(sections, repository, search.query), event):
+                case Chosen(value=root):
+                    return Finished(chosen=Cloning(repository=repository, root=root))
                 case Back():
                     return ChoosingClone(search=clone_search)
                 case Search() as moved:
@@ -709,7 +819,7 @@ def queried(picking: Picking, edit: Callable[[str], str]) -> Picking:
     match picking:
         case ChoosingClone(search=search):
             return ChoosingClone(search=search.edited(edit(search.query)))
-        case ChoosingBranch(search=search):
+        case ChoosingBranch(search=search) | ChoosingRoot(search=search):
             return replace(picking, search=search.edited(edit(search.query)))
         case Finished():
             return picking
@@ -745,26 +855,25 @@ def query_row(field: TextInput) -> Div:
 
 
 def view(
-    picking: ChoosingClone | ChoosingBranch, sections: tuple[Section, ...], branches: Mapping[Path, Branches]
+    picking: Choosing, sections: tuple[Section, ...], branches: Mapping[Path, Branches]
 ) -> tuple[str, Search, tuple[Row[object], ...]]:
     """The title, search and rows the current step shows."""
     match picking:
         case ChoosingClone(search=search):
-            return "a clone", search, clone_rows(sections, search.query)
+            return "a clone, or type OWNER/REPO to clone one", search, clone_rows(sections, search.query)
         case ChoosingBranch(clone=clone, search=search):
             return f"{clone.name}: a worktree, a branch, or type a new one", search, branch_rows(branches[clone], search.query)
+        case ChoosingRoot(repository=repository, search=search):
+            return f"clone {repository.slug} under", search, root_rows(sections, repository, search.query)
         case _ as unreachable:
             assert_never(unreachable)
 
 
 @component
 def chooser(
-    sections: tuple[Section, ...], branches: Mapping[Path, Branches], choose: Callable[[Opening], None]
+    sections: tuple[Section, ...], branches: Mapping[Path, Branches], start: Choosing, choose: Callable[[Choice], None]
 ) -> Div:
-    def start() -> Picking:
-        return ChoosingClone(search=EMPTY_SEARCH)
-
-    picking, set_picking = use_state(start)
+    picking, set_picking = use_state(lambda: start)
     row_handle, _ = use_state(ElementHandle)
     field = use_text_input(
         query_of(picking), lambda edit: query_of(set_picking(lambda latest: queried(latest, edit))), auto_focus=True
@@ -781,12 +890,12 @@ def chooser(
                 if (controls := response_controls(field.on_input(trimmed(event), receiver))) is None:
                     return None
                 return (*controls, scroll)
-            case Finished(opening=opening) as finished:
+            case Finished(chosen=chosen) as finished:
                 set_picking(finished)
-                if opening is not None:
-                    choose(opening)
+                if chosen is not None:
+                    choose(chosen)
                 return Quit()
-            case ChoosingClone() | ChoosingBranch() as moved:
+            case ChoosingClone() | ChoosingBranch() | ChoosingRoot() as moved:
                 set_picking(moved)
                 return scroll
             case _ as unreachable:
@@ -826,12 +935,12 @@ def chooser(
     )
 
 
-async def choose_opening(
-    sections: tuple[Section, ...], branches: Mapping[Path, Branches], **app_options: object
-) -> Opening | None:
-    """Run the picker until it quits, and return what it chose, if anything."""
-    chosen: list[Opening] = []
-    await counterweight_app(chooser(sections, branches, chosen.append), **app_options)
+async def run_chooser(
+    sections: tuple[Section, ...], branches: Mapping[Path, Branches], start: Choosing, **app_options: object
+) -> Choice | None:
+    """Run the picker from START until it quits, and return what it chose, if anything."""
+    chosen: list[Choice] = []
+    await counterweight_app(chooser(sections, branches, start, chosen.append), **app_options)
     return chosen[-1] if chosen else None
 
 
@@ -1202,8 +1311,8 @@ def _selftest() -> int:
 
     projects, work = Path("/p"), Path("/w")
     sections = (
-        Section(title="~/projects", clones=(projects / "dotfiles", projects / "ray")),
-        Section(title="~/work", clones=(work / "service",)),
+        Section(root=projects, clones=(projects / "dotfiles", projects / "ray")),
+        Section(root=work, clones=(work / "service",)),
     )
     branches = {
         projects / "dotfiles": Branches(worktrees=("fix-tabs", "wt"), without_worktree=("spike",)),
@@ -1244,7 +1353,7 @@ def _selftest() -> int:
         return picking
 
     def opened(clone: Path, branch: str) -> Finished:
-        return Finished(opening=Opening(clone=clone, branch=branch))
+        return Finished(chosen=Opening(clone=clone, branch=branch))
 
     cases: list[tuple[str, bool]] = [
         ("discovery keeps only directories whose .git is a directory", discovered == (root / "clone", root / "other")),
@@ -1260,7 +1369,7 @@ def _selftest() -> int:
         ),
         (
             "a heading appears only over a section with matches",
-            clone_rows(sections, "SERV") == (Heading("~/work"), Option("service", work / "service")),
+            clone_rows(sections, "SERV") == (Heading("~/w"), Option("service", work / "service")),
         ),
         ("an empty query lists every section", len(clone_rows(sections, "")) == 5),
         (
@@ -1307,10 +1416,48 @@ def _selftest() -> int:
             "Escape from the branches goes back to the clones, query kept",
             stepped("serv", enter, escape, "i", enter, enter) == opened(work / "service", "Feature"),
         ),
-        ("Escape from the clones leaves", stepped(escape) == Finished(opening=None)),
-        ("Ctrl+C leaves from the branches", stepped(enter, KeyPressed(key=Key.ControlC)) == Finished(opening=None)),
-        ("keys after finishing change nothing", stepped(escape, enter, enter) == Finished(opening=None)),
+        ("Escape from the clones leaves", stepped(escape) == Finished(chosen=None)),
+        ("Ctrl+C leaves from the branches", stepped(enter, KeyPressed(key=Key.ControlC)) == Finished(chosen=None)),
+        ("keys after finishing change nothing", stepped(escape, enter, enter) == Finished(chosen=None)),
         ("Enter with nothing matched is left to the field", step(ChoosingClone(search=Search("zz", Highlight())), enter, sections, branches) is None),
+    ]
+
+    fresh = Repository(owner="octo-org", name="new.repo_2")
+    cases += [
+        ("OWNER/REPO names a repository", parse_repository(" octo-org/new.repo_2 ") == fresh),
+        ("an HTTPS URL names its repository", parse_repository("https://github.com/octo-org/new.repo_2.git") == fresh),
+        ("an SSH URL names its repository", parse_repository("git@github.com:octo-org/new.repo_2.git") == fresh),
+        ("a URL past the repository names it", parse_repository("https://github.com/octo-org/new.repo_2/tree/main") == fresh),
+        ("a name without an owner names no repository", parse_repository("new.repo_2") is None),
+        ("another host's URL names no repository", parse_repository("https://gitlab.com/octo-org/new.repo_2") is None),
+        ("a repository of .. names none", parse_repository("octo-org/..") is None),
+        (
+            "a repository not cloned anywhere is offered to clone, after nothing matched",
+            clone_rows(sections, "octo-org/new.repo_2") == (Option("+ clone octo-org/new.repo_2", fresh),),
+        ),
+        (
+            "a repository cloned under one root lists that clone, then offers to clone it again",
+            clone_rows(sections, "someone/ray")
+            == (Heading("~/p"), Option("ray", projects / "ray"), Option("+ clone someone/ray", Repository("someone", "ray"))),
+        ),
+        (
+            "a repository cloned under every root is not offered",
+            clone_rows((sections[0], Section(root=work, clones=(work / "ray",))), "someone/ray")[-1] == Option("ray", work / "ray"),
+        ),
+        (
+            "the roots offered leave out one already holding a clone of that name",
+            root_rows(sections, Repository("someone", "ray"), "") == (Option("~/w", work),),
+        ),
+        (
+            "Enter on the offer, then on a root, chooses to clone there",
+            stepped("octo-org/new.repo_2", enter, down, enter) == Finished(chosen=Cloning(repository=fresh, root=work)),
+        ),
+        ("a root can be picked by typing its name", stepped("octo-org/new.repo_2", enter, "w", enter) == Finished(chosen=Cloning(fresh, work))),
+        (
+            "Escape from the roots goes back to the clones, query kept",
+            stepped("someone/ray", enter, escape, enter, "spike", enter) == opened(projects / "ray", "spike"),
+        ),
+        ("a clone lands under its root by the repository's name", Cloning(fresh, work).path == work / "new.repo_2"),
     ]
 
     tabs = [
@@ -1338,7 +1485,7 @@ def _selftest() -> int:
     }
     clones = (projects / "dotfiles", projects / "ray")
     page = render_page(
-        (Section(title="~/projects", clones=(projects / "a<b",)),),
+        (Section(root=projects, clones=(projects / "a<b",)),),
         {projects / "a<b": Branches(worktrees=("x</script>",), without_worktree=())},
         "box",
         Notice("<oops>", is_error=True),
@@ -1421,15 +1568,16 @@ def _selftest() -> int:
         *steps: object,
         picked_from: tuple[Section, ...] = sections,
         branches_of: Mapping[Path, Branches] = branches,
-    ) -> Opening | None:
+        start: Choosing = ChoosingClone(search=EMPTY_SEARCH),
+    ) -> Choice | None:
         return asyncio.run(
             asyncio.wait_for(
-                choose_opening(picked_from, branches_of, headless=True, dimensions=(50, 12), autopilot=[*steps, Quit()]),
+                run_chooser(picked_from, branches_of, start, headless=True, dimensions=(50, 12), autopilot=[*steps, Quit()]),
                 timeout=timedelta(seconds=30).total_seconds(),
             )
         )
 
-    many = (Section(title="~/projects", clones=tuple(projects / f"clone-{index:02}" for index in range(30))),)
+    many = (Section(root=projects, clones=tuple(projects / f"clone-{index:02}" for index in range(30))),)
     frames: list[Frame] = []
     picked(*(down for _ in range(20)), Screenshot(frames.append), picked_from=many, branches_of={})
     screen = frames[0].text(ansi=False) if frames else ""
@@ -1442,6 +1590,15 @@ def _selftest() -> int:
             == Opening(projects / "ray", "a-b"),
         ),
         ("the app hands back nothing when left", picked(escape) is None),
+        (
+            "the app hands back a repository to clone",
+            picked(*typed("octo-org/new.repo_2"), enter, enter) == Cloning(repository=fresh, root=projects),
+        ),
+        (
+            "the app can start at a clone's branches, as it does after cloning one",
+            picked(enter, start=ChoosingBranch(clone_search=EMPTY_SEARCH, clone=work / "service", search=EMPTY_SEARCH))
+            == Opening(work / "service", "Feature"),
+        ),
         ("moving past the rows shown scrolls the highlight into view", "clone-20" in screen and "clone-00" not in screen),
     ]
 
