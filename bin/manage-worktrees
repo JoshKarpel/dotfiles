@@ -951,7 +951,8 @@ def serve(
 ) -> None:
     """Serve a web form that runs `new` with Claude as the tab's command, for opening a worktree from a phone.
 
-    Pick a clone, name a branch, and the tab opens with Claude in it; Remote
+    Pick a clone, or name a repository to clone and where, name a branch, and
+    the tab opens with Claude in it; Remote
     Control then lists that session in the Claude app as <repo>:<branch>. The
     tab opens with `--no-focus`, so whoever is looking at the session stays
     where they are.
@@ -980,23 +981,66 @@ class Rejection:
     message: str
 
 
-def parse_opening(headers: Mapping[str, str], body: str, clones: Iterable[Path]) -> Opening | Rejection:
-    """What a form submission asks `new` to open, or why it is refused.
+# The repo field's value for cloning a repository rather than picking a clone, which no clone's absolute path can be.
+CLONE_CHOICE = "clone"
 
-    HEADERS are keyed in lowercase. The repo has to be one of CLONES, so the
-    form can only name a clone the page offered, never an arbitrary path. The
-    branch is checked by `new` itself, through git.
+
+@dataclass(frozen=True, slots=True)
+class CloneAndOpen:
+    """What a form submission asks for instead of an opening: clone a repository, then open BRANCH in the new clone."""
+
+    cloning: Cloning
+    branch: str
+
+
+def parse_opening(headers: Mapping[str, str], body: str, sections: tuple[Section, ...]) -> Opening | CloneAndOpen | Rejection:
+    """What a form submission asks `new` to open, and whether to clone it first, or why it is refused.
+
+    HEADERS are keyed in lowercase. The branch is checked by `new` itself, through git.
     """
     expected_origin = f"{headers.get('x-forwarded-proto', '')}://{headers.get('x-forwarded-host', '')}"
     if headers.get("origin") != expected_origin:
         return Rejection(HTTPStatus.FORBIDDEN, "This form only accepts submissions from its own page.")
     fields = parse_qs(body, keep_blank_values=True)
-    by_path = {str(clone): clone for clone in clones}
-    if (clone := by_path.get(fields.get("repo", [""])[0])) is None:
-        return Rejection(HTTPStatus.BAD_REQUEST, "That repository is not one of the clones listed.")
-    if not (branch := fields.get("branch", [""])[0].strip()):
+
+    def field(name: str) -> str:
+        return fields.get(name, [""])[0]
+
+    target = parse_target(field("repo"), field("clone"), field("root"), sections)
+    if isinstance(target, Rejection):
+        return target
+    if not (branch := field("branch").strip()):
         return Rejection(HTTPStatus.BAD_REQUEST, "Name a branch to open.")
-    return Opening(clone=clone, branch=branch)
+    match target:
+        case Path() as clone:
+            return Opening(clone=clone, branch=branch)
+        case Cloning() as cloning:
+            return CloneAndOpen(cloning=cloning, branch=branch)
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def parse_target(repo: str, clone: str, root: str, sections: tuple[Section, ...]) -> Path | Cloning | Rejection:
+    """The clone a submission's REPO field picks, or with CLONE_CHOICE there, the repository CLONE names to clone under ROOT.
+
+    The form can only name a clone or a root the page offered, never an
+    arbitrary path, and a clone cannot land on one already there, as in the picker.
+    """
+    if repo != CLONE_CHOICE:
+        by_path = {str(path): path for section in sections for path in section.clones}
+        if (path := by_path.get(repo)) is None:
+            return Rejection(HTTPStatus.BAD_REQUEST, "That repository is not one of the clones listed.")
+        return path
+    if (repository := parse_repository(clone)) is None:
+        return Rejection(HTTPStatus.BAD_REQUEST, "Name the repository to clone as OWNER/REPO, or paste its github.com URL.")
+    by_root = {str(section.root): section for section in sections}
+    if (section := by_root.get(root)) is None:
+        return Rejection(HTTPStatus.BAD_REQUEST, "That is not one of the places listed to clone into.")
+    if repository.name in {path.name for path in section.clones}:
+        return Rejection(
+            HTTPStatus.CONFLICT, f"{section.title} already has a clone named {repository.name}; pick it from the list instead."
+        )
+    return Cloning(repository=repository, root=section.root)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1118,6 +1162,8 @@ h1 span { color: var(--muted); font-weight: normal; }
 form { display: grid; gap: 1rem; background: var(--surface); border: 1px solid var(--line);
   border-radius: 0.75rem; padding: 1rem; }
 label { display: grid; gap: 0.35rem; font-weight: 600; font-size: 0.9rem; }
+fieldset { display: grid; gap: 1rem; border: none; margin: 0; padding: 0; min-width: 0; }
+fieldset[hidden] { display: none; }
 select, input, button { font: inherit; padding: 0.7rem 0.75rem; border-radius: 0.5rem;
   border: 1px solid var(--line); background: var(--ground); color: var(--ink); width: 100%; }
 button { background: var(--accent); color: var(--accent-ink); border: none; font-weight: 600; }
@@ -1137,11 +1183,17 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; }
 
 # Refills the branch suggestions for the clone picked, and remembers that clone,
 # since the next thing started from a phone is usually in the same repository.
+# Cloning is not remembered, since the clone it makes is in the list next time.
+# The clone fields are disabled while hidden, which keeps them out of both the
+# submission and the browser's check of required fields.
 PAGE_SCRIPT = """
 const repo = document.getElementById("repo");
 const list = document.getElementById("branches");
+const cloning = document.getElementById("cloning");
 function suggest() {
   list.replaceChildren(...(BRANCHES[repo.value] || []).map((name) => new Option(name)));
+  cloning.hidden = cloning.disabled = repo.value !== CLONE_CHOICE;
+  if (repo.value === CLONE_CHOICE) return;
   try { localStorage.setItem("repo", repo.value); } catch {}
 }
 try { const last = localStorage.getItem("repo"); if (last && last in BRANCHES) repo.value = last; } catch {}
@@ -1183,7 +1235,8 @@ def render_page(
 ) -> str:
     """The form, listing each section's clones and suggesting each clone's branches, under NOTICE if there is one.
 
-    The running SESSIONS follow it, and the page reloads at REFRESH_TO after a
+    Last among the clones is the choice to clone a repository instead, under
+    one of the sections' roots. The running SESSIONS follow it, and the page reloads at REFRESH_TO after a
     moment when it is waiting on one to connect.
     """
     groups = "".join(
@@ -1192,6 +1245,9 @@ def render_page(
         + "</optgroup>"
         for section in sections
         if section.clones
+    ) + f'<optgroup label="new"><option value="{CLONE_CHOICE}">Clone a repository…</option></optgroup>'
+    roots = "".join(
+        f'<option value="{html.escape(str(section.root))}">{html.escape(section.title)}</option>' for section in sections
     )
     suggestions = {
         str(clone): [*branches[clone].worktrees, *branches[clone].without_worktree] for clone in branches
@@ -1218,6 +1274,10 @@ def render_page(
 {render_notice(notice)}
 <form method="post" action="/open">
 <label>Repository<select name="repo" id="repo">{groups}</select></label>
+<fieldset id="cloning" hidden disabled>
+<label>Clone<input name="clone" required placeholder="OWNER/REPO or a github.com URL" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+<label>Into<select name="root">{roots}</select></label>
+</fieldset>
 <label>Branch<input name="branch" list="branches" required autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go"></label>
 <datalist id="branches"></datalist>
 <button>Open with Claude</button>
@@ -1225,7 +1285,7 @@ def render_page(
 <h2>Remote Control sessions</h2>
 {render_sessions(sessions)}
 </main>
-<script>const BRANCHES = {suggestions_json};{PAGE_SCRIPT}</script>
+<script>const BRANCHES = {suggestions_json}; const CLONE_CHOICE = {json.dumps(CLONE_CHOICE)};{PAGE_SCRIPT}</script>
 </body>
 </html>
 """
@@ -1255,36 +1315,52 @@ class OpeningHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode()
         headers = {key.lower(): value for key, value in self.headers.items()}
         sections, _ = read_clones()
-        match parse_opening(headers, body, (clone for section in sections for clone in section.clones)):
+        match parse_opening(headers, body, sections):
             case Rejection(status=status, message=message):
                 self.send_page(status, Notice(message, is_error=True), remote_sessions(read_session_records(CLAUDE_SESSIONS)))
             case Opening(clone=clone, branch=branch):
-                name = tab_name(clone, branch)
-                # The name goes to both flags: `--name` is what the prompt box and
-                # /resume show, and `--remote-control` is what the Claude app lists.
-                claude = shlex.join(["claude", "--name", name, "--remote-control", name])
-                # The script's own interpreter already has its dependencies, so this skips uv entirely.
+                self.open_with_claude(clone, branch)
+            case CloneAndOpen(cloning=cloning, branch=branch):
                 result = subprocess.run(
-                    [sys.executable, str(Path(__file__).resolve()), "new", "--command", claude, "--no-focus", "--", str(clone), branch],
+                    ["gh", "repo", "clone", cloning.repository.slug, str(cloning.path)],
                     capture_output=True,
                     text=True,
-                    timeout=timedelta(minutes=2).total_seconds(),
+                    timeout=timedelta(minutes=10).total_seconds(),
                 )
                 if result.returncode != 0:
-                    message = result.stderr.strip() or f"manage-worktrees new exited {result.returncode}"
-                    self.send_page(
-                        HTTPStatus.INTERNAL_SERVER_ERROR,
-                        Notice(message, is_error=True),
-                        remote_sessions(read_session_records(CLAUDE_SESSIONS)),
-                    )
+                    self.send_failure(result.stderr.strip() or f"gh repo clone exited {result.returncode}")
                     return
-                # Post/redirect/get, so reloading the page that says it opened does not open it again.
-                self.send_response(HTTPStatus.SEE_OTHER)
-                self.send_header("Location", f"/?opened={quote(name)}")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
+                self.open_with_claude(cloning.path, branch)
             case _ as unreachable:
                 assert_never(unreachable)
+
+    def open_with_claude(self, clone: Path, branch: str) -> None:
+        """Run `new` with Claude as the tab's command, and redirect to the page that waits for it to connect."""
+        name = tab_name(clone, branch)
+        # The name goes to both flags: `--name` is what the prompt box and
+        # /resume show, and `--remote-control` is what the Claude app lists.
+        claude = shlex.join(["claude", "--name", name, "--remote-control", name])
+        # The script's own interpreter already has its dependencies, so this skips uv entirely.
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "new", "--command", claude, "--no-focus", "--", str(clone), branch],
+            capture_output=True,
+            text=True,
+            timeout=timedelta(minutes=2).total_seconds(),
+        )
+        if result.returncode != 0:
+            self.send_failure(result.stderr.strip() or f"manage-worktrees new exited {result.returncode}")
+            return
+        # Post/redirect/get, so reloading the page that says it opened does not open it again.
+        self.send_response(HTTPStatus.SEE_OTHER)
+        self.send_header("Location", f"/?opened={quote(name)}")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def send_failure(self, message: str) -> None:
+        """The form again, under MESSAGE as an error."""
+        self.send_page(
+            HTTPStatus.INTERNAL_SERVER_ERROR, Notice(message, is_error=True), remote_sessions(read_session_records(CLAUDE_SESSIONS))
+        )
 
     def send_page(
         self,
@@ -1483,7 +1559,7 @@ def _selftest() -> int:
         "x-forwarded-proto": "https",
         "x-forwarded-host": "box.exe.xyz:3002",
     }
-    clones = (projects / "dotfiles", projects / "ray")
+    form_sections = (Section(root=projects, clones=(projects / "dotfiles", projects / "ray")), Section(root=work, clones=()))
     page = render_page(
         (Section(root=projects, clones=(projects / "a<b",)),),
         {projects / "a<b": Branches(worktrees=("x</script>",), without_worktree=())},
@@ -1539,26 +1615,55 @@ def _selftest() -> int:
         ),
         (
             "a submission from the page opens the clone and branch it names",
-            parse_opening(origin, "repo=%2Fp%2Fray&branch=+feat%2Fx+", clones) == Opening(projects / "ray", "feat/x"),
+            parse_opening(origin, "repo=%2Fp%2Fray&branch=+feat%2Fx+", form_sections) == Opening(projects / "ray", "feat/x"),
         ),
         (
             "a submission from another origin is refused",
-            parse_opening({**origin, "origin": "https://evil.exe.xyz"}, "repo=%2Fp%2Fray&branch=x", clones)
+            parse_opening({**origin, "origin": "https://evil.exe.xyz"}, "repo=%2Fp%2Fray&branch=x", form_sections)
             == Rejection(HTTPStatus.FORBIDDEN, "This form only accepts submissions from its own page."),
         ),
         (
             "a submission with no Origin is refused even with no proxy headers to compare",
-            isinstance(parse_opening({}, "repo=%2Fp%2Fray&branch=x", clones), Rejection),
+            isinstance(parse_opening({}, "repo=%2Fp%2Fray&branch=x", form_sections), Rejection),
         ),
         (
             "a repo the page did not list is refused",
-            parse_opening(origin, "repo=%2Fetc&branch=x", clones)
+            parse_opening(origin, "repo=%2Fetc&branch=x", form_sections)
             == Rejection(HTTPStatus.BAD_REQUEST, "That repository is not one of the clones listed."),
         ),
         (
             "a blank branch is refused",
-            parse_opening(origin, "repo=%2Fp%2Fray&branch=++", clones)
+            parse_opening(origin, "repo=%2Fp%2Fray&branch=++", form_sections)
             == Rejection(HTTPStatus.BAD_REQUEST, "Name a branch to open."),
+        ),
+        (
+            "a submission choosing to clone names the repository, the root, and the branch",
+            parse_opening(origin, "repo=clone&clone=+https%3A%2F%2Fgithub.com%2Focto-org%2Fnew.repo_2+&root=%2Fw&branch=b", form_sections)
+            == CloneAndOpen(Cloning(Repository("octo-org", "new.repo_2"), work), "b"),
+        ),
+        (
+            "a clone naming no repository is refused",
+            parse_opening(origin, "repo=clone&clone=ray&root=%2Fw&branch=b", form_sections)
+            == Rejection(HTTPStatus.BAD_REQUEST, "Name the repository to clone as OWNER/REPO, or paste its github.com URL."),
+        ),
+        (
+            "a clone under a root the page did not list is refused",
+            parse_opening(origin, "repo=clone&clone=o%2Fr&root=%2Ftmp&branch=b", form_sections)
+            == Rejection(HTTPStatus.BAD_REQUEST, "That is not one of the places listed to clone into."),
+        ),
+        (
+            "a clone onto one already there is refused",
+            parse_opening(origin, "repo=clone&clone=someone%2Fray&root=%2Fp&branch=b", form_sections)
+            == Rejection(HTTPStatus.CONFLICT, "~/p already has a clone named ray; pick it from the list instead."),
+        ),
+        (
+            "a clone with a blank branch is refused",
+            parse_opening(origin, "repo=clone&clone=o%2Fr&root=%2Fw&branch=", form_sections)
+            == Rejection(HTTPStatus.BAD_REQUEST, "Name a branch to open."),
+        ),
+        (
+            "the page offers cloning under each root",
+            '<option value="clone">' in page and '<select name="root"><option value="/p">~/p</option></select>' in page,
         ),
         ("the page escapes clone names and notices", "a&lt;b" in page and "&lt;oops&gt;" in page and "<oops>" not in page),
         ("a branch name cannot close the page's script early", "x</script>" not in page and "x<\\/script>" in page),
