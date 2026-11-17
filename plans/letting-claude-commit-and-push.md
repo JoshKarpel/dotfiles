@@ -515,6 +515,12 @@ checked) inside a `<details>` fold, with the model as the
 [Simon Willison's details-summary pattern](https://simonwillison.net/2026/Nov/9/details-summary/).
 Claude writes the fold itself, since only Claude knows which model it ran as.
 It leaves out the effort level, which it has no way to see.
+An issue the work resolves is linked above the fold with a
+[closing keyword](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue)
+(`Closes #12`), which is what puts the PR in the issue's Development sidebar
+and closes the issue on merge.
+Land passes the body through untouched, so GitHub's own parsing is the whole
+mechanism and land has nothing to check.
 
 **On every run:**
 
