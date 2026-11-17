@@ -31,6 +31,15 @@ doesn't need repeating per session.
   `<summary>` names your model, such as `<summary>Claude Opus 5.5</summary>`. Leave out
   the effort level: you can't see it, so a stated one is a guess. After that, land again at the end of
   each turn that committed, so the PR and its CI stay current.
+- When the work resolves a GitHub issue, link it from the draft with a closing keyword
+  on a line of its own above the fold (`Closes #12`), so the PR appears in the issue's
+  Development sidebar and merging closes it
+  ([linking a pull request to an issue](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue)).
+  Use the issue I named when starting the session; when I named none, search the repo's
+  open issues for one, link it only if it clearly describes this work, and otherwise
+  name the near misses in the report. Work that only advances an issue mentions it
+  without a keyword (`Part of #12`), since a keyword closes the issue on merge. Link
+  only issues the repo's readers can see (the public-record rule).
 - Rewrite the draft whenever what the PR is has changed. It is the only way to change your
   part of the PR description; the next land carries it.
 - After landing, wait for the PR's checks without polling: run
