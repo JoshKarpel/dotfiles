@@ -97,7 +97,14 @@ release anyway depends on what the knob filters. mise's `minimum_release_age`
 applies only to fuzzy resolution, so pinning a specific version bypasses it.
 uv's `exclude-newer` hides every release inside the window, so a pin on one is
 unsatisfiable, and the bypass is a per-package exemption
-(`exclude-newer-package = { <package> = false }`).
+(`exclude-newer-package = { <package> = false }`). npm's `min-release-age`,
+set in the project's `.npmrc`, filters the same way: the window is a bare
+number of days (`min-release-age=7`), an exact pin inside it fails with
+`ETARGET`, a dist-tag falls back to the newest version outside it, and the
+bypass is `min-release-age-exclude[]=<package>` (a name or glob, which exempts
+that package but not its dependencies). It also holds back `npm audit fix`: a
+patched release younger than the window stays uninstalled, and the command
+warns and exits non-zero, so a fresh security fix needs the exemption.
 
 ## References
 
