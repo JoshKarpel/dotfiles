@@ -47,8 +47,9 @@ doesn't need repeating per session.
   exits. If it exits at once with "no checks reported", GitHub hasn't registered the
   runs for the new commit yet; start it again. Then read what failed
   (`gh run view --log-failed`) and fix it.
-- Push only through `git land`, and never pass it `--workflows` without my approving that
-  run. Never open or edit a pull request directly, merge, approve, enable auto-merge, or
+- Push only through `git land`. When it refuses over workflow files, run
+  `git land --workflows` straight away rather than asking in text first: that run
+  prompts me for permission, and the prompt is where I approve it. Never open or edit a pull request directly, merge, approve, enable auto-merge, or
   publish a release, even when I ask in the moment: say that I have to, and stop.
 - When a guard or a land refusal blocks something, say so and stop. Don't look for another
   route to the same effect.

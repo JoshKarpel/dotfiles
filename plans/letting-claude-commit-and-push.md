@@ -549,8 +549,8 @@ mechanism and land has nothing to check.
 4. Refuse when that range touches `.github/workflows/` or an
    `action.yml`/`action.yaml`, unless run as `git land --workflows`, and list
    the files: a same-repo branch's `push` and `pull_request` runs get the repo's
-   secrets and token before anyone reviews. `--workflows` is Josh's to approve
-   (decision 3).
+   secrets and token before anyone reviews. `--workflows` is Josh's to approve,
+   through its permission prompt (decision 3).
 5. `git push -u origin HEAD`, never forced. A non-fast-forward rejection (a
    pre-commit.ci autofix, Josh pressing "Update branch", a push from another
    machine) stops land with a message, and Claude runs `git pull --ff`, which
@@ -640,8 +640,10 @@ worded as one so the harness's "unless durably authorized" clause applies:
   `gh pr checks --watch --fail-fast` in the background (started again if
   the runs haven't registered yet), then read what failed
   (`gh run view --log-failed`) and fix it.
-- Push only through `git land`, and never pass it `--workflows` without Josh
-  approving that run. Never open or edit a pull request directly, merge,
+- Push only through `git land`. When it refuses over workflow files, run
+  `git land --workflows` straight away rather than asking in text first: that
+  run prompts Josh for permission, and the prompt is where he approves it.
+  Never open or edit a pull request directly, merge,
   approve, enable auto-merge, or publish a release, even when asked to in the
   moment. Say that Josh has to, and stop.
 - When a guard or a land refusal blocks something, say so and stop. Don't look

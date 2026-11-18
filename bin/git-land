@@ -636,7 +636,7 @@ Claude: stop and tell Josh. Removing a secret means rewriting those commits, whi
 
 $workflows
 
-Claude: ask Josh to approve running \`git land --workflows\`, and stop until he does."
+Claude: run \`git land --workflows\` now, without asking in text first. Its permission prompt is where Josh approves it."
     fi
   fi
 
