@@ -44,7 +44,9 @@
   script, a default that masks the branch you meant to exercise. A pass is no
   safer than a failure: a probe asking whether a permission allows a shell
   command teaches nothing if the subject satisfies the request another way and
-  never attempts that command. Confirm the probe reached the path you think it
+  never attempts that command. A `pgrep -f` or `ps | grep` for a marker matches
+  the probe's own shell, whose command line contains the marker, so "still alive"
+  can be the probe finding itself. Confirm the probe reached the path you think it
   did before concluding anything from either outcome.
 - **Isolate a sandbox from the user's own config.** A throwaway `git init` repo
   still reads the global gitconfig and global ignore file, so a fixture named
@@ -121,6 +123,13 @@
   deliberately broken code the same way (`timeout 60 <test command>` if the suite
   has no watchdog yet): breaking a cancellation or concurrency path is exactly how
   a suite that used to finish starts hanging.
+- **Check the machine's load before blaming the change for a timeout.** On a
+  machine shared with other agents or builds, a watchdog firing or a suite
+  slowing down often measures contention, not the diff. Run `uptime` first. Where
+  the load is high, rerun on a quieter machine, or compare against the base branch
+  on the same machine at the same moment, before investigating the change. A
+  worker killed by the watchdog also drops its coverage data, so a coverage
+  collapse right after a timeout is an artifact of the kill, not untested code.
 
 ## References
 

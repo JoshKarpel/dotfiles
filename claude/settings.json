@@ -338,6 +338,15 @@
         ]
       },
       {
+        "matcher": "Edit|MultiEdit|Write|Artifact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-plan-page-check"
+          }
+        ]
+      },
+      {
         "matcher": "AskUserQuestion|ExitPlanMode",
         "hooks": [
           {

@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# PreToolUse hook (Edit, MultiEdit, Write, Artifact): keep a plan's page derived from its `.md`.
+#
+# A plan page is whatever `plan-artifact` rendered, and the next render overwrites any hand edit, so
+# the edit is lost the moment another session republishes. Publishing the `.md` itself puts raw
+# markdown where the rendered page was. Both slipped past the CLAUDE.md instruction often enough to
+# want a guard. This refuses:
+#
+# - Edit, MultiEdit, or Write on an `.html` file carrying plan-artifact's generator mark, and a Write
+#   whose new content carries it;
+# - an Artifact publish that sends `edits` to such a file, which is the same hand edit by another route;
+# - an Artifact publish of a plan's `.md`, where a plan is what `claude-stop-plan-artifact` calls one: a
+#   `.md` with an `Artifact: <url>` line, anything under a `plans/` directory, or a `PLAN.md`.
+#
+# Only `.html` files are checked for the mark, since `bin/plan-artifact` holds the same string as
+# source and has to stay editable. A publish of an `.html` path that does not exist is left to the
+# Artifact tool, whose own error already says so.
+
+set -euo pipefail
+
+GENERATOR='<meta name="generator" content="plan-artifact">'
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the hook's embedded self-tests. This marker line is
+# how `claude-hook-selftests` discovers participating hooks. The tests drive the hook through its own
+# stdin interface (exit 2 = block, 0 = allow) against files in a throwaway directory.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+  mkdir -p "$workdir/plans" "$workdir/docs" "$workdir/bin"
+  printf '<!doctype html>\n<html><head>%s<title>Ship</title></head></html>\n' "$GENERATOR" >"$workdir/page.html"
+  printf '<!doctype html>\n<title>Mine</title>\n' >"$workdir/other.html"
+  printf '# Ship it\n\nArtifact: https://claude.ai/code/artifact/abc\n\nStep one.\n' >"$workdir/docs/linked.md"
+  printf '# Draft\n\nNo link yet.\n' >"$workdir/plans/draft.md"
+  printf '# Top\n\nIdea.\n' >"$workdir/PLAN.md"
+  printf '# Guide\n\nArtifact: is mentioned mid-line here, not as a link line.\n' >"$workdir/docs/guide.md"
+  printf 'GENERATOR = %q\n' "$GENERATOR" >"$workdir/bin/plan-artifact"
+
+  t() {
+    local want="$1" desc="$2" payload="$3" got
+    jq -c --arg cwd "$workdir" '. + {cwd: $cwd}' <<<"$payload" |
+    CLAUDE_HOOK_SELFTEST= "$0" >/dev/null 2>&1 && got=0 || got=$?
+    [[ "$got" == "$want" ]] || { printf 'FAIL want=%s got=%s :: %s\n' "$want" "$got" "$desc"; fails=1; }
+  }
+  edit() { jq -cn --arg t "$1" --arg p "$2" '{tool_name: $t, tool_input: {file_path: $p, old_string: "a", new_string: "b"}}'; }
+  write() { jq -cn --arg p "$1" --arg c "$2" '{tool_name: "Write", tool_input: {file_path: $p, content: $c}}'; }
+  publish() { jq -cn --arg p "$1" '{tool_name: "Artifact", tool_input: {file_path: $p, force: true}}'; }
+
+  # --- BLOCK: hand edits to a generated page ---
+  t 2 "Edit on a generated page" "$(edit Edit "$workdir/page.html")"
+  t 2 "MultiEdit on a generated page" "$(edit MultiEdit "$workdir/page.html")"
+  t 2 "Write over a generated page" "$(write "$workdir/page.html" '<p>hand written</p>')"
+  t 2 "Write of new content carrying the mark" "$(write "$workdir/new.html" "<head>$GENERATOR</head>")"
+  t 2 "a relative path resolves against cwd" "$(edit Edit page.html)"
+  t 2 "Artifact edits on a generated page" \
+    "$(jq -cn --arg p "$workdir/page.html" '{tool_name: "Artifact", tool_input: {file_path: $p, edits: [{old_str: "Ship", new_str: "Go"}]}}')"
+  # --- BLOCK: publishing a plan's markdown ---
+  t 2 "publishing a .md with an Artifact line" "$(publish "$workdir/docs/linked.md")"
+  t 2 "publishing a .md under plans/" "$(publish "$workdir/plans/draft.md")"
+  t 2 "publishing a PLAN.md" "$(publish "$workdir/PLAN.md")"
+  t 2 "an explicit publish action" \
+    "$(jq -cn --arg p "$workdir/PLAN.md" '{tool_name: "Artifact", tool_input: {action: "publish", file_path: $p}}')"
+  # --- ALLOW ---
+  t 0 "Edit on a page plan-artifact did not write" "$(edit Edit "$workdir/other.html")"
+  t 0 "Edit on the plan's markdown" "$(edit Edit "$workdir/plans/draft.md")"
+  t 0 "Edit on plan-artifact's own source" "$(edit Edit "$workdir/bin/plan-artifact")"
+  t 0 "Write of a new ordinary page" "$(write "$workdir/fresh.html" '<title>Fresh</title>')"
+  t 0 "publishing a rendered page" "$(publish "$workdir/page.html")"
+  t 0 "publishing a page that does not exist yet" "$(publish "$workdir/missing.html")"
+  t 0 "publishing an ordinary .md" "$(publish "$workdir/docs/guide.md")"
+  t 0 "Artifact edits on an ordinary page" \
+    "$(jq -cn --arg p "$workdir/other.html" '{tool_name: "Artifact", tool_input: {file_path: $p, edits: [{old_str: "Mine", new_str: "Yours"}]}}')"
+  t 0 "reading a plan's artifact" \
+    "$(jq -cn '{tool_name: "Artifact", tool_input: {action: "read", url: "https://claude.ai/code/artifact/abc"}}')"
+  t 0 "a tool this hook does not govern" "$(jq -cn --arg p "$workdir/page.html" '{tool_name: "Read", tool_input: {file_path: $p}}')"
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+INPUT=$(cat)
+TOOL=$(jq -r '.tool_name // ""' <<<"$INPUT")
+FILE=$(jq -r '.tool_input.file_path // ""' <<<"$INPUT")
+CWD=$(jq -r '.cwd // ""' <<<"$INPUT")
+
+[[ -n "$FILE" ]] || exit 0
+[[ "$FILE" == /* || -z "$CWD" ]] || FILE="$CWD/$FILE"
+
+is_generated_page() {
+  [[ "$FILE" == *.html && -f "$FILE" ]] && grep -qF "$GENERATOR" "$FILE"
+}
+
+is_plan() {
+  [[ "$FILE" == *.md && -f "$FILE" ]] || return 1
+  [[ "$FILE" == */plans/* || "$(basename "$FILE")" == PLAN.md ]] && return 0
+  grep -qE '^Artifact:[[:space:]]*[^[:space:]]+[[:space:]]*$' "$FILE"
+}
+
+refuse_hand_edit() {
+  cat >&2 <<EOF
+$FILE is a plan page rendered by plan-artifact, so a hand edit here is lost on the next render. Edit the plan's .md instead, rerun \`plan-artifact <plan.md> $FILE\`, and publish the result.
+EOF
+  exit 2
+}
+
+case "$TOOL" in
+  Edit | MultiEdit)
+    is_generated_page && refuse_hand_edit
+    ;;
+  Write)
+    is_generated_page && refuse_hand_edit
+    if [[ "$FILE" == *.html ]] && jq -r '.tool_input.content // ""' <<<"$INPUT" | grep -qF "$GENERATOR"; then
+      refuse_hand_edit
+    fi
+    ;;
+  Artifact)
+    ACTION=$(jq -r '.tool_input.action // "publish"' <<<"$INPUT")
+    [[ "$ACTION" == publish ]] || exit 0
+    if jq -e '.tool_input.edits | length > 0' <<<"$INPUT" >/dev/null 2>&1 && is_generated_page; then
+      refuse_hand_edit
+    fi
+    if is_plan; then
+      cat >&2 <<EOF
+$FILE is a plan's markdown; its Artifact is the page plan-artifact renders from it, not the .md itself. Render it with \`plan-artifact $FILE <scratchpad>/<name>.html\` and publish that .html, with the plan's existing Artifact url (and force: true) when it has an \`Artifact:\` line.
+EOF
+      exit 2
+    fi
+    ;;
+esac
+exit 0

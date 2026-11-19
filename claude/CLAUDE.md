@@ -4,6 +4,11 @@
 
 - Be concise and direct; skip preamble and flattery.
 - When a request is ambiguous in a way that changes the outcome, ask rather than assume.
+- A terse follow-up ("does it check for X?", "which mount is it at now?") is about what I
+  was last talking about, which isn't always what you last answered. When your reading of
+  one is about to start work (a diagnosis, a search, a design change), say the reading in
+  a line first ("Reading this as ship-pr, not git land: ..."), so a wrong guess costs a
+  sentence rather than a turn.
 - Avoid em dashes; use commas, parentheses, colons, or separate sentences instead.
 - Use the Oxford comma: "red, white, and blue", not "red, white and blue".
 - Don't cite volatile exact metrics (test counts, file counts, coverage percentages) in
@@ -138,6 +143,13 @@ doesn't need repeating per session.
   header per file, `grep -n pat a b c` (or `grep -rn pat dir`) prefixes each match with
   its file, and `wc -l a b c` counts each. For a substitution, run the inner command in a
   call of its own and use its output literally in the next.
+- Read another clone, or another revision, without moving it: `git show <rev>:<path>`,
+  `git grep <pattern> <rev>`, or `git worktree add --detach` into the scratchpad. A
+  `git checkout` in a clone outside the session's repo switches what my editor, my other
+  sessions, and that clone's own tests are looking at, and nothing tells them it moved.
+  The same goes for global state changed to get a check passing: `mise use -g` or any
+  edit under `~/.config` writes through a symlink into the dotfiles clone, as an
+  uncommitted change on whatever branch that clone has checked out.
 - When you start a server just to check something, assume I may already be running the app on
   the default port; pick a non-default port and clean it up when done.
 - Every markdown plan (plan mode's, or a plan doc in a repo) has a published HTML Artifact,
