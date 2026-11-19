@@ -56,7 +56,11 @@ node = "lts"
 # PATH, which it falls back to when the interpreter it pinned at install time is
 # gone. Without a global version, mise's shim for it (there whenever any
 # project's mise.toml names pre-commit) fails in every directory that doesn't.
-pre-commit = "latest"
+# `pipx:` rather than the registry's default, aqua's zipapp, because the zipapp
+# runs on whatever `python3` is first on PATH, which on macOS is the system 3.9
+# that pre-commit's bundled virtualenv no longer supports; `uv tool install`
+# gives it a Python of its own.
+"pipx:pre-commit" = "latest"
 ripgrep = "latest"
 rust = "stable"
 sd = "latest"
