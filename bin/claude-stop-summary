@@ -12,8 +12,10 @@
 # another check fired, since a check that fires once per prompt can skip, and the report would go
 # missing on that turn.
 #
-# It also carries the reminder for a branch that has never been landed: that reminder must not
-# cost a model turn of its own, and this is the one turn that is spent anyway.
+# It also carries what landing is due, since this is the one turn that is spent anyway: the
+# reminder for a branch that has never been landed, and the land request `claude-stop-land` would
+# otherwise block for (`claude-stop-land --request`). Carrying that request spends the land check's
+# ask, so neither it nor the question gate in `claude-stop` counts it as still to come.
 
 set -euo pipefail
 
@@ -81,6 +83,19 @@ EOF
   asks "the default branch still asks for the report" yes
   [[ "$OUT" != *"has not been landed"* ]] || { printf 'FAIL the default branch gets no reminder :: %s\n' "$OUT"; fails=1; }
 
+  # --- a landed branch with unlanded commits: the land request rides on the report ---
+  snapshot() { (cd "$repo" && env "${unset_git[@]}" CLAUDE_HOOK_SELFTEST= "$REAL_SNAPSHOT" "$@"); }
+  UNLANDED=${LANDED/unlanded=0/unlanded=2}
+  call p6 0 "$UNLANDED"
+  asks "a landed branch with unlanded commits asks for the report" yes
+  [[ "$OUT" == *"run \`git land\`"* && "$OUT" == *"whether you landed"* ]] ||
+  { printf 'FAIL the land request rides on the report :: %s\n' "$OUT"; fails=1; }
+  snapshot asked p6 land || { printf 'FAIL carrying the land request spends its ask\n'; fails=1; }
+  snapshot ask p7 land
+  call p7 0 "$UNLANDED"
+  asks "a land check that has asked still gets the report" yes
+  [[ "$OUT" != *"run \`git land\`"* ]] || { printf 'FAIL a land already asked for is not asked again :: %s\n' "$OUT"; fails=1; }
+
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
   fi
@@ -101,6 +116,10 @@ LAND_STATE=$(git-land --state 2>/dev/null || true)
 if grep -qx 'default=no' <<<"$LAND_STATE" && grep -qx 'landed=no' <<<"$LAND_STATE" &&
 ! grep -qx 'unlanded=0' <<<"$LAND_STATE"; then
   REMINDER=$'\n\n'"This branch has not been landed yet. If the change is now worth showing (a coherent first version whose checks pass locally), write the PR draft to the path \`git land --path\` prints and run \`git land\` before the report, and say in the report that you did. Otherwise do not mention landing."
+fi
+LAND_REQUEST=$(claude-stop-land --request)
+if [[ -n "$LAND_REQUEST" ]] && claude-prompt-snapshot ask "$PROMPT_ID" land; then
+  REMINDER=$'\n\n'"Before the report: $LAND_REQUEST Then say in the report whether you landed, and why not if you didn't."
 fi
 
 CONTEXT="The checks have settled. Now write the turn's report: what changed, why, and how you checked it, as the reply Josh reads last. Don't restate replies you gave to the checks, and don't end on a question you didn't need to ask.${REMINDER}"

@@ -51,11 +51,16 @@ left out of the page.
 The output must be an `.html` path, and an existing file there is overwritten only if it is a page
 this script wrote. That keeps a mistyped output path from clobbering an unrelated file, which is
 what makes it safe to run without a permission prompt.
+
+The page carries a `plan-source` mark, a hash of the plan's path and text, so publishing the page
+records which version of the plan it shows (`claude-plan-page-published`) without the page revealing
+where the plan lives. `plan-artifact --mark <plan.md>` prints a plan's current mark.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 from collections.abc import Callable
@@ -419,8 +424,34 @@ def parse_plan(source: str) -> Plan:
     )
 
 
-def page(plan: Plan) -> str:
-    """The whole page, as the Artifact tool wants it: title and styles first, no html/head/body tags."""
+def source_mark(path: Path, source: str) -> str:
+    """
+    The `plan-source` mark for the plan at `path` (absolute, its directory resolved) reading `source`.
+
+    The `Artifact:` line is left out, and runs of blank lines squeezed (adding the link adds the blank
+    line under it too), so writing the link into a plan after its first publish doesn't make the page
+    look stale. `claude-stop-plan-artifact` gets the mark from `--mark` rather than computing its own,
+    so there is one definition.
+    """
+    lines: list[str] = []
+    for line in source.splitlines():
+        if ARTIFACT_LINE.match(line) or (not line.strip() and lines and not lines[-1].strip()):
+            continue
+        lines.append(line)
+    return hashlib.sha1("\n".join([str(path), *lines]).encode()).hexdigest()
+
+
+def plan_path(plan: Path) -> Path:
+    """The path a mark is computed over: absolute, with the directory's symlinks resolved."""
+    return plan.absolute().parent.resolve() / plan.name
+
+
+def page(plan: Plan, mark: str) -> str:
+    """
+    The whole page, as the Artifact tool wants it: title and styles first, no html/head/body tags.
+
+    `mark` is the plan's `source_mark`.
+    """
     progress = None
     if plan.tasks_total:
         percent = round(100 * plan.tasks_done / plan.tasks_total)
@@ -460,6 +491,7 @@ def page(plan: Plan) -> str:
             title(children=plan.title),
             meta(attrs={"name": "claude:viewport-fit-sides", "content": "cover"}),
             meta(attrs={"name": "generator", "content": "plan-artifact"}),
+            meta(attrs={"name": "plan-source", "content": mark}),
             link(attrs={"rel": "stylesheet", "href": FONTS}),
             style(children=Markup(STYLESHEET)),
             div(
@@ -529,7 +561,7 @@ x = "<b>"
 </svg>
 """
     plan = parse_plan(source)
-    html = page(plan)
+    html = page(plan, "0123abcd")
     checks: list[tuple[str, object, object]] = [
         ("title from the first # heading, as plain text", plan.title, "Ship the thing"),
         (
@@ -655,6 +687,29 @@ x = "<b>"
             True,
         ),
         ("the page carries the generator mark", GENERATOR in html, True),
+        ("the page carries its source mark", '<meta name="plan-source" content="0123abcd">' in html, True),
+        ("the source mark hides the path", "/home/me/plans" in source_mark(Path("/home/me/plans/x.md"), "# X\n"), False),
+        (
+            "the source mark covers the path",
+            source_mark(Path("/a/x.md"), "# X\n") == source_mark(Path("/b/x.md"), "# X\n"),
+            False,
+        ),
+        (
+            "the source mark covers the text",
+            source_mark(Path("/a/x.md"), "# X\n\nOne.\n") == source_mark(Path("/a/x.md"), "# X\n\nTwo.\n"),
+            False,
+        ),
+        (
+            "the source mark ignores adding the Artifact line",
+            source_mark(Path("/a/x.md"), "# X\n\nOne.\n")
+            == source_mark(Path("/a/x.md"), "# X\n\nArtifact: https://claude.ai/code/artifact/abc\n\nOne.\n"),
+            True,
+        ),
+        (
+            "the source mark still sees a blank line that separates",
+            source_mark(Path("/a/x.md"), "# X\nOne.\n") == source_mark(Path("/a/x.md"), "# X\n\nOne.\n"),
+            False,
+        ),
         ("a new .html path is written", overwrite_refusal(Path("/tmp/new.html"), None), None),
         ("a page this script wrote is overwritten", overwrite_refusal(Path("/tmp/old.html"), html), None),
         ("a path that isn't .html is refused", overwrite_refusal(Path("/home/me/.zshrc"), None) is not None, True),
@@ -683,20 +738,27 @@ def main() -> int:
         return selftest()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("plan", type=Path, help="the plan's markdown file")
-    parser.add_argument("out", type=Path, help="where to write the page's HTML")
+    parser.add_argument("out", type=Path, nargs="?", help="where to write the page's HTML")
+    parser.add_argument("--mark", action="store_true", help="print the plan's plan-source mark instead of writing a page")
     args = parser.parse_args()
     source, out = args.plan, args.out
+    if args.mark:
+        print(source_mark(plan_path(source), source.read_text()))
+        return 0
+    if out is None:
+        parser.error("the page's output path is required")
     try:
         existing: str | None = out.read_text(errors="replace")
     except FileNotFoundError:
         existing = None
     if reason := overwrite_refusal(out, existing):
         parser.error(reason)
+    text = source.read_text()
     try:
-        plan = parse_plan(source.read_text())
+        plan = parse_plan(text)
     except ValueError as error:
         parser.error(f"{source}: {error}")
-    out.write_text(page(plan))
+    out.write_text(page(plan, source_mark(plan_path(source), text)))
     print(out)
     return 0
 

@@ -742,13 +742,21 @@ time, so hooks compute it rather than anyone writing it down:
   the land markers, carried from the draft on the next land.
 - **At stop**, a new check `claude-stop-land` runs after `claude-stop-commit`.
   When the branch has been landed before and has unlanded commits,
-  it blocks once per prompt and asks Claude to land them, rewriting the draft
+  it asks once per prompt for Claude to land them, rewriting the draft
   first if they change what the PR is, or to say in one line why not.
-  When the last land's PR failed to open, it asks Claude to land again. A
-  branch that has never been landed earns only a reminder that the change
-  lands once it's worth showing. A Stop hook's `additionalContext` always
-  costs a model turn, so the reminder rides on `claude-stop-summary`'s request
-  for the report, the one turn spent anyway. Like every check, neither runs on
+  When those commits change workflow files, which a plain land refuses, the
+  request names `git land --workflows`, whose permission prompt is Josh's
+  approval. When the last land's PR failed to open, it asks Claude to land
+  again. A branch that has never been landed earns only a reminder that the
+  change lands once it's worth showing.
+  A Stop hook's `additionalContext` always costs a model turn, so whenever
+  `claude-stop-summary` is still to ask for this prompt's report, the land
+  request and the reminder both ride on that request, the one turn spent
+  anyway. Carrying the request spends the land check's ask, and the check
+  blocks on its own only when the report has already been asked for or the
+  prompt changed nothing. A land Claude defers for a reason, such as a
+  coverage gate still running in the background, then costs a sentence in the
+  report rather than a turn on every wake. Like every check, neither runs on
   a turn that ends on a question or an offer to Josh (decision 7).
 
 ### 4. What stays out of the record
@@ -1013,13 +1021,13 @@ flowchart TD
   PC -->|"no: stage, record pass fingerprint"| FIN
   FIN{"finish: prompt changed,<br/>no merge, not asked?"} -->|yes| BLOCK
   FIN -->|no| PLAN
-  PLAN{"plan-artifact: a plan changed since<br/>the prompt's start HEAD, new this session?"} -->|yes| BLOCK
+  PLAN{"plan-artifact: a plan changed since<br/>the prompt's start HEAD, new this session,<br/>not published at its current text?"} -->|yes| BLOCK
   PLAN -->|no| COM
   COM{"commit: staged, allowed branch,<br/>fingerprint = pass, not asked?"} -->|yes| BLOCK
   COM -->|no| LAND
-  LAND{"land: not default, not asked, and<br/>landed with unlanded > 0 or PR failed?"} -->|yes| BLOCK
+  LAND{"land: not default, not asked,<br/>landed with unlanded > 0 or PR failed,<br/>and the report already asked<br/>or the prompt changed nothing?"} -->|yes| BLOCK
   LAND -->|no| SUM
-  SUM{"summary: prompt changed,<br/>not asked?"} -->|"yes (plus never-landed reminder)"| BLOCK
+  SUM{"summary: prompt changed,<br/>not asked?"} -->|"yes (plus the land request<br/>or never-landed reminder)"| BLOCK
   SUM -->|no| ANN
 
   BLOCK[/"print the check's JSON;<br/>Claude replies"/] --> REC
@@ -1044,6 +1052,14 @@ Three details the loop depends on, each easy to get wrong:
   all.
 - `claude-stop-plan-artifact` diffs against the prompt's starting `HEAD`, not
   `HEAD`, since a plan Claude committed mid-turn changed all the same.
+- A plan already published at its current text isn't asked about, since Claude
+  often republishes before the stop. Each page carries an opaque mark of its
+  plan's path and text (no path, so the page doesn't reveal where the plan
+  lives). `claude-plan-page-published`, a PostToolUse hook on Artifact (so only
+  a publish that succeeded), records it, and the check compares each changed
+  plan's current mark from `plan-artifact --mark` against that record. The
+  mark leaves out the `Artifact:` line, so writing the link in after a first
+  publish isn't an edit.
 
 Costs: one more model turn on every turn that changes the repo, and a Haiku
 call of about 2s on every stop where a check could block and the reply

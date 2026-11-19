@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# PostToolUse hook (Artifact): record that a plan page was published, so the plan check doesn't ask
+# for a republish Claude has already done.
+#
+# `plan-artifact` marks each page with its plan's `plan-source` mark. When an Artifact publish of
+# such a page succeeds (PostToolUse fires only on success; a failure is PostToolUseFailure), the mark
+# goes to `claude-stop-plan-artifact --record`, which owns the record and compares it against each
+# changed plan's current mark at the stop. Nothing is printed: on PostToolUse, stdout is read as the
+# hook's output.
+
+set -euo pipefail
+
+GENERATOR='<meta name="generator" content="plan-artifact">'
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the hook's embedded self-tests. This marker line is
+# how `claude-hook-selftests` discovers participating hooks. The main case is a round trip through
+# the real `plan-artifact` and `claude-stop-plan-artifact` in a throwaway repository, which is what
+# pins the page's mark to the one the stop check computes.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  BIN_DIR=$(dirname "$SELF")
+  fails=0
+  workdir=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$workdir"' EXIT
+  export XDG_STATE_HOME="$workdir/state"
+  PUBLISHED="$XDG_STATE_HOME/claude/plan-pages-published"
+  # shellcheck disable=SC2207
+  unset_git=($(git rev-parse --local-env-vars | sed 's/^/-u /'))
+
+  repo="$workdir/repo"
+  mkdir -p "$repo/plans"
+  env "${unset_git[@]}" git init -q "$repo"
+  printf '# Ship it\n\nStep one.\n' >"$repo/plans/ship.md"
+  printf '<!doctype html>\n<title>Mine</title>\n' >"$workdir/other.html"
+  CLAUDE_HOOK_SELFTEST= "$BIN_DIR/plan-artifact" "$repo/plans/ship.md" "$workdir/ship.html" >/dev/null
+
+  published() {
+    jq -c --arg cwd "$workdir" '. + {cwd: $cwd, hook_event_name: "PostToolUse"}' <<<"$1" |
+    env PATH="$BIN_DIR:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" >"$workdir/out" 2>&1 ||
+    { printf 'FAIL exited non-zero :: %s\n' "$(cat "$workdir/out")"; fails=1; }
+    [[ ! -s "$workdir/out" ]] || { printf 'FAIL printed output :: %s\n' "$(cat "$workdir/out")"; fails=1; }
+  }
+  records() {
+    local desc="$1" want="$2" got
+    got=0
+    [[ -f "$PUBLISHED" ]] && got=$(wc -l <"$PUBLISHED")
+    [[ "$got" -eq "$want" ]] || { printf 'FAIL %s: want %s recorded, got %s\n' "$desc" "$want" "$got"; fails=1; }
+  }
+  plan_check() {
+    (cd "$repo" && jq -cn '{session_id: "session-a1", prompt_id: ""}' |
+    env "${unset_git[@]}" PATH="$BIN_DIR:$PATH" CLAUDE_HOOK_SELFTEST= "$BIN_DIR/claude-stop-plan-artifact" 2>&1)
+  }
+
+  # --- nothing a plan page didn't come from is recorded ---
+  published "$(jq -cn --arg p "$workdir/other.html" '{tool_name: "Artifact", tool_input: {file_path: $p}}')"
+  records "an ordinary page" 0
+  published "$(jq -cn --arg p "$workdir/ship.html" '{tool_name: "Artifact", tool_input: {action: "read", url: "https://claude.ai/code/artifact/abc"}}')"
+  records "a read" 0
+  published "$(jq -cn --arg p "$workdir/ship.html" '{tool_name: "Write", tool_input: {file_path: $p}}')"
+  records "another tool" 0
+
+  # --- the round trip: render, publish, and the plan check is quiet until the plan changes ---
+  [[ "$(plan_check)" == *"plans/ship.md"* ]] || { printf 'FAIL the control: an unpublished plan is asked about\n'; fails=1; }
+  rm -f "$repo/.git/claude-plan-artifact-nudged"
+  published "$(jq -cn '{tool_name: "Artifact", tool_input: {file_path: "ship.html", url: "https://claude.ai/code/artifact/abc", force: true}}')"
+  records "a plan page, by a path relative to cwd" 1
+  OUT=$(plan_check)
+  [[ -z "$OUT" ]] || { printf 'FAIL a published plan is not asked about :: %s\n' "$OUT"; fails=1; }
+  rm -f "$repo/.git/claude-plan-artifact-nudged"
+  printf 'Step two.\n' >>"$repo/plans/ship.md"
+  [[ "$(plan_check)" == *"plans/ship.md"* ]] || { printf 'FAIL an edit after the publish is asked about\n'; fails=1; }
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+INPUT=$(cat)
+[[ "$(jq -r '.tool_name // ""' <<<"$INPUT")" == Artifact ]] || exit 0
+[[ "$(jq -r '.tool_input.action // "publish"' <<<"$INPUT")" == publish ]] || exit 0
+FILE=$(jq -r '.tool_input.file_path // ""' <<<"$INPUT")
+CWD=$(jq -r '.cwd // ""' <<<"$INPUT")
+[[ -n "$FILE" ]] || exit 0
+[[ "$FILE" == /* || -z "$CWD" ]] || FILE="$CWD/$FILE"
+[[ "$FILE" == *.html && -f "$FILE" ]] || exit 0
+grep -qF "$GENERATOR" "$FILE" || exit 0
+
+MARK=$(grep -oE '<meta name="plan-source" content="[0-9a-f]{40}">' "$FILE" | head -n 1 | sed -E 's/.*content="([0-9a-f]{40})".*/\1/' || true)
+[[ -n "$MARK" ]] || exit 0
+claude-stop-plan-artifact --record "$MARK" >/dev/null

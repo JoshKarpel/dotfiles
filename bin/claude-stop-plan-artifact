@@ -9,9 +9,20 @@
 # so adding the link after a first publish is not a change) is recorded whether or not it was nudged,
 # so a later session isn't asked about edits an earlier one left in the working tree.
 #
+# A plan whose current text already has a published page isn't asked about at all: Claude often
+# republishes before the stop, and a nudge then costs a turn to say so. `plan-artifact` marks each page
+# with its plan's `plan-source` mark, `claude-plan-page-published` (a PostToolUse hook on Artifact, so
+# only a publish that succeeded) passes it to `claude-stop-plan-artifact --record`, and this check
+# compares the plan's current mark (`plan-artifact --mark`) against that record. An edit made after
+# the render changes the mark, so it is asked about as before.
+#
 # Run by `claude-stop` after the finishing pass, since that pass may itself edit the plan.
 
 set -euo pipefail
+
+# Marks of the plan texts whose pages have been published, from any repo or none (plan mode's plans
+# live outside one), so the record is per user rather than per git directory.
+PUBLISHED="${XDG_STATE_HOME:-$HOME/.local/state}/claude/plan-pages-published"
 
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker line is how
 # `claude-hook-selftests` discovers participating hooks. Every case is a git state, so each runs
@@ -21,6 +32,9 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   fails=0
   workdir=$(realpath "$(mktemp -d)")
   trap 'rm -rf "$workdir"' EXIT
+  # The published record is per user, so the tests keep theirs in the sandbox.
+  export XDG_STATE_HOME="$workdir/state"
+  PUBLISHED="$XDG_STATE_HOME/claude/plan-pages-published"
   # During a `git commit` GIT_INDEX_FILE points at the outer repo's index; the sandbox needs its own.
   # shellcheck disable=SC2207
   unset_git=($(git rev-parse --local-env-vars | sed 's/^/-u /'))
@@ -91,6 +105,18 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   env "${unset_git[@]}" git -C "$repo" commit -q -am "edit later"
   names "a plan committed since the prompt started is named" "plans/later.md"
 
+  # --- a plan whose current text already has a published page ---
+  SESSION=session-e5
+  PROMPT=""
+  printf 'Step five.\n' >>"$repo/plans/ship.md"
+  MARK=$(cd "$repo" && CLAUDE_HOOK_SELFTEST= "$BIN_DIR/plan-artifact" --mark plans/ship.md)
+  CLAUDE_HOOK_SELFTEST= "$SELF" --record "$MARK"
+  CLAUDE_HOOK_SELFTEST= "$SELF" --record "$MARK"
+  [[ "$(grep -cxF "$MARK" "$PUBLISHED")" == 1 ]] || { printf 'FAIL a mark is recorded once\n'; fails=1; }
+  silent "a plan published at its current text is not asked about"
+  printf 'Step six.\n' >>"$repo/plans/ship.md"
+  names "an edit after the publish is asked about" "plans/ship.md"
+
   rm "$repo/plans/ship.md"
   silent "a deleted plan has no page to rebuild"
 
@@ -98,6 +124,16 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
     echo "$(basename "$0"): all self-tests passed"
   fi
   exit "$fails"
+fi
+
+# `--record <mark>`: a page showing the plan text with this mark has been published.
+if [[ "${1:-}" == --record ]]; then
+  [[ "${2:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "usage: claude-stop-plan-artifact --record <plan-source mark>" >&2; exit 2; }
+  mkdir -p "$(dirname "$PUBLISHED")"
+  grep -qxsF "$2" "$PUBLISHED" || printf '%s\n' "$2" >>"$PUBLISHED"
+  # Only recent pages matter, and a mark that ages out costs nothing but one more nudge.
+  tail -n 500 "$PUBLISHED" >"$PUBLISHED.tmp" && mv "$PUBLISHED.tmp" "$PUBLISHED"
+  exit 0
 fi
 
 INPUT=$(cat)
@@ -131,6 +167,8 @@ while IFS= read -r path; do
   # Adding the link also adds the blank line under it, so runs of blank lines are squeezed first.
   KEY=$({ printf '%s\n' "$path"; { grep -vE "$ARTIFACT_LINE" "$path" || true; } | cat -s; } | sha1sum | cut -d' ' -f1)
   grep -qxsF "$KEY" "$NUDGED" && continue
+  MARK=$(plan-artifact --mark "$path" 2>/dev/null || true)
+  [[ -n "$MARK" ]] && grep -qxsF "$MARK" "$PUBLISHED" && continue
   printf '%s\n' "$KEY" >>"$NUDGED"
   SESSION_KEY=$(printf '%s\n%s\n' "$SESSION_ID" "$path" | sha1sum | cut -d' ' -f1)
   grep -qxsF "$SESSION_KEY" "$NUDGED" && continue
