@@ -96,6 +96,13 @@ EOF
   asks "a land check that has asked still gets the report" yes
   [[ "$OUT" != *"run \`git land\`"* ]] || { printf 'FAIL a land already asked for is not asked again :: %s\n' "$OUT"; fails=1; }
 
+  # --- a PR that failed to open reads landed=no, but the branch is on origin ---
+  PR_FAILED=${NEVER_LANDED/pr_failed=no/pr_failed=yes}
+  snapshot ask p8 land
+  call p8 0 "$PR_FAILED"
+  asks "a branch whose PR failed to open still gets the report" yes
+  [[ "$OUT" != *"has not been landed"* ]] || { printf 'FAIL a failed PR gets no never-landed reminder :: %s\n' "$OUT"; fails=1; }
+
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
   fi
@@ -113,8 +120,10 @@ claude-prompt-snapshot ask "$PROMPT_ID" summary || exit 0
 REMINDER=""
 LAND_STATE=$(git-land --state 2>/dev/null || true)
 # Not on the default branch, whose unlanded commits are Josh's rather than this turn's to publish.
+# Nor on a branch whose PR failed to open, which reads `landed=no` but is on origin: what it needs is
+# the land request below, and when that has already been asked, nothing.
 if grep -qx 'default=no' <<<"$LAND_STATE" && grep -qx 'landed=no' <<<"$LAND_STATE" &&
-! grep -qx 'unlanded=0' <<<"$LAND_STATE"; then
+grep -qx 'pr_failed=no' <<<"$LAND_STATE" && ! grep -qx 'unlanded=0' <<<"$LAND_STATE"; then
   REMINDER=$'\n\n'"This branch has not been landed yet. If the change is now worth showing (a coherent first version whose checks pass locally), write the PR draft to the path \`git land --path\` prints and run \`git land\` before the report, and say in the report that you did. Otherwise do not mention landing."
 fi
 LAND_REQUEST=$(claude-stop-land --request)

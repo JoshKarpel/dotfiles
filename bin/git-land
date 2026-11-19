@@ -494,9 +494,11 @@ default_state() {
 }
 
 print_state() {
-  local draft=no landed=no stale=no changed=no pr_failed=no workflows=no
+  local draft=no landed=no stale=no changed=no pr_failed=no workflows=no unlanded
   [[ -f "$DRAFT" ]] && draft=yes
-  [[ -n "$(unlanded_workflow_files)" ]] && workflows=yes
+  unlanded=$(unlanded_count)
+  # Every stop reads this state several times, and listing the files diffs each unlanded commit.
+  [[ "$unlanded" == 0 || -z "$(unlanded_workflow_files)" ]] || workflows=yes
   if is_stale; then
     stale=yes
   elif [[ -f "$PR_FAILED" ]]; then
@@ -510,7 +512,7 @@ print_state() {
     fi
   fi
   printf 'path=%s\ndraft=%s\nlanded=%s\nstale=%s\ndraft_changed=%s\nunlanded=%s\nworkflows=%s\npr_failed=%s\ndefault=%s\n' \
-    "$DRAFT" "$draft" "$landed" "$stale" "$changed" "$(unlanded_count)" "$workflows" "$pr_failed" "$(default_state)"
+    "$DRAFT" "$draft" "$landed" "$stale" "$changed" "$unlanded" "$workflows" "$pr_failed" "$(default_state)"
 }
 
 # `<host>/<owner>/<repo>` from a remote URL: https, `ssh://`, scp-style `user@host:owner/repo`, or a

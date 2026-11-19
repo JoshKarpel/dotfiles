@@ -131,8 +131,11 @@ if [[ "${1:-}" == --record ]]; then
   [[ "${2:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "usage: claude-stop-plan-artifact --record <plan-source mark>" >&2; exit 2; }
   mkdir -p "$(dirname "$PUBLISHED")"
   grep -qxsF "$2" "$PUBLISHED" || printf '%s\n' "$2" >>"$PUBLISHED"
-  # Only recent pages matter, and a mark that ages out costs nothing but one more nudge.
-  tail -n 500 "$PUBLISHED" >"$PUBLISHED.tmp" && mv "$PUBLISHED.tmp" "$PUBLISHED"
+  # Only recent pages matter, and a mark that ages out costs nothing but one more nudge. The record is
+  # shared by every session on the machine, so each trim writes its own temporary file: a fixed name
+  # lets two publishes at once truncate each other's copy, and the second `mv` then fails the hook.
+  TRIMMED=$(mktemp "$PUBLISHED.XXXXXX")
+  tail -n 500 "$PUBLISHED" >"$TRIMMED" && mv "$TRIMMED" "$PUBLISHED"
   exit 0
 fi
 

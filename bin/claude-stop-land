@@ -160,14 +160,15 @@ fi
 INPUT=$(cat)
 PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")
 
-REQUEST=$(land_request)
-[[ -n "$REQUEST" ]] || exit 0
-
 # The report is still to be asked for this prompt, so `claude-stop-summary` carries the request (and
-# spends this check's ask) rather than this check costing a turn before it.
+# spends this check's ask) rather than this check costing a turn before it. Checked before the land
+# state is read, since the summary reads it again for itself.
 if claude-prompt-snapshot changed "$PROMPT_ID" >/dev/null && ! claude-prompt-snapshot asked "$PROMPT_ID" summary; then
   exit 0
 fi
+
+REQUEST=$(land_request)
+[[ -n "$REQUEST" ]] || exit 0
 
 claude-prompt-snapshot ask "$PROMPT_ID" land || exit 0
 

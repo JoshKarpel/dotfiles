@@ -51,6 +51,9 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   t 2 "MultiEdit on a generated page" "$(edit MultiEdit "$workdir/page.html")"
   t 2 "Write over a generated page" "$(write "$workdir/page.html" '<p>hand written</p>')"
   t 2 "Write of new content carrying the mark" "$(write "$workdir/new.html" "<head>$GENERATOR</head>")"
+  { printf '<head>%s</head>\n' "$GENERATOR"; awk 'BEGIN { for (i = 0; i < 200000; i++) print "a line of the page body" }'; } >"$workdir/big-content"
+  t 2 "Write of a page larger than a pipe buffer" \
+    "$(jq -cn --arg p "$workdir/big.html" --rawfile c "$workdir/big-content" '{tool_name: "Write", tool_input: {file_path: $p, content: $c}}')"
   t 2 "a relative path resolves against cwd" "$(edit Edit page.html)"
   t 2 "Artifact edits on a generated page" \
     "$(jq -cn --arg p "$workdir/page.html" '{tool_name: "Artifact", tool_input: {file_path: $p, edits: [{old_str: "Ship", new_str: "Go"}]}}')"
@@ -110,7 +113,9 @@ case "$TOOL" in
     ;;
   Write)
     is_generated_page && refuse_hand_edit
-    if [[ "$FILE" == *.html ]] && jq -r '.tool_input.content // ""' <<<"$INPUT" | grep -qF "$GENERATOR"; then
+    # Matched inside jq rather than piped to `grep -q`: grep exits at the first match, and under
+    # pipefail jq's SIGPIPE on a page larger than the pipe buffer then reads as no match.
+    if [[ "$FILE" == *.html ]] && jq -e --arg g "$GENERATOR" '(.tool_input.content // "") | contains($g)' <<<"$INPUT" >/dev/null; then
       refuse_hand_edit
     fi
     ;;

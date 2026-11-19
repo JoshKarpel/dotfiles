@@ -1053,13 +1053,16 @@ Three details the loop depends on, each easy to get wrong:
 - `claude-stop-plan-artifact` diffs against the prompt's starting `HEAD`, not
   `HEAD`, since a plan Claude committed mid-turn changed all the same.
 - A plan already published at its current text isn't asked about, since Claude
-  often republishes before the stop. Each page carries an opaque mark of its
-  plan's path and text (no path, so the page doesn't reveal where the plan
-  lives). `claude-plan-page-published`, a PostToolUse hook on Artifact (so only
-  a publish that succeeded), records it, and the check compares each changed
-  plan's current mark from `plan-artifact --mark` against that record. The
-  mark leaves out the `Artifact:` line, so writing the link in after a first
-  publish isn't an edit.
+  often republishes before the stop. Each page carries a hash of its plan's
+  path and text, which keeps the path out of sight (though a reader with the
+  text could confirm a guessed path). `claude-plan-page-published`, a
+  PostToolUse hook on Artifact (so only a publish that succeeded), records it,
+  and the check compares each changed plan's current mark from
+  `plan-artifact --mark` against that record. The mark leaves out the
+  `Artifact:` line, so writing the link in after a first publish isn't an
+  edit. A plan that has the line also marks its page with a hash of that URL,
+  and only a publish to that URL is recorded, so a publish that made a new
+  artifact still gets the nudge to republish the plan's own page.
 
 Costs: one more model turn on every turn that changes the repo, and a Haiku
 call of about 2s on every stop where a check could block and the reply

@@ -5,8 +5,10 @@
 # `plan-artifact` marks each page with its plan's `plan-source` mark. When an Artifact publish of
 # such a page succeeds (PostToolUse fires only on success; a failure is PostToolUseFailure), the mark
 # goes to `claude-stop-plan-artifact --record`, which owns the record and compares it against each
-# changed plan's current mark at the stop. Nothing is printed: on PostToolUse, stdout is read as the
-# hook's output.
+# changed plan's current mark at the stop. A plan with an `Artifact:` line also marks its page with
+# `plan-page`, a hash of that URL, and only a publish to that URL counts: one that made a new artifact
+# or went to another leaves the plan's own page stale, so the stop check should still ask. Nothing is
+# printed: on PostToolUse, stdout is read as the hook's output.
 
 set -euo pipefail
 
@@ -70,6 +72,16 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   printf 'Step two.\n' >>"$repo/plans/ship.md"
   [[ "$(plan_check)" == *"plans/ship.md"* ]] || { printf 'FAIL an edit after the publish is asked about\n'; fails=1; }
 
+  # --- a plan that names its page counts as published only at that page ---
+  printf '# Linked\n\nArtifact: https://claude.ai/code/artifact/linked\n\nStep one.\n' >"$repo/plans/linked.md"
+  CLAUDE_HOOK_SELFTEST= "$BIN_DIR/plan-artifact" "$repo/plans/linked.md" "$workdir/linked.html" >/dev/null
+  published "$(jq -cn '{tool_name: "Artifact", tool_input: {file_path: "linked.html"}}')"
+  records "a linked plan published to a new artifact" 1
+  published "$(jq -cn '{tool_name: "Artifact", tool_input: {file_path: "linked.html", url: "https://claude.ai/code/artifact/other"}}')"
+  records "a linked plan published to another artifact" 1
+  published "$(jq -cn '{tool_name: "Artifact", tool_input: {file_path: "linked.html", url: "https://claude.ai/code/artifact/linked", force: true}}')"
+  records "a linked plan published to its own page" 2
+
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
   fi
@@ -88,4 +100,9 @@ grep -qF "$GENERATOR" "$FILE" || exit 0
 
 MARK=$(grep -oE '<meta name="plan-source" content="[0-9a-f]{40}">' "$FILE" | head -n 1 | sed -E 's/.*content="([0-9a-f]{40})".*/\1/' || true)
 [[ -n "$MARK" ]] || exit 0
+PAGE=$(grep -oE '<meta name="plan-page" content="[0-9a-f]{40}">' "$FILE" | head -n 1 | sed -E 's/.*content="([0-9a-f]{40})".*/\1/' || true)
+if [[ -n "$PAGE" ]]; then
+  URL=$(jq -r '.tool_input.url // ""' <<<"$INPUT")
+  [[ -n "$URL" && "$(printf '%s' "$URL" | git hash-object --stdin)" == "$PAGE" ]] || exit 0
+fi
 claude-stop-plan-artifact --record "$MARK" >/dev/null
