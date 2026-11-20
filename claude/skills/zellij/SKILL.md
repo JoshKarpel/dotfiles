@@ -261,6 +261,6 @@ ends every pane.
 
 This setup's choices are documented where they live: the comments in
 `config/zellij/config.kdl` say why each deviation from the defaults exists, and
-`CLAUDE.md` "The Work Session" covers the systemd units, socket pinning, and
+`.claude/rules/work-session.md` covers the systemd units, socket pinning, and
 `zellij-restart-session`. Read those before changing either, rather than
 re-deriving them.

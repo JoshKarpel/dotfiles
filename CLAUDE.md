@@ -71,99 +71,12 @@ after it ships.
 ## The Work Session
 
 A dev box holds one long-lived zellij session named after its short hostname.
-`zellij-session.service` creates it at boot, which is what makes it outlive the
-last logout rather than only the last dropped connection. Creating it on login
-instead would tie its existence to somebody having connected, so a
-reboot would quietly discard it until the next login.
-
-Joining it is a deliberate act, never a side effect of a shell starting: `za`
-(`sources/zellij.sh`) from a terminal, or the atlas link to the web client. A
-login lands at a plain prompt, so a tool that opens a shell for its own purposes
-(VS Code resolving its environment, an editor terminal) gets a shell rather than
-a client attached to the session someone is looking at elsewhere.
-
-`zellij-web.service` then serves that session at
-`https://<vm>.exe.xyz:3000/<session>`, which needs `web_sharing "on"` in
-`config/zellij/config.kdl`: the web server serves sessions it created itself
-whatever that setting says, and the work session is created outside it.
-
-The atlas links each session by name rather than linking the web server's root,
-because arriving there without a session in the path creates a new one. It
-offers a VS Code Remote-SSH link to the box alongside them, and withholds both
-from a caller who is not the VM's owner. How it decides that belongs to
-[exe-dev-atlas](https://github.com/JoshKarpel/exe-dev-atlas) rather than to
-anything here.
-
-`vscode-web.service` is the other half of that link: `code serve-web` on 3001,
-kept alongside it rather than replacing it. The two differ in where the
-workbench runs, which decides where its settings come from. Remote-SSH runs it
-on the laptop and inherits the settings already there. `serve-web` runs it here
-and keeps user settings in the browser's IndexedDB rather than on disk, so a
-`settings.json` on the box is not read and Settings Sync has to be signed in per
-browser. The CLI comes from mise rather than the copy Remote-SSH pushes to
-`~/.vscode-server/code-<commit>`, whose path moves with every VS Code update.
-
-A few details are worth knowing before touching any of this.
-
-Both units start zellij through a login shell (`bash -lc`) rather than with an
-environment of their own. Every pane inherits the server's environment rather
-than the attaching client's, and a pane zellij resurrects runs its serialized
-command directly, with no shell of its own, so the server's environment is the
-only one it ever gets. Pinning variables in the unit one at a time is a second
-copy of shell startup, and every variable it misses breaks only in resurrected
-panes. `TERM` and `FORCE_HYPERLINK` are the exceptions, set by `env` in
-`config/zellij/config.kdl`, since zellij is the terminal its panes run in and
-these say what it supports. Only a CLI client applies that
-block to the server it spawns, so `zellij-web.service` pins the same values for
-the sessions `zellij web` creates, and starts after the work session so that a
-browser tab reconnecting at boot cannot create the work session first.
-
-Zellij keys its session sockets off `$XDG_RUNTIME_DIR` and falls back to
-`/tmp/zellij-$UID` when it is unset. A systemd user unit always has it and sshd
-here never does, so the unit and the logins it exists to serve would build two
-separate sessions of the same name. `sources/exe.sh` pins `ZELLIJ_SOCKET_DIR`,
-and the login shell carries that pin into the units.
-
-A server the shell cannot see through that socket directory may as well not
-exist: `attach --create` builds a second session of the same name beside it and
-nothing about the result looks wrong. Zellij covers the ordinary case itself,
-declining to clobber a live server whose socket is on disk even when that server
-is too busy to answer, so what is left is the server whose socket was unlinked
-under it and the server started against a different directory. Neither is
-recoverable, since an unlinked socket cannot be relinked and the panes live in
-the server's memory, so `warn_stranded_zellij_servers` reports them rather than
-letting the loss pass silently. It runs at the end of login rather than inside
-`za`, where the message would be wiped by zellij taking the terminal, and it is
-what makes the warning readable at all: a prompt holds it on screen.
-
-`zellij attach --create-background` is the only way to make a session with no
-controlling terminal, and it exits 1 with "Session already exists" rather than
-succeeding as a no-op, hence `SuccessExitStatus=1`. A real failure panics and
-exits 101, so tolerating 1 does not hide one.
-
-Whether the session survives the unit depends on who started its server. The
-server `attach --create-background` starts stays in the unit's cgroup, and
-`KillMode=control-group` means `stop` and `restart` SIGTERM it, ending every
-pane and leaving its socket file behind. A server `za` created from a login
-because the unit's was missing lives in that login's scope instead, and the unit
-cannot touch it. `zellij-restart-session` covers both: it ends the session with
-`zellij kill-session`, which reaches either kind cleanly, then restarts the unit,
-and it is how a changed unit environment or config reaches the server. The one
-time `install.sh` runs it is when mise has upgraded zellij underneath the
-session, losing every pane, unless `install.sh` is itself running inside that
-session, where it skips and says to run it by hand after detaching.
-
-The token that gets you into the web client is minted per box with
-`zellij web --create-token`, displayed once, and hashed into
-`~/.local/share/zellij/tokens.db`. Nothing in this repo can provision it, so it
-is a manual step per box.
-
-`bin/exe-dev` writes units there too, from the setup script `create-botbox`
-sends: a bot-box has nobody to run the installer on it, so it gets a timer that
-does. Those name no clone (`%h` reaches the home directory, and systemd resolves
-a specifier wherever it appears, quoting included), and are written at first boot
-rather than on every converge, so a change to them reaches only boxes built
-afterwards.
+`zellij-session.service` creates it at boot, and joining it is a deliberate act
+(`za` from a terminal, or the atlas link to the web client on 3000), never a
+side effect of a shell starting. `zellij-restart-session` is how a changed unit
+environment, config, or zellij release reaches it, and it ends every pane.
+`.claude/rules/work-session.md` covers the units, socket pinning, the web client,
+and the failure modes, and loads when one of the files it governs is read.
 
 ## Shell Startup Chain
 
@@ -183,258 +96,51 @@ can just use the name.
 
 ## Key Commands
 
-```bash
-# Apply all dotfiles and install dependencies
-./install.sh
+Each script in `bin/` takes `--help`. What `--help` doesn't say is which ones
+run on their own, so running them by hand is only for wanting it now:
+`install.sh` schedules `sync-branches` hourly and `tidy` daily (exe.dev only),
+and `cloister-codex` and `converge-atlas` daily (dev boxes only).
 
-# Run pre-commit hooks manually
-pre-commit run
-
-# Reclaim disk by removing what installed tools can re-download or rebuild.
-# install.sh schedules it daily on exe.dev VMs, and `update` runs it after
-# install.sh; run it by hand to reclaim now.
-tidy
-
-# Show a checkout's disk use split into tracked, untracked, ignored, submodule,
-# and repository (.git) bytes. Also runs as `git disk-usage`, aliased `git du`.
-git-disk-usage [path]
-
-# Land this branch: push it and open or update its draft pull request from the
-# draft at `git land --path`, after a clean-tree check, a gitleaks scan of the
-# unlanded commits, and a refusal on workflow files without --workflows. The one
-# way Claude pushes. Run with --help for the modes.
-git land
-
-# Josh's quick change on a PR-only default branch: refuse on uncommitted or
-# untracked changes, push the branch, open a PR, and auto-merge it.
-git yeet
-
-# Count Claude tokens in files/dirs via the Anthropic count_tokens API
-# (needs ANTHROPIC_API_KEY). Run with --help for usage and flags.
-count-claude-tokens --help
-
-# Reach exe.dev and its VMs over checked host keys: run lobby commands, open a
-# shell or a VS Code window on a box, create one from this repo (or adopt an
-# existing VM, such as one made to reserve its name), cut a new one over to an
-# existing name, or print the URL the box you are on answers at.
-# Run with --help for subcommands and flags.
-exe-dev --help
-
-# Run Claude Code billed against exe.dev's LLM allocation rather than the
-# claude.ai subscription. exe.dev VMs only. Takes claude's own flags.
-claude-exe-dev --model opus
-
-# Fast-forward every local branch to its upstream, in every clone under
-# ~/projects and ~/work, skipping any checked out in a worktree with changes to
-# tracked files and reporting any that have diverged. install.sh schedules it
-# hourly, so running it by hand is only for wanting it now.
-sync-branches
-
-# Install Tailscale and join this machine to the tailnet. Run per-machine, not
-# from install.sh: it leaves a daemon running and joins a private network.
-setup-tailscale
-
-# Update claude-scriptorium and converge the systemd user service that serves
-# this machine's sessions. Dev-box VMs only; a no-op anywhere else. install.sh
-# schedules it daily, so running it by hand is only for wanting a release now.
-cloister-codex
-
-# Update exe-dev-atlas and converge the systemd user service that serves this
-# VM's front door: proxied ports, zellij sessions, and VS Code workspaces, with a
-# link to each. Dev-box VMs only; a no-op anywhere else. install.sh schedules it
-# daily, so running it by hand is only for wanting a release now.
-converge-atlas
-
-# End this box's zellij work session and start it again on a fresh server, so a
-# changed unit environment, config, or zellij release reaches it. Every pane
-# ends, so it refuses to run from inside zellij.
-zellij-restart-session
-
-# Print or set the font list zellij's web client draws with, one family name per
-# argument. A connected browser tab follows the edit live; the fonts have to be
-# installed where the browser runs.
-zellij-web-font "FiraCode Nerd Font" "Fira Code"
-
-# List the keybindings config/zellij/config.kdl adds or unbinds, which the
-# status bar never advertises: key, modes, and actions, read from the file.
-zellij-custom-keybinds
-
-# One git worktree per zellij tab, each running its own agent, aliased `wt`:
-# `wt new` opens a branch in <repo>.worktrees/<branch> beside the clone, in a
-# tab of its own, and `wt done` removes the worktree and closes its tab. `wt`
-# alone (Alt+Shift+e in zellij) picks the clone, from ~/projects and ~/work, and
-# the worktree, local branch, or new branch instead of taking them as
-# arguments, and `wt clone OWNER/REPO` clones one under those roots, then picks
-# its branch. `wt new --command CMD` runs CMD as the tab's command in place of a
-# shell, and `manage-worktrees serve` is `new` with Claude as that command,
-# behind a web page that can also clone, for dev boxes to serve on 3002. The
-# claude-tab-status hook marks each tab working (●), waiting on you (?), paused
-# on background work or a scheduled job that will wake it (◌), or finished (✓).
-# Run with --help for subcommands and flags.
-manage-worktrees --help
-
-# Pick local branches across every clone to delete (Alt+Shift+d in zellij),
-# with the ones merged or squash-merged into the default branch already marked
-# (a fork's parent's, when `git base-remote` says `upstream`). A branch checked
-# out in a worktree goes through `wt done`, tab and all.
-manage-git
-
-# See what is listening on which TCP port, copy a port's URL (exe.dev's on a VM),
-# and stop the process behind one: the interactive port-user and port-kill.
-manage-ports
-
-# See this account's own systemd user services, folded together with their
-# timers, and the highlighted one's journal, and start, restart, or stop them.
-manage-units
-
-# Pick a recipe from the justfile here and run it, typing any arguments after
-# its name. Aliased `jp`; Alt+j in zellij runs it in the focused pane's
-# directory and holds the output until a key.
-pick-just
-
-# Exit 0 only on an exe.dev VM tagged `dev-box`. The guard the services that
-# exist to be looked at by a person are gated on.
-is-dev-box
-```
+- `./install.sh` applies the dotfiles and installs dependencies;
+  `pre-commit run` runs the hooks.
+- `git land` is the one way Claude pushes: it opens or updates the draft PR from
+  the draft at `git land --path`. `git yeet` is Josh's quick change on a PR-only
+  default branch, auto-merged.
+- `tidy` reclaims disk that installed tools can re-download or rebuild;
+  `git-disk-usage` (`git du`) splits a checkout's disk use by kind.
+- `exe-dev` reaches exe.dev and its VMs (lobby commands, shells, creating or
+  adopting a box); `claude-exe-dev` runs Claude Code billed to exe.dev's LLM
+  allocation; `is-dev-box` is the guard the person-facing services are gated on.
+- `setup-tailscale` joins a machine to the tailnet, per machine and never from
+  `install.sh`, since it leaves a daemon running.
+- `count-claude-tokens` counts tokens through the Anthropic API
+  (needs `ANTHROPIC_API_KEY`).
+- `manage-worktrees` (`wt`) runs one git worktree per zellij tab, each with its
+  own agent; `manage-worktrees serve` is its web form on 3002.
+- The other TUIs: `manage-git` picks branches to delete across clones, with
+  the merged ones premarked,
+  `manage-ports` shows and stops listeners, `manage-units` drives systemd user
+  units, and `pick-just` (`jp`) runs a justfile recipe.
+- `zellij-restart-session`, `zellij-web-font`, and `zellij-custom-keybinds`
+  manage the work session, the web client's fonts, and the keybindings the
+  status bar doesn't advertise.
 
 ## Claude Code Hooks
 
-Hooks are registered in `claude/settings.json` and implemented as scripts in `bin/`.
-Read those two for which hooks exist, what events they fire on, and what each one
-does. What follows is only what neither source states.
-
-### Design Constraints
-
-- Hooks run in non-interactive shell subprocesses, so functions defined in
-  `sources/` (e.g. `exists`) are _not_ available. Shared logic needed by hooks must
-  be a standalone script in `bin/`, not a sourced function.
-- Hooks registered together in one group run in parallel, with no guaranteed order.
-  `claude-stop` is therefore an orchestrator rather than a group: it runs its checks
-  in sequence and announces the stop only when none of them blocked, so an
-  announcement means Claude is actually stopping rather than retrying after a block.
-- Stop hooks return JSON: `additionalContext` carries a message to Claude, and the TUI
-  shows it too, while `systemMessage` is a brief indicator for the user alone.
-- Text a hook emits, whether context, a block reason, or a refusal, puts each paragraph on
-  one line. The TUI wraps it to the terminal's width, so a hard wrap at the source's width
-  shows up as ragged lines. In Python, adjacent string literals keep the source wrapped
-  while the output stays unwrapped.
-- A hook that auto-approves has to prove the _whole_ command is safe, while one that
-  blocks needs only a single bad segment. `claude-gh-api-check` and
-  `claude-awk-check` are both built around that asymmetry: `allow` requires every
-  segment to be read-only, and anything unproven emits nothing so the call falls
-  through to the normal prompt.
-- `claude-prompt-snapshot` is the shared answer to "did this prompt change the
-  repo?". Registered on `UserPromptSubmit`, it records `HEAD` and a change-set
-  fingerprint (the tracked diff against `HEAD` plus the untracked file list) under
-  the git directory, keyed by `prompt_id`, and the stop checks compare against
-  that. Comparing `HEAD` as well matters because a turn that ends in a commit
-  leaves the tree clean, and comparing against the prompt's start rather than the
-  last nudge is what keeps edits made between prompts from counting. It also holds
-  the once-per-prompt record every asking check shares (`ask`), which is what lets
-  the question gate in `claude-stop` skip the model call once no check can still
-  ask. The plan in `plans/letting-claude-commit-and-push.md` diagrams the whole
-  stop sequence.
-- `claude-stop-precommit` records the fingerprint it last passed, and
-  `claude-stop-commit` asks for a commit only over that exact tree. The precommit
-  check reports each failing state once per prompt and then goes quiet, so without
-  the match the sequence would reach the commit check over a state pre-commit
-  never passed.
-- A hook whose only job is a side effect still has to keep all three channels clean:
-  the event decides how stdout is read (on `PreToolUse` a JSON object there is a
-  permission decision), stderr surfaces in the TUI, and a non-zero exit reads as a
-  hook error. `claude-sound` therefore swallows the failure of a player that is
-  installed but has no audio server to reach, which is every headless VM.
-- The `deny` list in `settings.json` stays thin on purpose. `claude-rm-scope-check`
-  decides whether an `rm` escapes the work area, so `deny` keeps only the
-  never-in-scope catastrophic backstops it can't reason about.
-
-### Hook Self-Tests
-
-A hook with non-trivial matching or side effects carries its own tests, gated on the
-`CLAUDE_HOOK_SELFTEST` environment variable so nothing pollutes its real arguments.
-Run a hook's tests with `CLAUDE_HOOK_SELFTEST=1 <hook-name>`; it prints results and
-exits 0 (pass) or 1 (fail). Keep the harness embedded in the hook rather than
-factored into a shared script: a hook should stay self-contained and
-copy-pasteable, and a small duplicated harness is a better trade than a hidden
-dependency.
-
-Each participating hook carries a `# CLAUDE_HOOK_SELFTEST` marker comment line, at
-column 0, as an explicit declaration. The `claude-hook-selftests` runner discovers the
-set from those markers, so there's no separate list to drift. It's wired into
-pre-commit (`files: ^bin/`), so a hook regression fails the commit. Given the changed
-files, it runs only the hooks that name a changed script outside a comment, directly
-or through a chain of other scripts, all in parallel; with no arguments, as in CI's
-`--all-files` run, or when the runner itself changed, it runs every one. A missing dependency (`jq`,
-`python3`) surfaces as a failed run rather than a silent pass, since the hook whose
-tests can't run exits non-zero.
-
-- **Bash hooks** embed a block right after the `set` line, before reading stdin. A
-  matching hook defines a `t <want-exit> <command>` helper that re-invokes the hook
-  (`CLAUDE_HOOK_SELFTEST= "$0"`) with a crafted `{tool_input:{command:…}}` payload and
-  asserts the exit code; `claude-http-server-bind-check` is the copy-paste template.
-  Where branches share an exit code, assert the side effect instead: `claude-stop`
-  stubs the checks and announcers it calls on PATH and compares the set that recorded
-  a call, which is what distinguishes a check that blocked from one that passed when
-  both exit 0. Where the exit code is the same across branches
-  but what the hook says differs, assert on the text: `claude-gh-status` exits 0 whether
-  or not it has anything to report, so its helpers capture the output and match a
-  substring that only the branch under test prints.
-- **Python hooks** check the env var in `main()` and run an embedded case matrix
-  against a pure `(command, cwd, repo_root) -> …` function, so the tests need no git
-  or filesystem. See `claude-rm-scope-check`.
-- External state is a reason to stub, not a reason to skip. Where a hook consults the
-  world through PATH, a stub directory prepended to PATH is enough, and any variable
-  whose ambient value would decide a case has to be unset in the test environment.
-  Where a hook needs a specific git repo,
-  building one with `git init` in a `mktemp -d` sandbox and `cd`-ing into it before
-  re-invoking the hook is enough: `claude-git-dash-c-check` does this to test
-  blocking on the repo root, on `.`, and from a subdirectory, while allowing a
-  different repo. `claude-uv-check` uses the same sandbox, `touch`-ing a `uv.lock`
-  in one repo and not the other so the fixture covers both the "not a uv project"
-  and "python invoked directly" branches. Run from a `git commit` hook, git's own
-  `GIT_DIR` and `GIT_INDEX_FILE` would point every sandbox back at this clone,
-  so `claude-hook-selftests` clears them before running anything; a self-test
-  reached only through it needs no guard of its own.
-- The installed environment is ambient state too, and CI has none of it: no `dotfiles/bin`
-  on PATH and no gitconfig, so a hook that calls a sibling script by name reaches nothing
-  and its guard clause passes every case. A hook that shells out to `bin/` prepends its own
-  directory to PATH in the self-test (`claude-uv-check`), and a `bin/` script spells out the
-  git plumbing rather than using a gitconfig alias (`is-uv-project`, `is-pre-commit-project`
-  call `git rev-parse --show-toplevel`, not `git root`). Both failures are invisible locally,
-  where PATH and gitconfig are installed, so a green local run says nothing about either.
-- A passing self-test that cannot fail is worth nothing, so confirm a new case catches
-  a deliberately broken copy of the hook before trusting it.
+Hooks are registered in `claude/settings.json` and implemented as scripts in
+`bin/`. Their design constraints are in `.claude/rules/hooks.md`. The self-test
+harness that hooks and other `bin/` scripts carry (`CLAUDE_HOOK_SELFTEST=1
+<name>`, run from pre-commit by `claude-hook-selftests`) is in
+`.claude/rules/self-tests.md`.
 
 ## Claude Code Shell Prefix
 
 `CLAUDE_CODE_SHELL_PREFIX` in `claude/settings.json` names `bin/claude-shell`,
-and Claude Code runs every Bash tool command, every hook, and every stdio MCP
-server through it, handing over the whole command as one argument. Settings
-hot-reload, so a change to the prefix reaches running sessions too, and a broken
-`claude-shell` breaks every Bash call and every hook at once. Read and Edit do
-not go through it, so a session can still repair it.
-
-Its job today is memory. Without swap, a runaway command does not get
-OOM-killed: the kernel evicts page cache, every process on the box refaults its
-own code, and the VM thrashes until it is unreachable. On a systemd machine
-`claude-shell` puts each command in a scope inside `claude-work.slice`, which
-`do_claude_work_slice` in `install.sh` caps as a percentage of RAM. The cap
-leaves room for what is _not_ in the slice, the Claude Code processes
-themselves, zellij, and your own shells, so the session that started a runaway
-stays responsive enough to explain the exit 137 and fix the cause. It is on the
-slice rather than on each scope because a cap only has to protect the headroom,
-and a slice-wide one also stops several agents' commands crowding it out together.
-
-`systemd-run --scope` execs in place, so the command keeps the caller's working
-directory, environment, standard streams, exit status, and PID, and Claude Code
-stopping it reaches it directly. Commands typed into a pane by hand and the
-Claude Code processes themselves are both outside the cap.
-
-The prefix is the one place every command Claude runs passes through, so it is
-where anything else about running them belongs. Filtering output through it, such
-as the masking `claude-redact-secrets` does as a hook, has to account for the
-stdio MCP servers that pass through it too, whose stdout is a JSON-RPC stream
-rather than output to rewrite.
+which runs every Bash tool command, hook, and stdio MCP server, each in a
+systemd scope inside the memory-capped `claude-work.slice`. A broken
+`claude-shell` breaks every Bash call and every hook at once, while Read and
+Edit still work, so a session can repair it. `.claude/rules/shell-prefix.md`
+covers the rest.
 
 ## Claude Code Skills
 
@@ -457,6 +163,12 @@ Language rules split the same way, source conventions in one file and project
 configuration in another: `rust.md` and `cargo.md`, `python.md` and `pyproject.md`.
 In both pairs the config rule's `paths:` are a subset of the source rule's, so the
 two are always in context together and neither needs to mention the other.
+
+Guidance about this repo's own files lives in `.claude/rules/`, scoped by
+`paths:` to the files it governs, rather than in this file. Every session here
+also loads the global `CLAUDE.md` and every path-less global rule, and Claude
+Code warns once the always-on total passes 150k characters, so this file keeps
+only what a session needs before it has touched anything.
 
 ## Claude Code Output Styles
 
