@@ -56,6 +56,12 @@ someone else's, and how to lay out the document so it supports a decision.
   policy, which counts but is the weakest mechanism there is. Will anyone hold
   the line under pressure? A review step needs stated bounds on acceptable
   change, and a soft limit should be stated as soft.
+- **State a guard's threat model before hardening it.** A check against honest
+  mistakes, one against an agent set on getting its way, and one against a
+  hostile actor need different mechanisms. A text parser in front of a full
+  shell can only ever be the first kind. Say which kind each guard is, so a
+  review that finds a bypass can tell a defect from a route the guard never
+  claimed to close, instead of hardening it round after round.
 - **Test categories with a counterexample.** If the same thing lands on either
   side of a proposed boundary depending on the caller, the property is
   contextual, not intrinsic.

@@ -7,18 +7,29 @@
 # "unlanded" mean, so this check, `claude-git-status`, and land itself count the same commits.
 #
 # A push whose PR failed to open (`pr_failed=yes`) asks too, whatever the count: the branch is on
-# origin, so it has nothing unlanded, and only another land opens the PR.
+# origin, so it has nothing unlanded, and only another land opens the PR. Unlanded commits that
+# change workflow files ask for `git land --workflows` by name, since a plain land refuses them and
+# its permission prompt is where Josh approves.
 #
-# A branch that has never been landed only earns a reminder, and that rides on
-# `claude-stop-summary`'s request for the report rather than costing a model turn here.
+# When `claude-stop-summary` is still to ask for this prompt's report, the request rides on that
+# instead (it calls `claude-stop-land --request` and spends this check's ask), so a land Claude
+# defers for a reason costs a sentence in the report rather than a model turn of its own. A prompt
+# that wakes on a finished background task and commits is the common case: without this, every such
+# wake paid for a land request and then a report. Only when the report has already been asked for,
+# or this prompt changed nothing, does this check block on its own.
+#
+# A branch that has never been landed only earns a reminder, and that rides on the report too.
 
 set -euo pipefail
 
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker line is how
-# `claude-hook-selftests` discovers participating hooks. The land state is stubbed on PATH; run
-# these with `CLAUDE_HOOK_SELFTEST=1 claude-stop-land`.
+# `claude-hook-selftests` discovers participating hooks. The land state and whether the prompt
+# changed the repo are stubbed on PATH, and the once-per-prompt record is the real one; run these
+# with `CLAUDE_HOOK_SELFTEST=1 claude-stop-land`.
 if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   SELF=$(realpath "$0")
+  BIN_DIR=$(dirname "$SELF")
+  export REAL_SNAPSHOT="$BIN_DIR/claude-prompt-snapshot"
   fails=0
   stubs=$(realpath "$(mktemp -d)")
   repo=$(realpath "$(mktemp -d)")
@@ -33,27 +44,42 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
 [ -n "$STUB_LAND_STATE" ] || exit 1
 printf '%s\n' "$STUB_LAND_STATE"
 EOF
-  chmod +x "$stubs/git-land"
+  # `changed` answers STUB_CHANGED (0 = the prompt changed the repo); everything else is the real one.
+  cat >"$stubs/claude-prompt-snapshot" <<'EOF'
+#!/bin/sh
+[ "$1" = changed ] || exec "$REAL_SNAPSHOT" "$@"
+exit "${STUB_CHANGED:-1}"
+EOF
+  chmod +x "$stubs"/*
 
-  # state <landed> <draft_changed> <unlanded> [pr_failed] [default]
+  # state <landed> <draft_changed> <unlanded> [pr_failed] [default] [workflows]
   state() {
-    printf 'path=/x/pr.md\ndraft=yes\nlanded=%s\nstale=no\ndraft_changed=%s\nunlanded=%s\npr_failed=%s\ndefault=%s' \
-      "$1" "$2" "$3" "${4:-no}" "${5:-no}"
+    printf 'path=/x/pr.md\ndraft=yes\nlanded=%s\nstale=no\ndraft_changed=%s\nunlanded=%s\nworkflows=%s\npr_failed=%s\ndefault=%s' \
+      "$1" "$2" "$3" "${6:-no}" "${4:-no}" "${5:-no}"
+  }
+  # run <prompt> <land_state> [args...], with STUB_CHANGED passed through from the caller.
+  run() {
+    local prompt="$1" land_state="$2"
+    shift 2
+    OUT=$(cd "$repo" && jq -cn --arg p "$prompt" '{prompt_id: $p}' |
+      env "${unset_git[@]}" STUB_CHANGED="${STUB_CHANGED:-1}" STUB_LAND_STATE="$land_state" \
+      PATH="$stubs:$BIN_DIR:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" "$@" 2>&1) ||
+    { printf 'FAIL exited non-zero :: %s\n' "$OUT"; fails=1; }
   }
   asks() {
     local desc="$1" prompt="$2" land_state="$3" want="$4" got=no
-    OUT=$(cd "$repo" && jq -cn --arg p "$prompt" '{prompt_id: $p}' |
-    env "${unset_git[@]}" STUB_LAND_STATE="$land_state" PATH="$stubs:$(dirname "$SELF"):$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1) ||
-    { printf 'FAIL %s: exited non-zero :: %s\n' "$desc" "$OUT"; fails=1; }
-    [[ "$OUT" == *"run \`git land\`"* ]] && got=yes
+    run "$prompt" "$land_state"
+    [[ "$OUT" == *"git land"* && "${OUT:0:1}" == "{" ]] && got=yes
     [[ "$got" == "$want" ]] || { printf 'FAIL %s: want_ask=%s got=%s :: %s\n' "$desc" "$want" "$got" "$OUT"; fails=1; }
   }
+  snapshot() { (cd "$repo" && env "${unset_git[@]}" CLAUDE_HOOK_SELFTEST= "$REAL_SNAPSHOT" "$@"); }
 
   asks "no land state (no origin, detached) is silent" p1 "" no
   asks "a never-landed branch is silent" p2 "$(state no no 3)" no
   asks "a landed branch with nothing new is silent" p3 "$(state yes no 0)" no
   asks "a landed branch with new commits asks" p4 "$(state yes no 2)" yes
   [[ "$OUT" == *"2 commits"* ]] || { printf 'FAIL the count is named :: %s\n' "$OUT"; fails=1; }
+  [[ "$OUT" == *"Hold the turn"* ]] || { printf 'FAIL its own ask holds the report :: %s\n' "$OUT"; fails=1; }
   asks "the same prompt is asked once" p4 "$(state yes no 2)" no
   asks "a changed draft is mentioned" p5 "$(state yes yes 1)" yes
   [[ "$OUT" == *"draft has changed"* ]] || { printf 'FAIL changed draft not mentioned :: %s\n' "$OUT"; fails=1; }
@@ -67,44 +93,84 @@ EOF
   [[ "$OUT" == *"failed to open"* ]] || { printf 'FAIL the failed PR is named :: %s\n' "$OUT"; fails=1; }
   asks "a PR that failed to open on the default branch is silent" p9 "$(state no no 0 yes yes)" no
 
+  # --- workflow files: a plain land refuses them, so the request names the flag ---
+  asks "unlanded workflow files ask" p10 "$(state yes no 1 no no yes)" yes
+  [[ "$OUT" == *"run \`git land --workflows\` now"* ]] || { printf 'FAIL --workflows is named :: %s\n' "$OUT"; fails=1; }
+
+  # --- the report is still to be asked for: the request rides on it ---
+  STUB_CHANGED=0 asks "a changed prompt leaves the request to the report" p11 "$(state yes no 2)" no
+  [[ -z "$OUT" ]] || { printf 'FAIL deferring to the report says nothing :: %s\n' "$OUT"; fails=1; }
+  snapshot asked p11 land && { printf 'FAIL deferring to the report spends no ask\n'; fails=1; }
+  snapshot ask p12 summary
+  STUB_CHANGED=0 asks "a changed prompt whose report has asked asks itself" p12 "$(state yes no 2)" yes
+
+  # --- --request: the text alone, for the report to carry, spending nothing ---
+  run p13 "$(state yes no 2)" --request
+  [[ "$OUT" == *"run \`git land\`"* && "${OUT:0:1}" != "{" ]] || { printf 'FAIL --request prints the text :: %s\n' "$OUT"; fails=1; }
+  [[ "$OUT" != *"Hold the turn"* ]] || { printf 'FAIL --request leaves the report to its carrier :: %s\n' "$OUT"; fails=1; }
+  asks "--request spends no ask" p13 "$(state yes no 2)" yes
+  run p14 "$(state yes no 0)" --request
+  [[ -z "$OUT" ]] || { printf 'FAIL --request with nothing to land is empty :: %s\n' "$OUT"; fails=1; }
+
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
   fi
   exit "$fails"
 fi
 
-INPUT=$(cat)
-PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")
+# What Claude should do about landing this branch, as one paragraph, or nothing when there is nothing
+# to land: the branch has never been landed, is the default branch, or has nothing unlanded.
+land_request() {
+  git rev-parse --git-dir >/dev/null 2>&1 || return 0
+  local state
+  state=$(git-land --state 2>/dev/null) || return 0
+  # Unlanded commits on the default branch aren't Claude's (it can't commit there), so landing them
+  # would publish Josh's work without a PR on his behalf.
+  grep -qx 'default=no' <<<"$state" || return 0
+  local refuses="If land refuses, say so and stop: don't look for another route."
 
-git rev-parse --git-dir >/dev/null 2>&1 || exit 0
-STATE=$(git-land --state 2>/dev/null) || exit 0
-# Unlanded commits on the default branch aren't Claude's (it can't commit there), so landing them
-# would publish Josh's work without a PR on his behalf.
-grep -qx 'default=no' <<<"$STATE" || exit 0
+  if grep -qx 'pr_failed=yes' <<<"$state"; then
+    echo "The last land pushed this branch, but its PR failed to open, so the branch is on origin with no PR: run \`git land\` again to open it, or say in one line why not. $refuses"
+    return 0
+  fi
 
-if grep -qx 'pr_failed=yes' <<<"$STATE"; then
-  claude-prompt-snapshot ask "$PROMPT_ID" land || exit 0
-  CONTEXT="The last land pushed this branch, but its PR failed to open, so the branch is on origin with no PR: run \`git land\` again to open it, or say in one line why not. If land refuses, say so and stop: don't look for another route. Hold the turn's report: the last check asks for it."
-  jq -n --arg ctx "$CONTEXT" \
-    '{systemMessage: "[claude-stop-land] open the PR", hookSpecificOutput: {hookEventName: "Stop", additionalContext: $ctx}}'
+  grep -qx 'landed=yes' <<<"$state" || return 0
+  local unlanded
+  unlanded=$(sed -n 's/^unlanded=//p' <<<"$state")
+  [[ "$unlanded" =~ ^[0-9]+$ && "$unlanded" -gt 0 ]] || return 0
+
+  local draft_path draft_note commits verb land
+  draft_path=$(sed -n 's/^path=//p' <<<"$state")
+  draft_note="If these commits change what the PR is, rewrite the draft at $draft_path first, since it is the only way to change your part of the PR description."
+  grep -qx 'draft_changed=yes' <<<"$state" &&
+  draft_note="The draft has changed since the last land, so this land carries it to the PR. $draft_note"
+  commits="$unlanded commits" verb="aren't"
+  [[ "$unlanded" == 1 ]] && commits="1 commit" verb="isn't"
+  land="Then run \`git land\` so the PR and its CI stay current, or say in one line why not."
+  grep -qx 'workflows=yes' <<<"$state" &&
+  land="They change workflow files, which a plain land refuses: run \`git land --workflows\` now, without asking in text first, since its permission prompt is where Josh approves it."
+  echo "This branch has been landed, and $commits on it $verb on origin yet. $draft_note $land $refuses"
+}
+
+if [[ "${1:-}" == --request ]]; then
+  land_request
   exit 0
 fi
 
-grep -qx 'landed=yes' <<<"$STATE" || exit 0
-UNLANDED=$(sed -n 's/^unlanded=//p' <<<"$STATE")
-[[ "$UNLANDED" =~ ^[0-9]+$ && "$UNLANDED" -gt 0 ]] || exit 0
+INPUT=$(cat)
+PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")
+
+# The report is still to be asked for this prompt, so `claude-stop-summary` carries the request (and
+# spends this check's ask) rather than this check costing a turn before it. Checked before the land
+# state is read, since the summary reads it again for itself.
+if claude-prompt-snapshot changed "$PROMPT_ID" >/dev/null && ! claude-prompt-snapshot asked "$PROMPT_ID" summary; then
+  exit 0
+fi
+
+REQUEST=$(land_request)
+[[ -n "$REQUEST" ]] || exit 0
 
 claude-prompt-snapshot ask "$PROMPT_ID" land || exit 0
 
-DRAFT_PATH=$(sed -n 's/^path=//p' <<<"$STATE")
-DRAFT_NOTE="If these commits change what the PR is, rewrite the draft at $DRAFT_PATH first, since it is the only way to change your part of the PR description."
-grep -qx 'draft_changed=yes' <<<"$STATE" &&
-DRAFT_NOTE="The draft has changed since the last land, so this land carries it to the PR. $DRAFT_NOTE"
-
-COMMITS="$UNLANDED commits"
-[[ "$UNLANDED" == 1 ]] && COMMITS="1 commit"
-
-CONTEXT="This branch has been landed, and $COMMITS on it $([[ "$UNLANDED" == 1 ]] && echo "isn't" || echo "aren't") on origin yet. ${DRAFT_NOTE} Then run \`git land\` so the PR and its CI stay current, or say in one line why not. If land refuses, say so and stop: don't look for another route. Hold the turn's report: the last check asks for it."
-
-jq -n --arg ctx "$CONTEXT" \
-  '{systemMessage: "[claude-stop-land] land the new commits", hookSpecificOutput: {hookEventName: "Stop", additionalContext: $ctx}}'
+jq -n --arg ctx "$REQUEST Hold the turn's report: the last check asks for it." \
+  '{systemMessage: "[claude-stop-land] land the branch", hookSpecificOutput: {hookEventName: "Stop", additionalContext: $ctx}}'

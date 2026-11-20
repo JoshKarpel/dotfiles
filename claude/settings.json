@@ -338,6 +338,15 @@
         ]
       },
       {
+        "matcher": "Edit|MultiEdit|Write|Artifact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-plan-page-check"
+          }
+        ]
+      },
+      {
         "matcher": "AskUserQuestion|ExitPlanMode",
         "hooks": [
           {
@@ -400,6 +409,15 @@
           {
             "type": "command",
             "command": "claude-redact-secrets"
+          }
+        ]
+      },
+      {
+        "matcher": "Artifact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claude-plan-page-published"
           }
         ]
       }

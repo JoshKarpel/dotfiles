@@ -141,6 +141,7 @@ EOF
   want_out "--state stale" "stale=no"
   want_out "--state draft_changed" "draft_changed=no"
   want_out "--state unlanded" "unlanded=1"
+  want_out "--state workflows" "workflows=no"
   want_out "--state pr_failed" "pr_failed=no"
   want_out "--state default" "default=no"
   want_out "--state path" "path=$(git rev-parse --absolute-git-dir)/land/feature/pr.md"
@@ -348,6 +349,8 @@ EOF
   echo "runs: {}" >sub/action.yaml
   git add .github sub
   git commit -q -m workflows
+  run --state
+  want_out "--state with a workflow file unlanded" "workflows=yes"
   run
   want_exit "workflow file" 1
   want_out "workflow file lists ci.yml" ".github/workflows/ci.yml"
@@ -474,6 +477,13 @@ unlanded_count() {
   git rev-list --count HEAD --not --remotes=origin
 }
 
+# The unlanded files GitHub runs with the repo's secrets and token as soon as they're pushed, one per
+# line: land pushes them only with `--workflows`.
+unlanded_workflow_files() {
+  git log --format= --name-only HEAD --not --remotes=origin | sort -u |
+  grep -E '^\.github/workflows/|(^|/)action\.ya?ml$' || true
+}
+
 # Whether this is the default branch, from `refs/remotes/origin/HEAD` (local, unlike the `gh repo view`
 # land itself asks): `unknown` where origin has no HEAD. Every consumer acts only on `no`, since
 # unlanded commits on the default branch are Josh's rather than Claude's to publish.
@@ -484,8 +494,11 @@ default_state() {
 }
 
 print_state() {
-  local draft=no landed=no stale=no changed=no pr_failed=no
+  local draft=no landed=no stale=no changed=no pr_failed=no workflows=no unlanded
   [[ -f "$DRAFT" ]] && draft=yes
+  unlanded=$(unlanded_count)
+  # Every stop reads this state several times, and listing the files diffs each unlanded commit.
+  [[ "$unlanded" == 0 || -z "$(unlanded_workflow_files)" ]] || workflows=yes
   if is_stale; then
     stale=yes
   elif [[ -f "$PR_FAILED" ]]; then
@@ -498,8 +511,8 @@ print_state() {
       changed=yes
     fi
   fi
-  printf 'path=%s\ndraft=%s\nlanded=%s\nstale=%s\ndraft_changed=%s\nunlanded=%s\npr_failed=%s\ndefault=%s\n' \
-    "$DRAFT" "$draft" "$landed" "$stale" "$changed" "$(unlanded_count)" "$pr_failed" "$(default_state)"
+  printf 'path=%s\ndraft=%s\nlanded=%s\nstale=%s\ndraft_changed=%s\nunlanded=%s\nworkflows=%s\npr_failed=%s\ndefault=%s\n' \
+    "$DRAFT" "$draft" "$landed" "$stale" "$changed" "$unlanded" "$workflows" "$pr_failed" "$(default_state)"
 }
 
 # `<host>/<owner>/<repo>` from a remote URL: https, `ssh://`, scp-style `user@host:owner/repo`, or a
@@ -629,8 +642,7 @@ Claude: stop and tell Josh. Removing a secret means rewriting those commits, whi
     fi
 
     local workflows
-    workflows=$(git log --format= --name-only HEAD --not --remotes=origin | sort -u |
-    grep -E '^\.github/workflows/|(^|/)action\.ya?ml$' || true)
+    workflows=$(unlanded_workflow_files)
     if [[ -n "$workflows" && "$allow_workflows" != yes ]]; then
       die "the unlanded commits change files GitHub runs with the repo's secrets and token as soon as they're pushed:
 

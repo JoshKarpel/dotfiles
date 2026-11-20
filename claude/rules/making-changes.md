@@ -68,6 +68,19 @@ cost fallacy to argue otherwise, and to argue loudest when the code is worst.
 Accumulating a couple of conditionals to gain insight is fine. Bending the
 abstraction for the third and fourth caller is not.
 
+## Read Clustered Review Findings as One Finding
+
+When review after review turns up bugs at the same join, they are usually one
+bug: the structure is wrong. One example is a form that braids two kinds of
+submission, which grows hidden fields, a branch per kind, and checks done twice.
+Another is a parser in front of a shell, where each round finds one more
+spelling it misses. Before patching the next finding, ask whether the two
+concerns could be separate, or whether this layer can do the job at all.
+Splitting a braided flow often deletes most of the findings at once, because
+neither half needed the other; ten patches leave it braided. This is the
+wrong-abstraction signal arriving through review instead of through a new
+caller.
+
 ## Keep Refactors Small
 
 The larger the refactor, the likelier it fails. Keep the system working at
@@ -101,6 +114,10 @@ first, and scale that patience to the size of the system.
 Tests are often the hint: a case that looks pointless is frequently a bug
 someone already paid for. So are `git log` and `git blame` on the lines in
 question, which usually name the fence in a commit message.
+
+The fence runs the other way too. Before proposing a mechanism, check whether
+the history already tried it and took it out: `git log -S<term>` finds the
+commit that removed a heuristic, usually with the reason it failed.
 
 ## References
 
