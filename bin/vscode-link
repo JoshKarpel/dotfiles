@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
-# Print the links that open DIRECTORY (default: the current one) in VS Code on
-# this exe.dev VM, one per line: VS Code desktop over Remote-SSH first, then the
-# VS Code in the browser that vscode-web.service serves on 3001. Exits 1 off
-# exe.dev.
+# Print the URL that opens DIRECTORY (default: the current one) in the VS Code
+# that vscode-web.service serves in the browser on 3001. Exits 1 off exe.dev.
 # Usage: vscode-link [DIRECTORY]
 #
 # claude-statusline runs this on every render, so it stays in shell rather than
 # being an `exe-dev` subcommand, whose uv startup alone costs more than the rest
 # of the status line. It reads the VM's name off /etc/hosts as `exe-dev url`
-# does, and shapes the desktop link as exe-dev-atlas does.
+# does.
 
 set -euo pipefail
 
@@ -35,11 +33,9 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
 
   enc=${sandbox// /%20}
   t "links the current directory" 0 \
-  "vscode://vscode-remote/ssh-remote+nimbus.exe.xyz$enc?windowId=_blank
-https://nimbus.exe.xyz:3001/?folder=${enc//\//%2F}" "$sandbox/vm-hosts"
-  t "a relative directory is resolved and each segment encoded" 0 \
-  "vscode://vscode-remote/ssh-remote+nimbus.exe.xyz$enc/a%20dir/sub%231?windowId=_blank
-https://nimbus.exe.xyz:3001/?folder=${enc//\//%2F}%2Fa%20dir%2Fsub%231" "$sandbox/vm-hosts" "a dir/sub#1"
+    "https://nimbus.exe.xyz:3001/?folder=${enc//\//%2F}" "$sandbox/vm-hosts"
+  t "a relative directory is resolved and encoded" 0 \
+    "https://nimbus.exe.xyz:3001/?folder=${enc//\//%2F}%2Fa%20dir%2Fsub%231" "$sandbox/vm-hosts" "a dir/sub#1"
   t "a missing directory fails" 1 "" "$sandbox/vm-hosts" nowhere
   t "off exe.dev it fails" 1 "" "$sandbox/laptop-hosts"
 
@@ -65,8 +61,4 @@ absolute=$(cd -- "$directory" >/dev/null && pwd) || {
   exit 1
 }
 
-# The desktop link carries the directory as its path, so each segment is encoded
-# and the slashes kept; the browser link carries it as a query value, whole.
-jq -rn --arg host "$host" --arg dir "$absolute" '
-  "vscode://vscode-remote/ssh-remote+\($host)\($dir | split("/") | map(@uri) | join("/"))?windowId=_blank",
-  "https://\($host):3001/?folder=\($dir | @uri)"'
+jq -rn --arg host "$host" --arg dir "$absolute" '"https://\($host):3001/?folder=\($dir | @uri)"'

@@ -27,11 +27,9 @@ if [[ -n "$pr" ]]; then
     else "pending" end' <<<"$pr")
 fi
 
-# Links that open the session's directory in VS Code, on an exe.dev VM: desktop
-# over Remote-SSH, then the browser.
-if vscode_links=$(vscode-link "$cwd" 2>/dev/null); then
-  { read -r vscode_desktop; read -r vscode_web; } <<<"$vscode_links"
-fi
+# The link that opens the session's directory in VS Code in the browser, on an
+# exe.dev VM.
+vscode_url=$(vscode-link "$cwd" 2>/dev/null)
 
 # Fetch cached usage limits (gracefully skipped if unavailable)
 usage=$(claude-fetch-usage 2>/dev/null)
@@ -97,8 +95,8 @@ if [[ -n "${pr_number:-}" ]]; then
   fi
   status+=" | ${pr_info}"
 fi
-if [[ -n "${vscode_desktop:-}" ]]; then
-  status+=" | vscode: \033]8;;${vscode_desktop}\adesktop\033]8;;\a \033]8;;${vscode_web}\aweb\033]8;;\a"
+if [[ -n "$vscode_url" ]]; then
+  status+=" | \033]8;;${vscode_url}\avscode\033]8;;\a"
 fi
 if [[ -n "${five_hour_pct:-}" && -n "${seven_day_pct:-}" ]]; then
   five_hour_val=${five_hour_pct%\%}

@@ -220,9 +220,9 @@ count-claude-tokens --help
 # Run with --help for subcommands and flags.
 exe-dev --help
 
-# Print the links that open a directory (default: this one) in VS Code on this
-# exe.dev VM: desktop over Remote-SSH, then the browser client on 3001. The
-# Claude Code status line shows both for the session's directory.
+# Print the URL that opens a directory (default: this one) in the browser VS
+# Code on this exe.dev VM's port 3001. The Claude Code status line links it for
+# the session's directory.
 vscode-link [directory]
 
 # Run Claude Code billed against exe.dev's LLM allocation rather than the
