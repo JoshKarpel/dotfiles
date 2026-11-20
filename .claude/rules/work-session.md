@@ -99,7 +99,7 @@ The token that gets you into the web client is minted per box with
 `~/.local/share/zellij/tokens.db`. Nothing in this repo can provision it, so it
 is a manual step per box.
 
-`bin/exe-dev` writes units there too, from the setup script `create-botbox`
+`bin/exe-dev` writes units into `~/.config/systemd/user/` too, from the setup script `create-botbox`
 sends: a bot-box has nobody to run the installer on it, so it gets a timer that
 does. Those name no clone (`%h` reaches the home directory, and systemd resolves
 a specifier wherever it appears, quoting included), and are written at first boot
