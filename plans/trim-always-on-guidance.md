@@ -69,6 +69,10 @@ wrong answer, while a session carrying doctrine it didn't need costs tokens.
 The third gives way to the second, which is the change to the current
 harness-context rule this plan makes.
 
+When it's unclear whether a rule's trigger is reliable, it stays always-on.
+A rule moves out only when the sessions that need it are clearly the ones that
+will load it.
+
 ## How does each mechanism load?
 
 These are what the plan builds on.
@@ -121,13 +125,18 @@ They stay always-on and get trimmed.
 | `durable-docs.md` | 4.9k | Docs reviews are prose about the present state |
 | `making-changes.md`, less its refactoring half | ~4.7k | Abstraction choices happen in designs and code |
 | `verify-empirically.md` | 4.3k | Any session can state a remembered fact |
+| `api-design.md` | 3.9k | An endpoint gets designed while coding, unframed |
 | `supply-chain.md`, less its ecosystem settings | ~3.0k | A dependency gets added at `cargo add`, before any file is read |
+| `declarative.md` | 2.7k | Applies to designs as much as to code |
 | `public-record.md` | 2.4k | Anything can end up in a commit or issue |
 | `blameless.md` | 2.3k | Any write-up can assign fault |
 | `simple-vs-easy.md` | 1.8k | Cited by the others as the base vocabulary |
+| `control-plane.md` | 1.8k | Applies to designs as much as to code |
+| `values-over-places.md` | 1.7k | Applies to designs as much as to code |
+| `functional-core.md` | 1.2k | Applies to designs as much as to code |
 
-That's about 43.6k after the two splits. Trimming targets 25 to 30%, to about
-32k.
+That's about 54.9k after the two splits. Trimming targets 25 to 30%, to about
+40k.
 
 `making-changes.md` splits along the wrong-abstraction line. "Make the Change
 Easy", "Don't Factor Ahead of the Evidence", "Duplication Is Cheaper Than the
@@ -153,25 +162,20 @@ at the first Read in a coding one.
 A session that reads only through Bash and creates only new files never loads
 them; see the costs.
 
-| Rule | Chars | Note |
-|---|---|---|
-| `testing.md` | 9.6k | |
-| `comments.md` | 5.2k | |
-| `api-design.md` | 3.9k | Also read by the design-review skill |
-| `declarative.md` | 2.7k | Also read by the design-review skill |
-| `configuration.md` | 2.6k | |
-| `locality-of-behavior.md` | 2.4k | |
-| `parse-dont-validate.md` | 1.8k | |
-| `control-plane.md` | 1.8k | Also read by the design-review skill |
-| `values-over-places.md` | 1.7k | Also read by the design-review skill |
-| `refactoring.md` (new, from `making-changes.md`) | ~1.4k | |
-| `functional-core.md` | 1.2k | Also read by the design-review skill |
-| `dependency-injection.md` | 1.1k | |
-| `naming.md` | 0.6k | |
-| `local-conventions.md` | 0.3k | |
-| `functions.md` | 0.2k | |
+| Rule | Chars |
+|---|---|
+| `testing.md` | 9.6k |
+| `comments.md` | 5.2k |
+| `configuration.md` | 2.6k |
+| `locality-of-behavior.md` | 2.4k |
+| `parse-dont-validate.md` | 1.8k |
+| `refactoring.md` (new, from `making-changes.md`) | ~1.4k |
+| `dependency-injection.md` | 1.1k |
+| `naming.md` | 0.6k |
+| `local-conventions.md` | 0.3k |
+| `functions.md` | 0.2k |
 
-That's about 36.5k, loaded only in sessions that read files.
+That's about 25.2k, loaded only in sessions that read files.
 
 ### Design doctrine: by path for plans, by skill for everything else
 
@@ -186,9 +190,7 @@ design. Two triggers cover that:
 - **A `design-review` skill** for the cases with no local file: a design doc
   reviewed over an MCP connector, a design talked through in chat, a new plan.
   Its body is a pointer: read `designs.md` and `platforms.md` by path, and
-  `api-design.md`, `declarative.md`, `control-plane.md`,
-  `values-over-places.md`, `functional-core.md`, and `secrets.md` when the
-  design touches what they cover.
+  `secrets.md` when the design handles credentials.
 
 `operations.md` (3.0k) becomes an `operations` skill: rollouts, migrations,
 alerts, and incident follow-up, all named tasks.
@@ -225,11 +227,11 @@ The skill listing loads in every session in both columns, and isn't counted.
 
 | Session | Today (chars) | Afterwards (chars) |
 |---|---|---|
-| Chat or docs review | 120k | ~42k always-on |
-| Design review | 120k | ~42k, plus ~12k design doctrine and the rules it reads |
-| Coding | 120k | ~42k, plus ~37k on the first Read |
+| Chat or docs review | 120k | ~50k always-on |
+| Design review | 120k | ~50k, plus ~12k design doctrine |
+| Coding | 120k | ~50k, plus ~26k on the first Read |
 
-The 42k is the trimmed always-on rules (~32k) and the trimmed global
+The 50k is the trimmed always-on rules (~40k) and the trimmed global
 `CLAUDE.md` (~10k).
 
 ## What does this cost?
@@ -306,8 +308,9 @@ Moves change no wording; trims change no destination.
 - [ ] Rewrite `harness-context.md` around the ranking above: always-on for
   doctrine needed when the situation isn't framed, a file scope for doctrine
   tied to reading a kind of file, a skill for doctrine tied to a named task,
-  and the cost of each counted in tokens times the sessions that load it,
-  with caching measured rather than assumed.
+  always-on whenever the trigger is in doubt, and the cost of each counted in
+  tokens times the sessions that load it, with caching measured rather than
+  assumed.
 - [ ] Update the repo `CLAUDE.md`'s "Claude Code Rules" section to match.
 
 ### Phase 3: move without rewording
@@ -333,8 +336,3 @@ Moves change no wording; trims change no destination.
 
 - [ ] Count the always-on total again, and record from transcripts what a chat
   session, a design review, and a coding session each loaded.
-
-## Open questions for Josh
-
-- Does `api-design.md` belong in the code tier with the skill reading it, or
-  in the skill alone? An endpoint designed while coding needs it unframed.
