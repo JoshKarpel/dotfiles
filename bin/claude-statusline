@@ -8,6 +8,8 @@ model=$(echo "$data" | jq -r '.model.display_name // "unknown"')
 context_pct=$(echo "$data" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
 effort=$(echo "$data" | jq -r '.effort.level // empty')
 
+cwd=$(echo "$data" | jq -r '.workspace.current_dir // .cwd // "."')
+
 date_str=$(date +%Y-%m-%d\ %H:%M)
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
 
@@ -23,6 +25,12 @@ if [[ -n "$pr" ]]; then
     elif .reviewDecision == "APPROVED" then "approved"
     elif .reviewDecision == "CHANGES_REQUESTED" then "changes_requested"
     else "pending" end' <<<"$pr")
+fi
+
+# Links that open the session's directory in VS Code, on an exe.dev VM: desktop
+# over Remote-SSH, then the browser.
+if vscode_links=$(vscode-link "$cwd" 2>/dev/null); then
+  { read -r vscode_desktop; read -r vscode_web; } <<<"$vscode_links"
 fi
 
 # Fetch cached usage limits (gracefully skipped if unavailable)
@@ -88,6 +96,9 @@ if [[ -n "${pr_number:-}" ]]; then
     pr_info+=" (${pr_review_state})"
   fi
   status+=" | ${pr_info}"
+fi
+if [[ -n "${vscode_desktop:-}" ]]; then
+  status+=" | vscode: \033]8;;${vscode_desktop}\adesktop\033]8;;\a \033]8;;${vscode_web}\aweb\033]8;;\a"
 fi
 if [[ -n "${five_hour_pct:-}" && -n "${seven_day_pct:-}" ]]; then
   five_hour_val=${five_hour_pct%\%}

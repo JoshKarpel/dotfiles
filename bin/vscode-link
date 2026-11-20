@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Print the links that open DIRECTORY (default: the current one) in VS Code on
+# this exe.dev VM, one per line: VS Code desktop over Remote-SSH first, then the
+# VS Code in the browser that vscode-web.service serves on 3001. Exits 1 off
+# exe.dev.
+# Usage: vscode-link [DIRECTORY]
+#
+# claude-statusline runs this on every render, so it stays in shell rather than
+# being an `exe-dev` subcommand, whose uv startup alone costs more than the rest
+# of the status line. It reads the VM's name off /etc/hosts as `exe-dev url`
+# does, and shapes the desktop link as exe-dev-atlas does.
+
+set -euo pipefail
+
+# CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
+# line is how `claude-hook-selftests` discovers participating scripts. VSCODE_LINK_HOSTS
+# stands in for /etc/hosts, so the tests run off exe.dev too.
+if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
+  SELF=$(realpath "$0")
+  fails=0
+  sandbox=$(realpath "$(mktemp -d)")
+  trap 'rm -rf "$sandbox"' EXIT
+  mkdir -p "$sandbox/a dir/sub#1"
+  printf '# managed by exe.dev\n# 10.0.0.1 commented.exe.xyz\n127.0.0.1 localhost\n10.42.0.42 nimbus.exe.xyz nimbus\n' >"$sandbox/vm-hosts"
+  printf '127.0.0.1 localhost\n' >"$sandbox/laptop-hosts"
+
+  # t <desc> <want-exit> <want-out> <hosts> [args...]
+  t() {
+    local desc="$1" want_exit="$2" want_out="$3" hosts="$4" out exit_code=0
+    shift 4
+    out=$(cd "$sandbox" && VSCODE_LINK_HOSTS="$hosts" CLAUDE_HOOK_SELFTEST= "$SELF" "$@" 2>/dev/null) || exit_code=$?
+    [[ "$exit_code" == "$want_exit" && "$out" == "$want_out" ]] ||
+    { printf 'FAIL %s: want exit=%s out=%q, got exit=%s out=%q\n' "$desc" "$want_exit" "$want_out" "$exit_code" "$out"; fails=1; }
+  }
+
+  enc=${sandbox// /%20}
+  t "links the current directory" 0 \
+  "vscode://vscode-remote/ssh-remote+nimbus.exe.xyz$enc?windowId=_blank
+https://nimbus.exe.xyz:3001/?folder=${enc//\//%2F}" "$sandbox/vm-hosts"
+  t "a relative directory is resolved and each segment encoded" 0 \
+  "vscode://vscode-remote/ssh-remote+nimbus.exe.xyz$enc/a%20dir/sub%231?windowId=_blank
+https://nimbus.exe.xyz:3001/?folder=${enc//\//%2F}%2Fa%20dir%2Fsub%231" "$sandbox/vm-hosts" "a dir/sub#1"
+  t "a missing directory fails" 1 "" "$sandbox/vm-hosts" nowhere
+  t "off exe.dev it fails" 1 "" "$sandbox/laptop-hosts"
+
+  if [[ "$fails" == 0 ]]; then
+    echo "$(basename "$0"): all self-tests passed"
+  fi
+  exit "$fails"
+fi
+
+hosts=${VSCODE_LINK_HOSTS:-/etc/hosts}
+directory=${1:-.}
+
+host=$(awk '!/^#/ { for (i = 2; i <= NF; i++) if ($i ~ /\.exe\.xyz$/) { print $i; exit } }' "$hosts" 2>/dev/null) || true
+if [[ -z "$host" ]]; then
+  echo "not on an exe.dev VM" >&2
+  exit 1
+fi
+
+# cd prints the directory it landed in whenever CDPATH found it, which these
+# dotfiles set, so its own output is dropped to leave pwd's alone.
+absolute=$(cd -- "$directory" >/dev/null && pwd) || {
+  echo "no directory $directory" >&2
+  exit 1
+}
+
+# The desktop link carries the directory as its path, so each segment is encoded
+# and the slashes kept; the browser link carries it as a query value, whole.
+jq -rn --arg host "$host" --arg dir "$absolute" '
+  "vscode://vscode-remote/ssh-remote+\($host)\($dir | split("/") | map(@uri) | join("/"))?windowId=_blank",
+  "https://\($host):3001/?folder=\($dir | @uri)"'

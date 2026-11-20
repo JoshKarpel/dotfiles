@@ -220,6 +220,11 @@ count-claude-tokens --help
 # Run with --help for subcommands and flags.
 exe-dev --help
 
+# Print the links that open a directory (default: this one) in VS Code on this
+# exe.dev VM: desktop over Remote-SSH, then the browser client on 3001. The
+# Claude Code status line shows both for the session's directory.
+vscode-link [directory]
+
 # Run Claude Code billed against exe.dev's LLM allocation rather than the
 # claude.ai subscription. exe.dev VMs only. Takes claude's own flags.
 claude-exe-dev --model opus
