@@ -208,7 +208,11 @@ function do_brew() {
   brew install --display-times findutils  # BSD xargs doesn't have -a
   path_prefix "$(brew --prefix)/opt/findutils/libexec/gnubin"
 
-  xargs -r -a "$BASEDIR/targets/brew.txt" -- brew install --display-times
+  # Install only what is missing and leave upgrades to `brew upgrade` below. A
+  # cask named on the command line counts as outdated even when it updates
+  # itself, so letting `brew install` upgrade would replace iTerm2 (and try to
+  # quit it from inside itself) despite HOMEBREW_NO_UPGRADE_AUTO_UPDATES_CASKS.
+  HOMEBREW_NO_INSTALL_UPGRADE=1 xargs -r -a "$BASEDIR/targets/brew.txt" -- brew install --display-times
 
   # A cask upgrade moves the old app out of /Applications before installing the
   # new one, and rolls back only on StandardError, which Ruby's Interrupt is not.
