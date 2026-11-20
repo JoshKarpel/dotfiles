@@ -220,6 +220,11 @@ count-claude-tokens --help
 # Run with --help for subcommands and flags.
 exe-dev --help
 
+# Print the URL that opens a directory (default: this one) in the browser VS
+# Code on this exe.dev VM's port 3001. The Claude Code status line links it for
+# the session's directory.
+vscode-link [directory]
+
 # Run Claude Code billed against exe.dev's LLM allocation rather than the
 # claude.ai subscription. exe.dev VMs only. Takes claude's own flags.
 claude-exe-dev --model opus
