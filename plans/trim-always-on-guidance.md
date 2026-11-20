@@ -52,13 +52,16 @@ harness-context rule this plan makes.
 ## How does each mechanism load?
 
 These are what the plan builds on.
-The first two are observed in sessions on this machine; the rest are listed in
-the first phase to verify before anything depends on them.
 
-- A rule with `paths:` loads the first time a matching file goes through Read,
-  Edit, or Write. A Bash `cat` or `sed` of the same file does not load it.
-  Observed in the session that wrote this plan: `markdown.md` and `shell.md`
-  loaded on Read, never on the earlier Bash reads of the same files.
+- A rule with `paths:` loads its body the first time a matching file is read.
+  Reads only: creating a file with Write does not load it
+  ([#93248](https://github.com/anthropics/claude-code/issues/93248), quoting the
+  rules docs), and neither does a Bash `cat` or `sed`, nor Grep
+  ([#90004](https://github.com/anthropics/claude-code/issues/90004),
+  [#93403](https://github.com/anthropics/claude-code/issues/93403)). Edit
+  requires a prior Read, so editing an existing file does load it. Observed in
+  the session that wrote this plan: `markdown.md` and `shell.md` loaded on Read,
+  never on the earlier Bash reads of the same files.
 - A session that only talks, or only reads through an MCP connector, loads no
   scoped rule at all.
 - A skill's description sits in the skill listing in every session, and its
@@ -66,9 +69,17 @@ the first phase to verify before anything depends on them.
   descriptions past it. The skills in `claude/skills/` already carry 14.3k
   characters of frontmatter, so each new skill adds a description that has to
   earn its place too.
+- A skill with `paths:` is not loaded by its glob. Its description joins the
+  listing (a mid-session `skill_listing` delta) when a matching file is read,
+  and its body still waits for the model to invoke it. Observed with a probe
+  skill in a scratch repo: the description arrived after the matching Read, the
+  body never did.
 - A skill can tell the model to read a file by path, including a rule file.
   So one rule file can load by glob in a coding session and through a skill in
   a design review, with no second copy.
+
+Nothing loads one body both ways, by a glob and by invocation. The rule-plus-
+wrapper-skill pairing above is the nearest thing that exists today.
 
 ## Where does each rule go?
 
@@ -96,10 +107,12 @@ That's 42.0k now. Trimming targets 25 to 30%, to about 30k.
 
 ### Scoped to any file: doctrine for writing code
 
-These matter when code or config is being written, which always goes through
-Edit or Write and usually starts with a Read.
+These matter when code or config is being written, which usually starts by
+reading the code around it.
 They get `paths: ["**/*"]`, so they're free in docs and chat sessions and load
-early in a coding one.
+at the first Read in a coding one.
+A session that reads only through Bash and creates only new files never loads
+them; see the costs.
 
 | Rule | Chars | Note |
 |---|---|---|
@@ -187,8 +200,9 @@ The skill listing loads in every session in both columns, and isn't counted.
   coding doctrine until something is read. The design-review skill covers
   the case that's framed as a design; the unframed one goes uncovered.
 - A coding session that reads only through Bash gets the scoped rules at its
-  first Edit or Write. That's still before code is written, but after any
-  advice given from the Bash reads alone.
+  first Edit, which needs a Read first. One that only creates new files with
+  Write never gets them at all. Auto mode steers reads toward Bash, so this is
+  not a corner case; Phase 1 measures how often coding sessions here use Read.
 - A skill loads only when its description matches, which is the model's call.
   The design-review and operations triggers are named tasks, which is the
   case where that call is reliable; a design question asked in passing may
@@ -212,6 +226,16 @@ The skill listing loads in every session in both columns, and isn't counted.
   link. It would make the design-review trigger structural rather than the
   model's call, at the price of a hook that guesses intent from URLs. Worth
   revisiting if the skill misses in practice.
+- **A hook that loads scoped rules on every file operation**, Write and Bash
+  included, closing the reads-only gap. It would match tool input against each
+  rule's `paths:` and inject the body once per session. It reimplements Claude
+  Code's own loader beside it, and a Bash command's file arguments are a parse
+  of shell text, so it's held until Phase 1 shows the gap matters.
+- **One mechanism that loads a body both by a glob and by invocation.** That's
+  the right shape, and it doesn't exist; it would be a Claude Code feature
+  (for instance a skill option that injects the body when `paths:` matches,
+  instead of only listing the skill). The wrapper skill that reads a rule file
+  by path is the nearest approximation, and it's what this plan uses.
 - **Scoping only, without trimming.** Scoping saves only in sessions that don't
   touch the scope; trimming saves in all of them, so the always-on tier gets
   both.
@@ -228,8 +252,10 @@ Moves change no wording; trims change no destination.
   record, with hooks disabled.
 - [ ] Find whether it loads on a Read outside the project root (the scratchpad,
   another clone).
-- [ ] Find whether Grep and Glob load scoped rules, as Read does.
 - [ ] Confirm an MCP-only session loads none.
+- [ ] Count, from recent transcripts, how many coding sessions here read a file
+  with the Read tool before writing code, which is how many would get the code
+  tier at all.
 
 ### Phase 2: rewrite the doctrine this replaces
 

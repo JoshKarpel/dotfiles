@@ -76,7 +76,7 @@ A dev box holds one long-lived zellij session named after its short hostname.
 side effect of a shell starting. `zellij-restart-session` is how a changed unit
 environment, config, or zellij release reaches it, and it ends every pane.
 `.claude/rules/work-session.md` covers the units, socket pinning, the web client,
-and the failure modes, and loads when one of the files it governs is touched.
+and the failure modes, and loads when one of the files it governs is read.
 
 ## Shell Startup Chain
 
