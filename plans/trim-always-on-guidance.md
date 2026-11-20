@@ -336,3 +336,7 @@ Moves change no wording; trims change no destination.
 
 - [ ] Count the always-on total again, and record from transcripts what a chat
   session, a design review, and a coding session each loaded.
+- [ ] After a few weeks of use, run a `harvest-sessions` pass. Its readers use
+  `read_sessions.py --loads` to compare what loaded against what each session
+  needed, which is the check on whether the moved rules and new skills fire
+  when they should and stay out when they shouldn't.

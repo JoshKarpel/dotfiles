@@ -18,7 +18,11 @@ conversation order per session. The output is the raw material for mining
 conventions, corrections, recurring friction, and insights the assistant
 surfaced but never got codified. With `--tools`, it also surfaces each tool call
 and any tool errors or denials, so you can see how tools were used and where they
-tripped (the raw material for guardrail hooks). Reason over it; don't transcribe it.
+tripped (the raw material for guardrail hooks). With `--loads`, it also surfaces
+what put guidance into context and when (always-on instruction files, path-scoped
+rules as they load, skill listing changes and invocations), so you can see whether
+a rule or skill was present when the session needed it. Reason over it; don't
+transcribe it.
 
 Run with uv (the shebang handles this): the script has no third-party deps.
 """
@@ -105,12 +109,35 @@ def keep_user(text: str) -> bool:
     return not any(marker in text for marker in NOISE_MARKERS)
 
 
+def load_event(attachment: dict) -> str | None:
+    """Describe an attachment that put guidance into context, or `None` for the rest.
+
+    These are the record of what the session had loaded and when, which is what a
+    review of whether a rule or skill fired when it should have needs. The bodies
+    are left out: the path or skill name is enough to look the text up.
+    """
+    kind = attachment.get("type")
+    if kind == "instructions":
+        files = attachment.get("files")
+        paths = [f.get("path", "?") for f in files if isinstance(f, dict)] if isinstance(files, list) else []
+        return f"always-on instructions ({len(paths)} files): " + ", ".join(paths)
+    if kind == "nested_memory":
+        return f"scoped instructions loaded: {attachment.get('path', '?')}"
+    if kind == "skill_listing":
+        names = attachment.get("names")
+        names = names if isinstance(names, list) else []
+        if attachment.get("isInitial"):
+            return f"skills listed at start: {len(names)}"
+        return "skills added to listing: " + ", ".join(str(n) for n in names)
+    return None
+
+
 def summarize_tool_use(block: dict) -> str:
     name = block.get("name", "?")
     inp = block.get("input")
     if not isinstance(inp, dict):
         return name
-    for key in ("command", "file_path", "path", "query", "pattern", "url"):
+    for key in ("command", "file_path", "path", "query", "pattern", "url", "skill"):
         value = inp.get(key)
         if value:
             return f"{name}: {str(value).splitlines()[0]}"
@@ -140,7 +167,11 @@ def is_error_result(block: dict) -> bool:
 
 
 def session_messages(
-    path: Path, roles: set[str], min_len: int, include_tools: bool
+    path: Path,
+    roles: set[str],
+    min_len: int,
+    include_tools: bool,
+    include_loads: bool = False,
 ) -> list[tuple[str, str]]:
     kept: list[tuple[str, str]] = []
     for line in path.read_text(errors="replace").splitlines():
@@ -152,6 +183,12 @@ def session_messages(
         except json.JSONDecodeError:
             continue
         role = entry.get("type")
+        if role == "attachment":
+            attachment = entry.get("attachment")
+            if include_loads and isinstance(attachment, dict):
+                if (event := load_event(attachment)) is not None:
+                    kept.append(("load", event))
+            continue
         if role not in roles or entry.get("isMeta"):
             continue
         message = entry.get("message")
@@ -173,10 +210,14 @@ def session_messages(
         text = text_of(content).strip()
         if len(text) >= min_len and (role != "user" or keep_user(text)):
             kept.append((role, text))
-        if include_tools and isinstance(content, list):
+        if isinstance(content, list):
             for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
+                if not (isinstance(block, dict) and block.get("type") == "tool_use"):
+                    continue
+                if include_tools:
                     kept.append(("tool", summarize_tool_use(block)))
+                elif include_loads and block.get("name") == "Skill":
+                    kept.append(("load", f"skill invoked: {summarize_tool_use(block)}"))
     return kept
 
 
@@ -201,6 +242,13 @@ def main() -> int:
         action="store_true",
         help="Also surface tool calls and tool errors/denials, to learn how tools "
         "were used and where they tripped.",
+    )
+    parser.add_argument(
+        "--loads",
+        action="store_true",
+        help="Also surface what put guidance into context and when: the always-on "
+        "instruction files, each path-scoped rule or nested CLAUDE.md as it loads, "
+        "skills added to the listing, and skill invocations.",
     )
     parser.add_argument(
         "--list",
@@ -279,7 +327,9 @@ def main() -> int:
     for label, transcript in transcripts:
         tag = f"{label} | " if multi else ""
         session_id = transcript.stem[:8]
-        for role, text in session_messages(transcript, roles, args.min_len, args.tools):
+        for role, text in session_messages(
+            transcript, roles, args.min_len, args.tools, args.loads
+        ):
             total += 1
             key = (role, text[:200])
             if key in seen:
