@@ -5,8 +5,14 @@
 "$DOTFILES/bin/is-exe-dev" || return 0
 
 # Route gh through the GitHub integration so private repos work without a
-# token ever landing on the VM.
-export GH_HOST=github.int.exe.xyz
+# token ever landing on the VM, unless this box has its own `gh auth login` for
+# github.com. The integration covers only the repos attached to it, and none of
+# the account-level API (creating repos, forks, gists, search), so a box worked
+# on by hand logs in instead. Read from gh's hosts file rather than asking gh,
+# since this runs at every shell startup.
+if ! grep -qs '^github\.com:' "${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}/hosts.yml"; then
+  export GH_HOST=github.int.exe.xyz
+fi
 
 # Zellij puts its session sockets under $XDG_RUNTIME_DIR when that is set and
 # falls back to /tmp/zellij-$UID when it isn't. sshd here leaves it unset while a

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Print the current branch's pull request as `gh pr view --json` gives it, from a
 # cache, for claude-statusline. Prints `{}` when the branch has no PR, and nothing
-# at all off a branch or before the first lookup lands.
+# at all off a branch or before the first lookup lands. A PR with a successful
+# deployment (a preview or dev site) also carries `deployment`, the newest one's
+# `{environment, url}`.
 # Usage: claude-fetch-pr [--refresh]
 #
 # The status line renders every few seconds and a lookup takes over a second, so
@@ -15,7 +17,14 @@
 #
 # The cache is one file per branch under the git directory, so worktrees and
 # branches never read each other's PR. A failed lookup caches `{}` like "no PR"
-# does: `gh` exits 1 for both, and a missing link for one TTL is harmless.
+# does: `gh` exits 1 for both, and a missing link for one TTL is harmless. A failed
+# deployment lookup leaves `deployment` out, for the same reason.
+#
+# `gh pr view` has no deployments field, so they come from the PR's DEPLOYED_EVENT
+# timeline over GraphQL, addressed by owner, name, and number from the PR's URL
+# rather than by node id. A box without its own github.com login routes gh through
+# exe.dev's GitHub integration (`GH_HOST`, see sources/exe.sh), which refuses a
+# `node(id:)` query, since it can't tell which repository an opaque id belongs to.
 
 set -euo pipefail
 
@@ -23,8 +32,9 @@ TTL=60 # seconds
 
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
 # line is how `claude-hook-selftests` discovers participating scripts. A stub gh on
-# PATH answers STUB_PR_JSON (or fails when it is unset) and records each call, so the
-# tests assert on what is printed and on whether a lookup ran.
+# PATH answers `pr view` with STUB_PR_JSON and `api graphql` with STUB_DEPLOY_JSON
+# (failing when the one asked for is unset) and records each call, so the tests
+# assert on what is printed and on whether a lookup ran.
 if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   SELF=$(realpath "$0")
   fails=0
@@ -39,8 +49,12 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   cat >"$stubs/gh" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "$STUB_DIR/gh.calls"
-[ -n "${STUB_PR_JSON:-}" ] || exit 1
-printf '%s\n' "$STUB_PR_JSON"
+case "$1" in
+  api) answer="${STUB_DEPLOY_JSON:-}" ;;
+  *) answer="${STUB_PR_JSON:-}" ;;
+esac
+[ -n "$answer" ] || exit 1
+printf '%s\n' "$answer"
 EOF
   chmod +x "$stubs/gh"
 
@@ -59,11 +73,33 @@ EOF
     { printf 'FAIL %s: want_lookup=%s got_lookup=%s\n' "$desc" "$want_lookup" "$got_lookup"; fails=1; }
   }
 
-  PR='{"number":7,"state":"OPEN","url":"https://example.com/pull/7"}'
+  PR='{"number":7,"state":"OPEN","url":"https://github.com/acme/widgets/pull/7"}'
 
   STUB_PR_JSON="$PR" t "a refresh caches the PR" "" yes --refresh
   [[ "$(cat "$cache")" == "$PR" ]] || { printf 'FAIL refresh wrote %q\n' "$(cat "$cache")"; fails=1; }
+  [[ "$(grep -c '^api' "$stubs/gh.calls")" == 1 ]] ||
+  { printf 'FAIL a PR refresh did not look up its deployments once\n'; fails=1; }
   t "a fresh cache is printed without a lookup" "$PR" no
+
+  # Oldest first, as the timeline returns them: the newest successful deployment
+  # wins over an older success and a newer failure, and a deleted one (null) is skipped.
+  event() { printf '{"deployment":{"environment":"%s","latestStatus":{"state":"%s","environmentUrl":"%s"}}}' "$@"; }
+  DEPLOYS="{\"data\":{\"repository\":{\"pullRequest\":{\"timelineItems\":{\"nodes\":[
+    $(event old SUCCESS https://old.example.com),
+    $(event dev SUCCESS https://dev.example.com),
+    {\"deployment\":null},
+    $(event broken FAILURE https://broken.example.com),
+    $(event pending SUCCESS '')]}}}}}"
+  STUB_PR_JSON="$PR" STUB_DEPLOY_JSON="$DEPLOYS" t "a refresh caches the newest successful deployment" "" yes --refresh
+  want='{"number":7,"state":"OPEN","url":"https://github.com/acme/widgets/pull/7","deployment":{"environment":"dev","url":"https://dev.example.com"}}'
+  [[ "$(cat "$cache")" == "$want" ]] || { printf 'FAIL deployment refresh wrote %q\n' "$(cat "$cache")"; fails=1; }
+  grep -q -- '-F owner=acme -F name=widgets -F number=7 ' "$stubs/gh.calls" ||
+  { printf 'FAIL the deployment lookup did not address acme/widgets#7\n'; fails=1; }
+
+  STUB_PR_JSON="$PR" STUB_DEPLOY_JSON="{\"data\":{\"repository\":{\"pullRequest\":{\"timelineItems\":{\"nodes\":[$(event broken FAILURE https://broken.example.com)]}}}}}" \
+    t "a refresh with no successful deployment caches the PR alone" "" yes --refresh
+  [[ "$(cat "$cache")" == "$PR" ]] || { printf 'FAIL failed-deployment refresh wrote %q\n' "$(cat "$cache")"; fails=1; }
+
   t "a refresh with no PR caches {}" "" yes --refresh
   [[ "$(cat "$cache")" == "{}" ]] || { printf 'FAIL no-PR refresh wrote %q\n' "$(cat "$cache")"; fails=1; }
 
@@ -89,6 +125,29 @@ EOF
   exit "$fails"
 fi
 
+# Print the newest successful deployment of the PR in $1 (gh pr view's JSON) as
+# `{environment, url}`, or nothing when it has none, has no PR, or the lookup fails.
+# A status still pending has no environment URL yet, and one superseded in the same
+# environment turns INACTIVE, so SUCCESS with a URL is the live site.
+pr_deployment() {
+  local target
+  target=$(jq -r '.url // empty | capture("/(?<owner>[^/]+)/(?<name>[^/]+)/pull/(?<number>[0-9]+)$")
+    | "\(.owner) \(.name) \(.number)"' <<<"$1")
+  [[ -n "$target" ]] || return 0
+  read -r owner name number <<<"$target"
+  gh api graphql -F owner="$owner" -F name="$name" -F number="$number" -f query='
+    query($owner: String!, $name: String!, $number: Int!) {
+      repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+        timelineItems(last: 20, itemTypes: [DEPLOYED_EVENT]) { nodes { ... on DeployedEvent {
+          deployment { environment latestStatus { state environmentUrl } }
+        } } }
+      } }
+    }' 2>/dev/null | jq -c '
+    [.data.repository.pullRequest.timelineItems.nodes[].deployment // empty
+      | select(.latestStatus.state == "SUCCESS" and (.latestStatus.environmentUrl // "") != "")]
+    | last // empty | {environment, url: .latestStatus.environmentUrl}' 2>/dev/null || true
+}
+
 branch=$(git symbolic-ref --short -q HEAD 2>/dev/null) || exit 0
 cache="$(git rev-parse --absolute-git-dir)/claude-pr/$branch.json"
 
@@ -101,6 +160,10 @@ if [[ "${1:-}" == "--refresh" ]]; then
     flock -n 9 || exit 0
   fi
   pr=$(gh pr view --json number,url,state,isDraft,reviewDecision 2>/dev/null) || pr="{}"
+  deployment=$(pr_deployment "$pr")
+  if [[ -n "$deployment" ]]; then
+    pr=$(jq -c --argjson deployment "$deployment" '. + {deployment: $deployment}' <<<"$pr")
+  fi
   printf '%s\n' "$pr" >"$cache.tmp"
   mv "$cache.tmp" "$cache"
   exit 0

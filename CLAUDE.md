@@ -110,7 +110,9 @@ and `cloister-codex` and `converge-atlas` daily (dev boxes only).
   `git-disk-usage` (`git du`) splits a checkout's disk use by kind.
 - `exe-dev` reaches exe.dev and its VMs (lobby commands, shells, creating or
   adopting a box); `claude-exe-dev` runs Claude Code billed to exe.dev's LLM
-  allocation; `is-dev-box` is the guard the person-facing services are gated on.
+  allocation; `vscode-link` prints the URL opening a directory in the VM's
+  browser VS Code, which the status line links; `is-dev-box` is the guard the
+  person-facing services are gated on.
 - `setup-tailscale` joins a machine to the tailnet, per machine and never from
   `install.sh`, since it leaves a daemon running.
 - `count-claude-tokens` counts tokens through the Anthropic API

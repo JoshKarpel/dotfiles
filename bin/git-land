@@ -7,7 +7,7 @@
 # whoever invokes it; what it can't check is whether someone went around it.
 #
 # The PR description's title and body come from a draft Claude writes at `git land --path`, which
-# resolves per worktree and per branch inside the git directory, so it is never committed. Beside it
+# resolves per worktree and per branch under the XDG state directory, so it is never committed. Beside it
 # land keeps the copy it last landed (`landed.md`), which is how it knows whether the draft changed,
 # and the commit it last pushed (`pushed`), which is how it knows a directory belongs to an earlier
 # branch of the same name: one whose recorded commit isn't in `HEAD`'s history. A push whose PR then
@@ -44,6 +44,7 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   trap 'rm -rf "$workdir"' EXIT
   # shellcheck disable=SC2046
   unset $(git rev-parse --local-env-vars)
+  unset XDG_STATE_HOME
   export GIT_CONFIG_GLOBAL=/dev/null HOME="$workdir" XDG_CONFIG_HOME="$workdir"
   export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
   stubs="$workdir/stubs"
@@ -144,7 +145,9 @@ EOF
   want_out "--state workflows" "workflows=no"
   want_out "--state pr_failed" "pr_failed=no"
   want_out "--state default" "default=no"
-  want_out "--state path" "path=$(git rev-parse --absolute-git-dir)/land/feature/pr.md"
+  want_out "--state path" "path=$workdir/.local/state/git-land$clone/feature/pr.md"
+  XDG_STATE_HOME="$workdir/xdg" run --state
+  want_out "--state path under XDG_STATE_HOME" "path=$workdir/xdg/git-land$clone/feature/pr.md"
   git checkout -q main
   run --state
   want_out "--state on the default branch" "default=yes"
@@ -166,7 +169,7 @@ EOF
   # --- --path creates the directory and prints an absolute path ---
   run --path
   want_exit "--path" 0
-  [[ "$OUT" == /*/land/feature/pr.md && -d "$(dirname "$OUT")" ]] || fail "--path printed $OUT"
+  [[ "$OUT" == /*/git-land/*/feature/pr.md && -d "$(dirname "$OUT")" ]] || fail "--path printed $OUT"
 
   # --- refusals before anything is pushed ---
   run
@@ -419,6 +422,15 @@ EOF
   want_out "the PR opens on the retry, --state" "landed=yes"
   want_out "the PR opens on the retry, --state pr_failed" "pr_failed=no"
 
+  # --- a land directory left in the git directory moves to the state directory ---
+  fresh
+  old="$(git rev-parse --absolute-git-dir)/land/feature"
+  mkdir -p "$old"
+  echo "old draft" >"$old/pr.md"
+  run --path
+  [[ "$(cat "$OUT" 2>/dev/null)" == "old draft" ]] || fail "old land directory: --path printed $OUT, without the old draft"
+  [[ ! -e "$old" ]] || fail "old land directory: still in the git directory"
+
   # --- the default branch: push, open no PR ---
   fresh
   git checkout -q main
@@ -452,13 +464,21 @@ resolve() {
   BRANCH=$(git symbolic-ref --quiet --short HEAD) || return 1
   git rev-parse --quiet --verify HEAD >/dev/null || return 1
   git remote get-url origin >/dev/null 2>&1 || return 1
-  path=$(git rev-parse --git-path "land/$BRANCH")
-  [[ "$path" == /* ]] || path="$PWD/$path"
-  LAND_DIR="$path"
+  # Outside the git directory, because Claude Code treats everything under `.git/` as a protected
+  # path whose writes no allow rule or hook can pre-approve, so a draft there prompts on every write
+  # in manual mode. Keyed by the worktree's path, so each worktree keeps its own.
+  LAND_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/git-land$top/$BRANCH"
   DRAFT="$LAND_DIR/pr.md"
   LANDED="$LAND_DIR/landed.md"
   PUSHED="$LAND_DIR/pushed"
   PR_FAILED="$LAND_DIR/pr-failed"
+  # TODO: delete once no worktree's land directory predates the move out of the git directory.
+  path=$(git rev-parse --git-path "land/$BRANCH")
+  [[ "$path" == /* ]] || path="$PWD/$path"
+  if [[ -d "$path" && ! -e "$LAND_DIR" ]]; then
+    mkdir -p "$(dirname "$LAND_DIR")"
+    mv "$path" "$LAND_DIR"
+  fi
 }
 
 # The directory belongs to an earlier branch of this name when the commit it last pushed isn't in

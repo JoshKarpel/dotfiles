@@ -636,10 +636,11 @@ worded as one so the harness's "unless durably authorized" clause applies:
   the PR and its CI stay current.
 - Rewrite the draft whenever what the PR is has changed. It's the only way to
   change Claude's part of the PR description.
-- After landing, wait for the PR's checks without polling, with
-  `gh pr checks --watch --fail-fast` in the background (started again if
-  the runs haven't registered yet), then read what failed
-  (`gh run view --log-failed`) and fix it.
+- After landing, wait for the PR's checks with `claude-wait-checks` in the
+  background, which gives up after 15 minutes so no wait outlives the prompt
+  cache, and exits as soon as waiting can't help: a failed check, or merge
+  conflicts, which GitHub runs no `pull_request` checks for until they're
+  resolved (with the resolve-conflicts skill).
 - Push only through `git land`. When it refuses over workflow files, run
   `git land --workflows` straight away rather than asking in text first: that
   run prompts Josh for permission, and the prompt is where he approves it.
