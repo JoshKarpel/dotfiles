@@ -9,9 +9,9 @@ someone else's, and how to lay out the document so it supports a decision.
   new shape fix it? A restructuring with no stated pain gets a question, not a
   review. Ask, too, whether it's worth building at all, given what else the
   same effort could buy.
-- **Prove the simpler option fails.** The standing objection to any complex
-  design is "why not something simpler?" Answer it with evidence that the
-  simple version violates a requirement often enough to matter.
+- **Prove the simpler option fails.** Answer the standing objection to any
+  complex design, "why not something simpler?", with evidence that the simple
+  version violates a requirement often enough to matter.
 - **Compare against the real status quo,** warts included, not an idealized
   version. It is usually the next-best alternative.
 - **Ask for the evidence.** Has the problem actually happened? Where does the
@@ -56,12 +56,12 @@ someone else's, and how to lay out the document so it supports a decision.
   policy, which counts but is the weakest mechanism there is. Will anyone hold
   the line under pressure? A review step needs stated bounds on acceptable
   change, and a soft limit should be stated as soft.
-- **State a guard's threat model before hardening it.** A check against honest
-  mistakes, one against an agent set on getting its way, and one against a
-  hostile actor need different mechanisms. A text parser in front of a full
-  shell can only ever be the first kind. Say which kind each guard is, so a
-  review that finds a bypass can tell a defect from a route the guard never
-  claimed to close, instead of hardening it round after round.
+- **State a guard's threat model before hardening it.** Checks against honest
+  mistakes, against an agent set on getting its way, and against a hostile
+  actor need different mechanisms, and a text parser in front of a full shell
+  can only ever be the first kind. Say which kind each guard is, so a review
+  that finds a bypass can tell a defect from a route the guard never claimed to
+  close, instead of hardening it round after round.
 - **Test categories with a counterexample.** If the same thing lands on either
   side of a proposed boundary depending on the caller, the property is
   contextual, not intrinsic.
@@ -72,7 +72,7 @@ someone else's, and how to lay out the document so it supports a decision.
 - **Trace requirements to their source.** Is the requirement actually mandated,
   and does the simplest existing mechanism already satisfy it?
 - **Name costs imposed on others.** Pushing work onto another team may be
-  fine, but call it out.
+  fine; call it out.
 
 ## Lay Out the Document for a Decision
 
@@ -94,7 +94,7 @@ someone else's, and how to lay out the document so it supports a decision.
   owns a choice hasn't settled it, set out the options and what each costs, and
   stop there: no ranking, no "leans toward", no filling in the owner's own doc.
   The owner holds context you lack, and a lean written into a shared document
-  gets cited later as though it were the decision.
+  is later cited as the decision.
 - **Label extensibility as extensibility.** When a structure could absorb
   future requirements, say those requirements don't exist yet, so reviewers
   don't argue them as scope.
