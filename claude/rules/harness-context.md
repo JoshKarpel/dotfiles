@@ -1,13 +1,10 @@
 # Harness Context Loading
 
-Which mechanism carries a piece of guidance, and when each one loads. This covers
-the choice between a hook, a rule, a command, a skill, and an always-on
-instructions file; it says nothing about what the guidance should contain.
-
-The organizing question, _who decides that guidance applies_, generalizes across
-harnesses; the names below are Claude Code's. A harness offering only one always-on
-instructions file collapses the choice to "unconditional or absent", leaving only
-the criterion below.
+Which mechanism carries a piece of guidance, and when each one loads: a hook,
+an always-on file (`CLAUDE.md` or a path-less rule), a rule with `paths:`, a
+command, or a skill. It says nothing about what the guidance should contain.
+The names are Claude Code's; the organizing question, _who decides that
+guidance applies_, carries to any harness.
 
 ## A Session Is Not Storage
 
@@ -27,56 +24,109 @@ hour, is the signal to say where the lesson belongs before moving on.
 |---|---|---|---|
 | Hook | The harness, on an event and matcher | When the event fires | Loud: a broken hook errors |
 | `CLAUDE.md`, path-less rule | Nobody; unconditional | Every session | Context cost, always paid |
-| Rule with `paths:` | The harness, on a file glob | On a matching file operation | Silent: no file operation, no rule |
+| Rule with `paths:` | The harness, on a file glob | On the first Read of a matching file inside the project | Silent: no such Read, no rule |
 | Command | The user, explicitly | When typed | None; the user sees it didn't run |
 | Skill | The model, from the description | When the model judges it relevant | Silent, and self-referential |
 
 A hook is the only one that _enforces_ rather than advises. It runs outside the
 model, so it can block an action or gate a stop whatever the model concluded.
 
-## Nothing Conditional May Carry Answer-Changing Doctrine
+## Worldview, Mechanics, and Procedure
 
-Guidance that would change the conclusion loads unconditionally. Conditional
-mechanisms carry only additive material: file-format specifics, or a procedure for
-a situation someone will name out loud.
+The always-on set teaches how I think, and I bring all of it to every problem,
+so it's judged as a whole rather than rule by rule. It is also
+the contract: the part of the environment that is identical in every session.
+What sorts a passage is what kind of guidance it is:
 
-The always-on set is the contract, the part of the environment that is identical in
-every session. Its context cost is what buys that consistency, so trimming it
-spends confidence that today's environment matches yesterday's.
+- **Worldview** is a principle or a way of judging. It holds across languages,
+  tools, and kinds of work, and it's needed precisely when nobody has framed
+  the situation as the one it covers. It goes always-on.
+- **Mechanics** are facts about one tool, format, or platform: a flag, a config
+  knob, a gotcha. They go in a rule scoped to the files that are open when they
+  matter. A mechanic that misses its scope costs a rediscovered flag, which a
+  `--help` or a probe recovers.
+- **Procedure** is a checklist for a task someone names out loud: an incident
+  review, publishing a plan's page. It goes in a skill.
+
+The test for a passage: would it still be true and useful if the tool it names
+didn't exist? Worldview passes, even when it uses a tool as its example. When a
+passage's kind is in doubt, it stays always-on: missing doctrine costs a wrong
+answer, and carrying it costs tokens.
+
+Those tokens are real. The prompt cache doesn't share always-on text across
+sessions, since the system prompt carries per-session values (the scratchpad
+path, git status, the date) ahead of it, so every session and every subagent
+pays a cache write for all of it. Count a mechanism's cost as its tokens times
+the sessions that load it, and measure caching rather than assuming it.
 
 ## A Skill Cannot Correct the Judgment That Loads It
 
-Skill activation is decided by the same model whose default the doctrine exists to
-override. "Avoid fallback" is needed precisely when the model has _not_ framed the
-situation as a fallback decision, which is precisely when it won't load the skill.
-The gap is structural, not a description to tune.
+Skill activation is decided by the same model whose default the doctrine exists
+to override. "Avoid fallback" is needed precisely when the model has _not_
+framed the situation as a fallback decision, which is precisely when it won't
+load a skill about fallback. The gap is structural, not a description to tune.
+Skills work when the trigger is stated: a failed CI run, a review to work
+through, a plan to publish.
 
-Skills work when the user states the trigger: a failed CI run, a slow query, a
-review to work through. Nothing has to be recognized in advance.
+## Scoped Rules Load on Reads Inside the Project
+
+- A rule with `paths:` loads its body the first time the Read tool opens a
+  matching file inside the project root. Creating a file with Write, a Bash
+  `cat` or `sed`, and Grep load nothing; Edit needs a prior Read, so editing an
+  existing file does. A Read outside the project root (another clone, a
+  scratchpad worktree) loads nothing, even through `--add-dir`.
+- So guidance that informs a decision made before any file is read can't be
+  scoped. Design doctrine applies to a discussion that touches nothing;
+  dependency hygiene applies at `cargo add`, before any lockfile is read.
+- Write the glob for the files open when the mechanic matters, not the
+  narrowest pattern that names the tool: a narrower glob fires in fewer
+  sessions.
+- A skill's `paths:` doesn't load the skill. It adds the description to the
+  listing on a matching Read, and the body still waits for invocation.
+- A skill or an always-on line can name a rule's path for the model to read,
+  which reaches a scoped rule from a task that opens no matching file.
+
+## Slice Small, and Write Each Rule to Stand Alone
+
+The always-on files arrive as one block, each under a header of about 130
+characters naming its path, and a scoped rule arrives under the same header. A
+file boundary is cheap, and a file name is only an address. So:
+
+- **Split by what loads it, not by topic.** One tool's mechanics belong with
+  that tool's files, apart from the worldview they illustrate. A slice should
+  still outweigh its header.
+- **Each rule makes sense read alone.** Gloss a borrowed term in a clause where
+  it's used, and state an idea outright rather than as an analogy to another
+  rule. A pointer to another rule is somewhere to read more, never something
+  the citing rule depends on. A rule that stands alone can later be scoped or
+  moved on the evidence about that rule alone.
+- **Don't write which rule owns which topic.** That's maintenance guidance for
+  whoever edits the corpus, and it goes stale on the next split.
+
+## Editing Always-On Text
+
+Compress words, not ideas. `git log -L` on a passage shows whether a
+`harvest-sessions` pass or a fix for an observed mistake added it, or whether it
+was written up front. A passage a correction added is the best evidence of what
+sessions rely on: it keeps its claim, may be reworded tighter, and goes only
+when another rule says the same thing. Cut restatements, second examples making
+the same point, and framing with no claim. Don't compress to a percentage
+target, which forces the cuts into the corrected passages.
 
 ## Choosing a Mechanism
 
 First match wins.
 
 - **Must it happen whatever the model concludes?** A hook.
-- **Would its absence change the answer?** Unconditional text, `CLAUDE.md` or a
-  path-less rule. Never a skill.
+- **Is it worldview?** Always-on: `CLAUDE.md` or a path-less rule. Never a skill.
 - **Should the user trigger it deliberately?** A command. It costs nothing until
   typed.
-- **Is it a procedure for a situation the user will name?** A skill. Size it
-  freely, since it only loads when invoked.
-- **Does it only make sense while looking at a file of a given kind?** A rule with
+- **Is it a procedure for a task someone will name?** A skill. Size it freely,
+  since it only loads when invoked.
+- **Is it a mechanic of a tool whose files will be open?** A rule with
   `paths:`.
+- **Still unsure?** Always-on.
 
-`CLAUDE.md` and a path-less rule cost the same, so that choice is editorial: how to
-work with this user and this harness goes in `CLAUDE.md`, and portable doctrine
-that another rule could cite as a principle goes in a rule.
-
-## Scoped Rules Load Lazily
-
-A session with no file operations loads no scoped rules at all, `paths: ["*"]`
-included: `*` means "on the first matching file operation", not "always". So
-guidance informing a decision made before code exists cannot be scoped by path.
-Design doctrine applies to a discussion that touches nothing; dependency hygiene
-applies at `cargo add`, not when a lockfile is later read. The matching file is
-touched after the decision, or never.
+`CLAUDE.md` and a path-less rule cost the same, so that choice is editorial: how
+to work with this user and this harness goes in `CLAUDE.md`, and portable
+doctrine goes in a rule.
