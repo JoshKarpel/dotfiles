@@ -19,7 +19,7 @@
 # Beside the verdict it looks for signs of trouble the verdict alone hides: a run slower than the
 # default branch's, one queued with no runner, a step stuck far past its usual time, a failure the
 # default branch shares or that has needed reruns there before, a workflow that failed without
-# reporting a check or that stopped running, a base that has moved on. Each signal prints only when
+# reporting a check, a base that has moved on. Each signal prints only when
 # something looks off, and says nothing at all when it looks normal: the point is to surface a
 # potential problem for Claude to react to, not to report status, and a line saying all is well is
 # one more line to read past. A new signal follows the same rule, with its threshold set where a
@@ -69,10 +69,10 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
 
   # An unset GH_PR_JSON reproduces `gh pr view` finding no PR, and an unset GH_CHECKS_JSON
   # `gh pr checks` finding no checks, which it reports as an error rather than an empty list. The
-  # `gh run list` variables split by what the script asks for: this commit's runs (GH_RUNS_JSON),
-  # recent pull request runs (GH_PR_RUNS_JSON), the default branch's successful runs
-  # (GH_BASELINE_JSON), its latest completed run (GH_LATEST_JSON), and its run history with attempts
-  # (GH_HISTORY_JSON). GH_JOBS_<id> is a run's jobs, and GH_COMPARE_JSON the base comparison.
+  # `gh run list` variables split by what the script asks for: this commit's runs (GH_RUNS_JSON), the
+  # default branch's successful runs (GH_BASELINE_JSON), its latest completed run (GH_LATEST_JSON),
+  # and its run history with attempts (GH_HISTORY_JSON). GH_JOBS_<id> is a run's jobs, and
+  # GH_COMPARE_JSON the base comparison.
   cat >"$stubs/gh" <<'EOF'
 #!/usr/bin/env bash
 no_jobs='{"jobs":[]}' even='{"ahead_by":0,"files":[]}'
@@ -84,7 +84,6 @@ case "$1 $2" in
   "run list")
     case "$*" in
       *--commit*) printf '%s' "${GH_RUNS_JSON:-[]}" ;;
-      *--event*) printf '%s' "${GH_PR_RUNS_JSON:-[]}" ;;
       *"--status success"*) printf '%s' "${GH_BASELINE_JSON:-[]}" ;;
       *"--status completed"*) printf '%s' "${GH_LATEST_JSON:-[]}" ;;
       *) printf '%s' "${GH_HISTORY_JSON:-[]}" ;;
@@ -167,12 +166,6 @@ EOF
   t 1 "!rerun" GH_PR_JSON="$open" GH_CHECKS_JSON="$failed" GH_HISTORY_JSON='[{"attempt":1,"url":"https://example.com/a"}]'
   t 0 "lint concluded startup_failure without reporting a check" GH_PR_JSON="$open" GH_CHECKS_JSON="$passed" \
     GH_RUNS_JSON="[$(run 1 ci completed success $T:00Z $T:00Z $T:29Z),$(run 5 lint completed startup_failure $T:00Z $T:00Z $T:00Z)]"
-  pr_runs() { local sha; for sha in "$@"; do printf '{"workflowName":"ci","headSha":"%s"},{"workflowName":"lint","headSha":"%s"},' "$sha" "$sha"; done; }
-  five="[$(pr_runs a b c d e | sed 's/,$//')]" four="[$(pr_runs a b c d | sed 's/,$//')]"
-  t 0 "lint ran on each of the last 5 pull request commits but not on this one" GH_PR_JSON="$open" GH_CHECKS_JSON="$passed" \
-    GH_RUNS_JSON="$quick" GH_PR_RUNS_JSON="$five"
-  t 0 "!ran on each" GH_PR_JSON="$open" GH_CHECKS_JSON="$passed" GH_RUNS_JSON="$quick" GH_PR_RUNS_JSON="$four"
-  t 5 "lint ran on each" GH_PR_JSON="$open" GH_PR_RUNS_JSON="$five"
   t 0 "they change .github/workflows/ci.yml:" GH_PR_JSON="$open" GH_CHECKS_JSON="$passed" \
     GH_COMPARE_JSON='{"ahead_by":3,"files":[{"filename":".github/workflows/ci.yml"},{"filename":"README.md"}]}'
   t 0 "main has 80 commits this branch lacks" GH_PR_JSON="$open" GH_CHECKS_JSON="$passed" GH_COMPARE_JSON='{"ahead_by":80,"files":[]}'
@@ -245,7 +238,6 @@ QUEUED_SECONDS=300     # a run queued this long without starting has no runner t
 STEP_FACTOR=2          # a step is slow past this multiple of its slowest recent successful run...
 STEP_FLOOR_SECONDS=60  # ...and past this, so a step that usually takes a second isn't flagged at three
 BEHIND_COMMITS=50      # a base this far ahead makes the checks a test against an old one
-PR_HEADS=5             # a workflow that ran on each of this many recent PR commits is expected on this one
 HISTORY_RUNS=20        # how many of the default branch's runs to look through for reruns
 
 JQ_DEFS='def fmt: if . < 120 then "\(floor)s" else "\(. / 60 | floor)m" end;
@@ -330,21 +322,6 @@ flaky() {
   done < <(failed_workflows)
 }
 
-# A workflow that ran on every one of the last few PR commits elsewhere but not on this one.
-missing_workflows() {
-  local recent
-  recent=$(gh run list --event pull_request --limit 100 --json workflowName,headSha) || return 0
-  jq -r --argjson recent "$recent" --arg head "$head" --argjson heads "$PR_HEADS" '
-    map(.workflowName) as $here
-    | ($recent | map(select(.headSha != $head))) as $other
-    | ($other | reduce .[].headSha as $sha ([]; if index([$sha]) then . else . + [$sha] end) | .[:$heads]) as $shas
-    | select(($shas | length) == $heads)
-    | [$other[] | select(.headSha | IN($shas[]))] | group_by(.workflowName)
-    | map(select(map(.headSha) | unique | length == $heads) | .[0].workflowName)[]
-    | select(IN($here[]) | not)
-    | "  - \(.) ran on each of the last \($heads) pull request commits but not on this one, so a path filter or a trigger change may be skipping it."' <<<"$runs"
-}
-
 # A base that has moved on: changing CI itself, or by enough that the checks tested an old one.
 behind_base() {
   local compare
@@ -368,10 +345,9 @@ anomalies() {
   found=$(
     runs_without_checks
     case "$verdict" in
-      pass) slow_runs; missing_workflows; behind_base ;;
+      pass) slow_runs; behind_base ;;
       fail) failing_on_default; flaky; slow_runs; behind_base ;;
       timeout) queued_runs; slow_steps; slow_runs; behind_base ;;
-      none) missing_workflows ;;
     esac
   )
   [[ -n "$found" ]] || return 0
