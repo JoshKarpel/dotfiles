@@ -70,6 +70,10 @@ updated, so a change to the source requires a pod restart to take effect.
 `subPath` specifically opts out of the live-update behavior even though it looks
 like a file mount.
 
+For Kubernetes projected `ConfigMap`/`Secret` volumes, watch the mount directory:
+the kubelet swaps an atomic `..data` symlink rather than rewriting the file in
+place, so a naive watch on the file alone can miss updates.
+
 This makes directory mounts the only consumption method that supports rotating
 a `Secret` or refreshing a `ConfigMap` without a restart. The mount only updates
 the files, though: picking up the new value is the app's responsibility, so it

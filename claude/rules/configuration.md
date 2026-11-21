@@ -29,10 +29,7 @@ Decide deliberately, per setting, how a change takes effect:
   in-process holder when the source changes, so ordinary reads stay in memory.
   Don't re-read the file on every access: that puts I/O on the hot path for a
   value that rarely changes. Polling on a timer is an acceptable fallback when
-  watching isn't available. For Kubernetes projected `ConfigMap`/`Secret`
-  volumes, watch the mount directory: the kubelet swaps an atomic `..data`
-  symlink rather than rewriting the file in place, so a naive watch on the file
-  alone can miss updates.
+  watching isn't available.
 - **Restart to apply** when live reload isn't worth the complexity, typically
   settings baked into stateful resources at construction (changing connection
   pool sizing, for instance, means tearing down and rebuilding the pool, which

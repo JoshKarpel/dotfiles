@@ -4,11 +4,6 @@
   patching.** Needing a mock to test a piece of logic means it is entangled with
   I/O: extract it. Where a dependency remains, pass a different argument instead
   of monkeypatching globals or module internals.
-- **When patching is unavoidable, patch where the name is looked up, not
-  where it's defined.** A shim module that re-imports a third-party function
-  binds its own name to it at import time; patching the shim leaves call
-  sites that import directly from the third-party module untouched. Patch
-  the module that actually resolves the name at runtime.
 - **One behavior per test; arrange/act/assert; descriptive names.** A test
   name should state the behavior under test, not the function name. If a test
   covers multiple behaviors, it can only fail at one of them: split it.
@@ -48,14 +43,6 @@
   the probe's own shell, whose command line contains the marker, so "still alive"
   can be the probe finding itself. Confirm the probe reached the path you think it
   did before concluding anything from either outcome.
-- **Isolate a sandbox from the user's own config.** A throwaway `git init` repo
-  still reads the global gitconfig and global ignore file, so a fixture named
-  `fixture.bin` can be silently untracked by a `*.bin` pattern, failing the
-  test for a reason in nobody's code. `GIT_CONFIG_GLOBAL=/dev/null` alone
-  doesn't fix it: with no config setting `core.excludesFile`, git falls back to
-  `$XDG_CONFIG_HOME/git/ignore` (or `~/.config/git/ignore`), so point
-  `XDG_CONFIG_HOME` or `HOME` at the sandbox as well. Any tool with a
-  user-level config directory needs the same treatment.
 - **Prove a new test can fail.** A test that passes on its first run may be
   incapable of failing. Break the code deliberately, or run the test against a
   knowingly-broken copy, and confirm it fails before trusting it. This matters
@@ -79,20 +66,6 @@
   actually produce the effect (does the hook run before or after the teardown it
   is supposed to observe?), then get a second independent signal by re-running.
   A fix you can't explain mechanically is a coincidence you haven't caught yet.
-- **Exclude a platform-only branch per platform, not everywhere.** A blanket
-  coverage exclusion on a branch that only runs on another platform stops
-  measuring it everywhere, so the gate goes quiet if that path dies. Exclude it
-  only where it can't run, and gate each platform on its own run rather than on
-  coverage data combined across a matrix: each job then passes or fails alone,
-  a local run reaches the gate without the other platforms' data, and a miss
-  names the platform that missed. The price is a pragma on every platform-only
-  branch, which also marks it as such for the next editor. The exclusion still
-  needs the gate to run where the branch does: with single-platform CI, a
-  per-platform exclusion is a blanket one under another name. Building the
-  other platform's shape locally
-  (deleting the attribute the code probes for, constructing the other event loop
-  directly) to test it for real everywhere is an option where it's cheap, not a
-  prerequisite.
 - **Coverage is a floor, not a ceiling.** 100% line and branch coverage means
   every line ran, not that anything pins its behavior: a mutation that flips an
   `and` to an `or` can survive a fully-covering test that never varies the

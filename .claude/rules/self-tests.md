@@ -50,7 +50,10 @@ tests can't run exits non-zero.
   and "python invoked directly" branches. Run from a `git commit` hook, git's own
   `GIT_DIR` and `GIT_INDEX_FILE` would point every sandbox back at this clone,
   so `claude-hook-selftests` clears them before running anything; a self-test
-  reached only through it needs no guard of its own.
+  reached only through it needs no guard of its own. A sandbox repo still reads
+  the global gitconfig and ignore file, so read
+  `~/.claude/rules/test-sandboxes.md` before building one: these self-tests
+  live in `bin/` scripts, which match none of its test-file globs.
 - The installed environment is ambient state too, and CI has none of it: no `dotfiles/bin`
   on PATH and no gitconfig, so a hook that calls a sibling script by name reaches nothing
   and its guard clause passes every case. A hook that shells out to `bin/` prepends its own
