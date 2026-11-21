@@ -7,14 +7,11 @@ Kent Beck:
 > For each desired change, make the change easy (warning: this may be hard),
 > then make the easy change.
 
-When asked to make a change, assume similar changes will follow. Before diving
-in, ask whether the code is in the right shape to receive not just this change
-but the next few like it. If not, restructure so that this and future changes
-become easy.
-
-Avoid one-off solutions. Prefer building systems out of composable building
-blocks, so each new requirement snaps into place rather than requiring bespoke
-logic.
+When asked to make a change, assume similar ones will follow, and ask before
+diving in whether the code is in shape to receive the next few like it.
+If not, restructure so that this and future changes become easy.
+Avoid one-off solutions: build from composable blocks, so each new requirement
+snaps into place rather than needing bespoke logic.
 
 ## Don't Factor Ahead of the Evidence
 
@@ -25,15 +22,15 @@ already asked for.
 An unfilled cell in a matrix the design already commits to is evidence too.
 Once an abstraction enumerates its axes (the arms of a union, both directions
 of a codec table, a handler per method), the missing combination is implied by
-the ones already there, and "wait until someone needs it" is the wrong test:
-the design asked for it the moment the axes were fixed, and shipping three of
-four arms leaves a hole callers have to route around. This licenses completing
-a cross-product that already exists. It does not license inventing an axis so
-there's a cross-product to complete.
+the ones already there. "Wait until someone needs it" is the wrong test: the
+design asked for it the moment the axes were fixed, and shipping three of four
+arms leaves a hole callers have to route around. This licenses completing a
+cross-product that already exists, not inventing an axis so there's one to
+complete.
 
 Wait for *cut points* to emerge: a narrow interface the rest of the system
 talks through, with the complexity sealed behind it. Cut points are found, not
-planned. Refactor toward them as they appear.
+planned, so refactor toward them as they appear.
 
 Bias toward waiting. A wrong abstraction costs more than the duplication it
 replaced, because every later change has to fight it, and backing it out is
@@ -46,10 +43,9 @@ option that buys only a small constant factor is rarely worth its complexity.
 
 When a decision is forced before the evidence arrives, defer it with a knob:
 expose the value you're unsure of as one setting with a sensible default and
-settle it later. This works while it stays a value. One setting has a single
-live value you can change; a plugin point, a strategy interface, or a second
-code path means every branch has to keep working forever, which is the
-commitment you were trying to defer.
+settle it later. This works only while it stays a value. A plugin point, a
+strategy interface, or a second code path means every branch has to keep
+working forever, which is the commitment you were trying to defer.
 
 ## Duplication Is Cheaper Than the Wrong Abstraction
 
@@ -64,22 +60,20 @@ you're passing it another parameter and adding another conditional path. It may
 have been right once; that day has passed. Back it out into its callers and
 re-extract from what's left, rather than bending it further. Expect the sunk
 cost fallacy to argue otherwise, and to argue loudest when the code is worst.
-
-Accumulating a couple of conditionals to gain insight is fine. Bending the
+A couple of conditionals accumulated to gain insight is fine; bending the
 abstraction for the third and fourth caller is not.
 
 ## Read Clustered Review Findings as One Finding
 
 When review after review turns up bugs at the same join, they are usually one
-bug: the structure is wrong. One example is a form that braids two kinds of
-submission, which grows hidden fields, a branch per kind, and checks done twice.
-Another is a parser in front of a shell, where each round finds one more
-spelling it misses. Before patching the next finding, ask whether the two
-concerns could be separate, or whether this layer can do the job at all.
-Splitting a braided flow often deletes most of the findings at once, because
-neither half needed the other; ten patches leave it braided. This is the
-wrong-abstraction signal arriving through review instead of through a new
-caller.
+bug: the structure is wrong. A form that braids two kinds of submission grows
+hidden fields, a branch per kind, and checks done twice; a parser in front of a
+shell has each round find one more spelling it misses. Before patching the next
+finding, ask whether the two concerns could be separate, or whether this layer
+can do the job at all. Splitting a braided flow often deletes most of the
+findings at once, because neither half needed the other; ten patches leave it
+braided. This is the wrong-abstraction signal arriving through review instead
+of through a new caller.
 
 ## Keep Refactors Small
 
@@ -109,11 +103,10 @@ a rewrite.
 ## Chesterton's Fence
 
 Don't remove code because it looks ugly or pointless. Work out why it's there
-first, and scale that patience to the size of the system.
-
-Tests are often the hint: a case that looks pointless is frequently a bug
-someone already paid for. So are `git log` and `git blame` on the lines in
-question, which usually name the fence in a commit message.
+first, and scale that patience to the size of the system. Tests are often the
+hint: a case that looks pointless is frequently a bug someone already paid for.
+So are `git log` and `git blame` on the lines in question, which usually name
+the fence in a commit message.
 
 The fence runs the other way too. Before proposing a mechanism, check whether
 the history already tried it and took it out: `git log -S<term>` finds the
