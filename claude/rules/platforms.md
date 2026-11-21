@@ -19,18 +19,21 @@ answers move with the system, so re-ask them periodically.
   be promoted into the platform later; the reverse is far more disruptive, and
   what lands in a platform rarely leaves.
 - **Shared is not the same as platform-owned.** Code many consumers use can be
-  a library owned by whichever team has opinions about it. Being common is not
-  by itself a reason for the platform team to own it.
+  a library owned by whichever team has opinions about it; being common is no
+  reason by itself for the platform team to own it.
 - **A flag per consumer is a component per consumer.** A shared component with
-  twenty boolean flags is twenty consumer-owned components in a trench coat;
-  see the making-changes rule on the wrong abstraction.
+  twenty boolean flags is twenty consumer-owned components in a trench coat:
+  when each new consumer needs another flag to fit, the abstraction is already
+  wrong.
 
 ## Platforms Configure; Consumers Decide
 
 - **Build what consumers configure, not what does their work.** What to do with
   the data is the consumer's business logic; how and when it arrives (batching,
   retries, scaling, delivery) is the platform's. Keep that split even when
-  absorbing the consumer's logic looks like a favor.
+  absorbing the consumer's logic looks like a favor: a platform that keeps
+  adapting to individual consumers' business logic builds solutions, not
+  leverage.
 - **Don't own logic every consumer must specialize.** Where each use needs its
   own variant, or requirements keep drifting, give the consumer a composition
   mechanism it owns. A fixed code path in the platform turns every change into
@@ -41,8 +44,6 @@ answers move with the system, so re-ask them periodically.
 - **Put responsibility with the party that has the context.** Don't add a check
   the platform can't actually make. An isolation boundary, for instance, is an
   opaque key the caller supplies, not a relationship the platform must prove.
-- **Generic is the point.** A platform that keeps adapting to individual
-  consumers' business logic builds solutions, not leverage.
 
 ## Hide Mechanism, Expose Decisions
 
@@ -87,7 +88,7 @@ rung, a real control but the weakest.
   Sharing the structure while rebuilding isolation inside it (independently
   versioned packages in a monorepo, per-team schemas nobody joins across) pays
   the costs of both. Ask how much of such a proposal would vanish if the parts
-  were simply separate.
+  were separate.
 
 ## Operational Burden Is the Cost to Minimize
 
