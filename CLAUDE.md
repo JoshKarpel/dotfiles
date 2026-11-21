@@ -98,8 +98,8 @@ can just use the name.
 
 Each script in `bin/` takes `--help`. What `--help` doesn't say is which ones
 run on their own, so running them by hand is only for wanting it now:
-`install.sh` schedules `sync-branches` hourly and `tidy` daily (exe.dev only),
-and `cloister-codex` and `converge-atlas` daily (dev boxes only).
+`install.sh` schedules `sync-branches` hourly on every machine, `tidy` daily on
+exe.dev, and `cloister-codex` and `converge-atlas` daily on dev boxes.
 
 - `./install.sh` applies the dotfiles and installs dependencies;
   `pre-commit run` runs the hooks.

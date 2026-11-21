@@ -151,8 +151,9 @@ ARTIFACT_LINE='^Artifact:[[:space:]]*[^[:space:]]+[[:space:]]*$'
 
 # Markdown changed since the prompt started, or new and untracked. The base is the prompt's starting
 # HEAD rather than HEAD, since Claude commits during a turn and a plan committed before the stop
-# changed all the same; a prompt with no snapshot falls back to HEAD. A repository with no commits
-# yet has nothing to diff against, so only the untracked files count there.
+# changed all the same; a prompt with no snapshot and no earlier stop to adopt falls back to HEAD.
+# A repository with no commits yet has nothing to diff against, so only the untracked files count
+# there.
 BASE=$(claude-prompt-snapshot start "$PROMPT_ID" 2>/dev/null || true)
 CHANGED=$(
   {

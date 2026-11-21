@@ -216,8 +216,10 @@ def session_messages(
                     continue
                 if include_tools:
                     kept.append(("tool", summarize_tool_use(block)))
-                elif include_loads and block.get("name") == "Skill":
-                    kept.append(("load", f"skill invoked: {summarize_tool_use(block)}"))
+                if include_loads and block.get("name") == "Skill":
+                    inp = block.get("input")
+                    skill = inp.get("skill") if isinstance(inp, dict) else None
+                    kept.append(("load", f"skill invoked: {skill or '?'}"))
     return kept
 
 
@@ -331,10 +333,13 @@ def main() -> int:
             transcript, roles, args.min_len, args.tools, args.loads
         ):
             total += 1
-            key = (role, text[:200])
-            if key in seen:
-                continue
-            seen.add(key)
+            # A load is a fact about one session at one point in it, so it is never folded
+            # into an identical earlier line the way repeated text is.
+            if role != "load":
+                key = (role, text[:200])
+                if key in seen:
+                    continue
+                seen.add(key)
             print(f"\n=== [{tag}{session_id} | {role} | {len(text)} chars] ===")
             print(text[: args.max_chars])
 

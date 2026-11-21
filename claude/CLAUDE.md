@@ -150,7 +150,8 @@ other.
 - When you start a server just to check something, assume I may already be running the
   app on the default port; pick a non-default port and clean it up when done.
 - Every markdown plan (plan mode's, or a plan doc in a repo) has a published HTML Artifact,
-  derived from the `.md` and republished whenever the plan changes.
+  derived from the `.md` and republished whenever the plan changes; the `plan-page` skill
+  has the procedure.
 - Reach past plain `grep` when a code search is structural rather than textual. `ast-grep`
   matches and rewrites by AST pattern (a bare `except`, a call with a literal argument) where
   regex can't. Run `--help` for the interface.

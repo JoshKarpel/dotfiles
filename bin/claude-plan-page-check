@@ -3,7 +3,7 @@
 #
 # A plan page is whatever `plan-artifact` rendered, and the next render overwrites any hand edit, so
 # the edit is lost the moment another session republishes. Publishing the `.md` itself puts raw
-# markdown where the rendered page was. Both slipped past the CLAUDE.md instruction often enough to
+# markdown where the rendered page was. Both slipped past the written instruction often enough to
 # want a guard. This refuses:
 #
 # - Edit, MultiEdit, or Write on an `.html` file carrying plan-artifact's generator mark, and a Write

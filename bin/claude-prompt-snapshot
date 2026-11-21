@@ -136,6 +136,11 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   silent "nothing arrived, nothing said"
   stop p5
 
+  git -C "$workdir/origin" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "upstream before a gap"
+  git -C "$repo" pull -q --ff-only origin main
+  changed "a prompt with no snapshot doesn't count origin's commits as its own" gap3 no
+  stop gap3
+
   # --- a gated prompt's edits carry into the next prompt ---
   prompt p6
   echo question-turn >>"$repo/file"
@@ -229,7 +234,7 @@ field() {
 # per worktree, not per session: two sessions in one worktree can adopt each other's, which only
 # moves a gap prompt's baseline. With nothing to adopt, the prompt keeps no start.
 adopt_start() {
-  local file="$1" key="$2" prev prev_file head fp
+  local file="$1" key="$2" prev prev_file head fp now
   [[ -n "$(field "$file" start_fp)" ]] && return 0
   prev=$(cat "$STATE_DIR/last-stop" 2>/dev/null || true)
   [[ -n "$prev" && "$prev" != "$key" && -f "$STATE_DIR/$prev" ]] || return 0
@@ -242,6 +247,15 @@ adopt_start() {
     fp=$(field "$prev_file" stop_fp)
   fi
   [[ -n "$fp" ]] || return 0
+  # Commits that arrived since then and that `origin` has (`sync-branches` fast-forwarding) aren't
+  # this prompt's work, so the start advances past them, as a carried start does for a prompt with
+  # a snapshot.
+  now=$(head_sha)
+  if [[ -n "$head" && -n "$now" && "$head" != "$now" ]] &&
+  git merge-base --is-ancestor "$head" HEAD 2>/dev/null &&
+  [[ -z "$(git rev-list "$head..HEAD" --not --remotes=origin 2>/dev/null)" ]]; then
+    head=$now
+  fi
   {
     printf 'start_head=%s\nstart_fp=%s\n' "$head" "$fp"
     cat "$file" 2>/dev/null || true
