@@ -50,7 +50,9 @@ doesn't need repeating per session.
 - After landing, wait for the PR's checks with `claude-wait-checks` in the background,
   which re-invokes you when it exits, and do what its last lines say. It gives up after
   15 minutes so no wait outlives the prompt cache: when it times out, look at the runs
-  still going for anything anomalous before starting it again. It also exits as soon as
+  still going for anything anomalous before starting it again. The run durations it
+  lists against the default branch's recent runs are for spotting a run drifting slower
+  than usual, on a pass too. It also exits as soon as
   waiting can't help, most often for a PR with merge conflicts, whose `pull_request`
   checks GitHub never runs: resolve those with the resolve-conflicts skill, land, and
   wait again. Don't wait with a bare `gh pr checks --watch` or a `sleep` loop around one:
