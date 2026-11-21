@@ -150,9 +150,9 @@ When asked to write a skill, place it in `claude/skills/` in this dotfiles repo 
 
 ## Claude Code Rules
 
-Rules live in `claude/rules/` and load automatically when Claude works with matching file types (if `paths:` frontmatter is set) or globally (if not). Use the `rule-curator` skill to add or update rules; new rules go in `claude/rules/`, not `claude/skills/`.
+Rules live in `claude/rules/`. A path-less rule loads in every session, and a rule with `paths:` loads on the first Read of a matching file inside the project. Use the `rule-curator` skill to add or update rules; new rules go in `claude/rules/`, not `claude/skills/`. `claude/rules/harness-context.md` sorts guidance into worldview (path-less), a tool's mechanics (scoped to that tool's files), and procedure (a skill), and says why.
 
-Rules are read at runtime, while the work is being done, so each one describes what it does concretely and on its own terms. A cross-reference is appropriate when it tells Claude what to *do* next ("confirm nothing mutates it, see the verify-empirically rule").
+Rules are read at runtime, while the work is being done, and a session may load one without the others, so each one stands alone: it glosses any term it borrows and states its ideas outright rather than as analogies to other rules. A cross-reference is appropriate when it tells Claude what to *do* next ("confirm nothing mutates it, see the verify-empirically rule") and the citing sentence still works without it.
 
 A cross-reference describing which rule owns which topic is not. That's maintenance guidance for whoever edits the corpus, it goes stale the moment a rule is split or renamed, and it costs context in every session that loads it. Keep that kind of guidance here instead.
 
@@ -165,6 +165,11 @@ Language rules split the same way, source conventions in one file and project
 configuration in another: `rust.md` and `cargo.md`, `python.md` and `pyproject.md`.
 In both pairs the config rule's `paths:` are a subset of the source rule's, so the
 two are always in context together and neither needs to mention the other.
+
+A path-less rule keeps its principles and leaves each tool's mechanics to that
+tool's scoped rule, so the principle loads everywhere and the flag names load
+with the files they configure: `supply-chain.md` says why cooldowns matter,
+and `pyproject.md`, `mise.md`, and `npm.md` carry each ecosystem's setting.
 
 Guidance about this repo's own files lives in `.claude/rules/`, scoped by
 `paths:` to the files it governs, rather than in this file. Every session here
@@ -214,7 +219,7 @@ would apply a style to every session on every machine. The `harry` alias in
   block declaring `requires-python` (and `dependencies` if any), so the script is
   self-contained and reproducible. A script with dependencies pins each exactly
   (`==`) and sets the cooldown under `[tool.uv]` with my own packages exempted (as
-  `config/mise/config.toml` exempts my tools), per the supply-chain rule.
+  `config/mise/config.toml` exempts my tools), per the python rule.
   `count-claude-tokens` is
   the exemplar with third-party dependencies; the Python hooks (`claude-rm-scope-check`,
   `claude-gh-api-check`) use the same shebang with an empty dependency set. `--quiet`
