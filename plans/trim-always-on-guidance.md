@@ -277,7 +277,7 @@ So compression keeps ideas and spends words:
   wrong-abstraction signal restated in `tradeoffs.md` and `platforms.md`.
 - **Merge rules only where compression finds real overlap**, not by theme.
 - **No percentage target.** A target pushes cuts into the passages this guard
-  protects. My unreviewed guess is 10 to 20% of the always-on text; Phase 5
+  protects. My unreviewed guess is 10 to 20% of the always-on text; Phase 4
   measures what it was.
 - **Replay known corrections for the largest rules.** For `writing.md`,
   `testing.md`, and `error-handling.md`, take two or three past prompts where
@@ -345,8 +345,9 @@ Headroom under the warning goes from about 29k to about 39k before compression.
   mode leaves a plan without its page until I notice.
 - **Compression can still drop an idea written up front** that was doing work
   no harvest saw.
-- **Staged landing takes weeks rather than one review**, and the savings arrive
-  in steps.
+- **Problems surface in use, after merge.** Review catches a reworded rule that
+  reads wrong, but not one whose loss shows only in some later session; the
+  harvest after a few weeks of use, and ad-hoc fixes, are what catch those.
 
 ## What did I consider and reject?
 
@@ -355,7 +356,7 @@ Headroom under the warning goes from about 29k to about 39k before compression.
   `design-review` skill for the rest. It saves the most in chat and docs
   sessions, but it splits the worldview by what a session happened to read, and
   the always-on rules would cite rules that aren't loaded. Once the rules stand
-  alone, it comes back as a per-rule question in Phase 6, decided on harvest
+  alone, it comes back as a per-rule question in Phase 5, decided on harvest
   evidence rather than up front.
 - **A `design-review` skill** carrying `designs.md` and `platforms.md`. Those
   are how I judge any proposal, so they shouldn't wait on the model deciding a
@@ -363,8 +364,10 @@ Headroom under the warning goes from about 29k to about 39k before compression.
   top of the always-on doctrine stays an option if harvests show one missing.
 - **Compressing to a percentage target**, which forces cuts into corrected
   passages.
-- **Everything in one pull request.** A regression couldn't then be traced to
-  any one change.
+- **Landing in stages**, with weeks of use between the splits and each batch of
+  compression. It would make a regression easier to attribute, but every
+  reworded rule gets reviewed anyway, and one commit per change keeps a
+  regression traceable to its commit. Fixing forward costs less than the wait.
 - **Merging the Hickey cluster** (simple-vs-easy, values-over-places,
   functional-core, declarative, locality-of-behavior) up front. It saves about
   1.5k of headings and references, and the cross-references already resolve by
@@ -378,12 +381,12 @@ Headroom under the warning goes from about 29k to about 39k before compression.
 
 ## How does this land?
 
-In stages, so a regression can be traced to the change that caused it.
-The verification, the doctrine rewrite, and the splits land on this branch, in
-this pull request.
-Compression lands in later pull requests, a few rules at a time, after the
-splits have been used for a few weeks and a harvest has checked them.
-One commit per move or per rule compressed, so each diff can be reviewed alone.
+All of it lands on this branch, in this pull request, and problems get fixed
+forward.
+Josh reviews each reworded rule; a `harvest-sessions` pass after a few weeks of
+use, and ad-hoc changes, catch what review doesn't.
+One commit per move or per rule compressed, so each diff can be reviewed alone
+and a regression traces to its commit.
 Moves change no wording; compression changes no destination.
 
 ### Phase 1: verify the loading mechanics
@@ -391,11 +394,11 @@ Moves change no wording; compression changes no destination.
 - [ ] Confirm a global rule scoped to the test-file globs loads on the first Read
   of a matching file, using the session transcript (its `nested_memory`
   attachments) as the record, with hooks disabled.
+- [ ] Find whether it loads on a Read outside the project root (the scratchpad,
+  another clone).
 - [ ] Load a few hundred small path-less rules in a scratch config, and confirm
   they all arrive in the `instructions` attachment, so slicing has no ceiling
   nearby.
-- [ ] Find whether it loads on a Read outside the project root (the scratchpad,
-  another clone).
 - [ ] Count, from recent transcripts, how often sessions that edit tests read a
   test file with the Read tool first.
 
@@ -419,33 +422,29 @@ Moves change no wording; compression changes no destination.
 - [ ] Scope `harness-context.md`, and point the global `CLAUDE.md` and the three
   curator skills at its path.
 
-### Phase 4: use and measure the splits
-
-- [ ] Count the always-on total again, and record from transcripts what a chat
-  session and a coding session each loaded.
-- [ ] After a few weeks of use, run a `harvest-sessions` pass. Its readers use
-  `read_sessions.py --loads` to compare what loaded against what each session
-  needed: a test edited without the test rules it needed, a plan written without
-  the `plan-page` skill, an incident written up without the `operations` skill.
-- [ ] Move back to always-on anything the harvest finds missing where it was
-  needed, before compression starts.
-
-### Phase 5: compress, guarded, in later pull requests
+### Phase 4: compress, guarded
 
 - [ ] Resolve the cross-rule duplicates listed above.
 - [ ] For each always-on rule and the global `CLAUDE.md`, sort its passages by
   `git log -L` into those a correction added and those written up front, and
-  compress under the guard.
+  compress under the guard, one commit per rule for Josh to review.
 - [ ] In the same pass, make each rule stand alone: gloss borrowed terms, turn
   analogies into clauses or drop them, and delete topic-owner pointers.
 - [ ] Replay two or three known corrections each for `writing.md`, `testing.md`,
   and `error-handling.md` against the old and new text.
-- [ ] Land a few rules per pull request, with use between them, each for Josh to
-  review.
-- [ ] Count the always-on total once more, and record what compression saved.
+- [ ] Count the always-on total again, and record what the splits and the
+  compression each saved.
 
-### Phase 6: reconsider splits rule by rule
+### Phase 5: after a few weeks of use
 
-- [ ] For each rule that now stands alone, check the harvests for whether
+- [ ] Record from transcripts what a chat session and a coding session each
+  loaded.
+- [ ] Run a `harvest-sessions` pass. Its readers use `read_sessions.py --loads`
+  to compare what loaded against what each session needed: a test edited
+  without the test rules it needed, a plan written without the `plan-page`
+  skill, an incident written up without the `operations` skill.
+- [ ] Move back to always-on anything the harvest finds missing where it was
+  needed, and restore any idea it finds compression dropped.
+- [ ] For each rule that now stands alone, check the harvest for whether
   sessions that never read a matching file needed it. Scope it, or move it to a
   skill, only where they clearly didn't; otherwise it stays always-on.
