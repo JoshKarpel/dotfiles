@@ -135,8 +135,9 @@ They stay always-on and get trimmed.
 | `values-over-places.md` | 1.7k | Applies to designs as much as to code |
 | `functional-core.md` | 1.2k | Applies to designs as much as to code |
 
-That's about 54.9k after the two splits. Trimming targets 25 to 30%, to about
-40k.
+That's about 54.9k after the two splits.
+They get a narrow trim in a later pull request, with no percentage target; see
+[how the trim is guarded](#how-is-the-trim-guarded).
 
 `making-changes.md` splits along the wrong-abstraction line. "Make the Change
 Easy", "Don't Factor Ahead of the Evidence", "Duplication Is Cheaper Than the
@@ -216,23 +217,59 @@ Work" is that: the scratchpad path (`claude-tmpdir-check`), `uv run`
 (`claude-uv-check`), `sleep` (`claude-sleep-poll-check`), loops and `$(...)`
 (`claude-avoid-approval-prompts`), `sudo`, and the plan page
 (`claude-stop-plan-artifact`).
-The trim drops what the model already does well unprompted, such as passing a
-`timeout` to a long Bash command, and tightens the rest.
+It gets the same guarded trim as the always-on rules, in the same later pull
+request.
+
+## How is the trim guarded?
+
+Moving and trimming fail differently.
+A moved rule still exists and still loads somewhere; the failure is a session
+that needed it and didn't load it, and the transcript records which rules
+loaded, so a harvest can find those sessions.
+A trimmed sentence is gone from every session, and nothing records that it was
+doing any work.
+That's where reliance I don't know about would be lost, so the trim is the
+step that needs the guard.
+
+It's also the smaller saving.
+Moves alone take a chat session from 120k to about 68k; the trim takes about
+18k more (roughly 4.5k tokens) off every session.
+
+The evidence of reliance is in the history.
+Much of the always-on text was added by `harvest-sessions` passes, each from a
+correction Claude needed in a real session, so `git log -L` on a passage shows
+whether it was added after an observed failure or written up front.
+The guard follows from that:
+
+- **Protect what a correction added.** A passage added by a harvest, or by a
+  commit fixing an observed mistake, stays unless it duplicates another rule.
+  It may be reworded, keeping its claim.
+- **Cut only from text written up front**, and only where it's plainly
+  redundant: restated elsewhere, a second example making the same point, or
+  framing that carries no claim.
+- **No percentage target.** A target pushes the cut into exactly the text this
+  guard protects.
+- **Replay known corrections for the largest rules.** For `writing.md`,
+  `error-handling.md`, and `testing.md`, take two or three past prompts where
+  the rule clearly changed the answer and run each through `claude -p` against
+  the old and new text. It's noisy and costs a few runs, which is why it's
+  limited to the rules where a lost sentence would cost the most.
 
 ## What does a session load afterwards?
 
-These are estimates from character counts, after the always-on trim and before
-trimming the scoped tiers.
-The skill listing loads in every session in both columns, and isn't counted.
+These are estimates from character counts, before any trim.
+The skill listing loads in every session in every column, and isn't counted.
 
-| Session | Today (chars) | Afterwards (chars) |
+| Session | Today (chars) | After the moves (chars) |
 |---|---|---|
-| Chat or docs review | 120k | ~50k always-on |
-| Design review | 120k | ~50k, plus ~12k design doctrine |
-| Coding | 120k | ~50k, plus ~26k on the first Read |
+| Chat or docs review | 120k | ~68k always-on |
+| Design review | 120k | ~68k, plus ~12k design doctrine |
+| Coding | 120k | ~68k, plus ~25k on the first Read |
 
-The 50k is the trimmed always-on rules (~40k) and the trimmed global
-`CLAUDE.md` (~10k).
+The 68k is the always-on rules after the two splits (~55k) and the global
+`CLAUDE.md` (~13k).
+The guarded trim lowers it, by an amount the guard decides rather than a
+target.
 
 ## What does this cost?
 
@@ -252,6 +289,11 @@ The 50k is the trimmed always-on rules (~40k) and the trimmed global
   from another for that reason alone.
 - More files and more indirection: a rule read by both a glob and a skill has
   two ways in, and renaming it means updating the skill too.
+- A trimmed sentence I relied on without knowing it is lost without a trace.
+  The guard protects what a correction added, but text written up front can
+  still have been doing work no harvest saw.
+- Landing in stages takes weeks rather than one review, and the savings arrive
+  in steps.
 
 ## What did I consider and reject?
 
@@ -283,11 +325,20 @@ The 50k is the trimmed always-on rules (~40k) and the trimmed global
   by path is the nearest approximation, and it's what this plan uses.
 - **Scoping only, without trimming.** Scoping saves only in sessions that don't
   read the scope; trimming saves in all of them, so the always-on tier gets
-  both.
+  both, with the trim guarded and landed after the moves have been used.
+- **A trim to a percentage target** (25 to 30% of the always-on tier). It
+  saves more, but it forces cuts into the passages corrections added, which are
+  the best evidence of what sessions rely on.
+- **Everything in one pull request.** About twenty changes landing at once
+  would leave a regression that couldn't be traced to any one of them.
 
 ## How does this land?
 
-All of it lands on this branch, in one pull request.
+In stages, so a regression can be traced to the change that caused it.
+The verification, the doctrine rewrite, and the moves land on this branch, in
+this pull request.
+The trims land in later pull requests, after the moves have been used for a few
+weeks and a harvest has checked them.
 One commit per move or per rule trimmed, so each diff can be reviewed alone.
 Moves change no wording; trims change no destination.
 
@@ -323,20 +374,26 @@ Moves change no wording; trims change no destination.
 - [ ] Create the `operations` skill from `operations.md`.
 - [ ] Scope `harness-context.md`, `secrets.md`, and `rfc2119.md`.
 
-### Phase 4: trim the always-on tier
-
-- [ ] Trim each always-on rule, one commit per rule, each for Josh to review,
-  merging rules where the trim turns up overlap.
-- [ ] Trim the global `CLAUDE.md`, dropping what the model does well unprompted.
-- [ ] Deduplicate `durable-docs.md`'s "Volatile Metrics" against the global
-  `CLAUDE.md` bullet, and `verify-empirically.md`'s "run the control" against
-  `testing.md`'s "suspect the check on a pass".
-
-### Phase 5: measure
+### Phase 4: measure the moves
 
 - [ ] Count the always-on total again, and record from transcripts what a chat
   session, a design review, and a coding session each loaded.
 - [ ] After a few weeks of use, run a `harvest-sessions` pass. Its readers use
   `read_sessions.py --loads` to compare what loaded against what each session
-  needed, which is the check on whether the moved rules and new skills fire
-  when they should and stay out when they shouldn't.
+  needed: sessions that edited code without the code tier, discussed a design
+  without `designs.md`, or ran a rollout without the `operations` skill.
+- [ ] Move back to always-on any rule the harvest finds missing where it was
+  needed, before any trim starts.
+
+### Phase 5: trim, guarded, in later pull requests
+
+- [ ] Deduplicate `durable-docs.md`'s "Volatile Metrics" against the global
+  `CLAUDE.md` bullet, and `verify-empirically.md`'s "run the control" against
+  `testing.md`'s "suspect the check on a pass".
+- [ ] For each always-on rule and the global `CLAUDE.md`, sort its passages by
+  `git log -L` into those a correction added and those written up front, and
+  cut only redundant text from the second group.
+- [ ] Replay two or three known corrections each for `writing.md`,
+  `error-handling.md`, and `testing.md` against the old and new text.
+- [ ] Land the trims a few rules per pull request, with use between them, each
+  for Josh to review, merging rules where the trim turns up overlap.
