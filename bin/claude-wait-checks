@@ -58,7 +58,8 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   git -C "$repo" push -q origin work
   head=$(git -C "$repo" rev-parse HEAD)
 
-  # An unset GH_PR_JSON reproduces `gh pr view` finding no PR; an unset GH_CHECKS_JSON reproduces
+  # GH_RUNS_JSON answers `gh run list --commit` (this commit's runs), GH_BASELINE_JSON any other
+  # `gh run list` (the default branch's), and both default to no runs. An unset GH_PR_JSON reproduces `gh pr view` finding no PR; an unset GH_CHECKS_JSON reproduces
   # `gh pr checks` finding no checks, which it reports as an error rather than an empty list.
   cat >"$stubs/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -67,6 +68,8 @@ case "$1 $2" in
     printf '%s' "$GH_PR_JSON" ;;
   "pr checks") [[ -n "${GH_CHECKS_JSON:-}" ]] || { echo "no checks reported on the 'work' branch" >&2; exit 1; }
     printf '%s' "$GH_CHECKS_JSON" ;;
+  "run list") if [[ "$*" == *--commit* ]]; then printf '%s' "${GH_RUNS_JSON:-[]}"; else printf '%s' "${GH_BASELINE_JSON:-[]}"; fi ;;
+  "repo view") echo main ;;
   *) exit 1 ;;
 esac
 EOF
@@ -106,6 +109,17 @@ EOF
   t 4 "hasn't reached" GH_PR_JSON="$(pr OPEN MERGEABLE 0000000)" GH_CHECKS_JSON="[$(check ci pass SUCCESS)]"
   t 6 "MERGED" GH_PR_JSON="$(pr MERGED UNKNOWN "$head")"
   t 6 "No pull request"
+
+  # Durations: this commit's run against the default branch's, finished or still going.
+  run() { printf '{"workflowName":"%s","status":"%s","startedAt":"%s","updatedAt":"%s"}' "$@"; }
+  passed="[$(check ci pass SUCCESS)]"
+  runs="[$(run ci completed 2026-01-01T00:00:00Z 2026-01-01T00:00:29Z)]"
+  base="[$(run ci completed 2026-01-01T00:00:00Z 2026-01-01T00:01:06Z),$(run ci completed 2026-01-01T00:00:00Z 2026-01-01T00:00:33Z),$(run ci completed 2026-01-01T00:00:00Z 2026-01-01T00:00:30Z)]"
+  t 0 "ci: 29s, against 30s to 66s (median 33s)" GH_PR_JSON="$open" GH_CHECKS_JSON="$passed" GH_RUNS_JSON="$runs" GH_BASELINE_JSON="$base"
+  t 1 "ci: 29s, against" GH_PR_JSON="$open" GH_CHECKS_JSON="[$(check ci fail FAILURE)]" GH_RUNS_JSON="$runs" GH_BASELINE_JSON="$base"
+  t 0 "no successful runs on main" GH_PR_JSON="$open" GH_CHECKS_JSON="$passed" GH_RUNS_JSON="$runs"
+  t 4 "so far, against 30s" GH_PR_JSON="$open" GH_CHECKS_JSON="[$(check ci pending IN_PROGRESS)]" \
+    GH_RUNS_JSON="[$(run ci in_progress 2026-01-01T00:00:00Z 2026-01-01T00:00:00Z)]" GH_BASELINE_JSON="$base"
 
   git -C "$repo" commit -q --allow-empty -m two
   t 7 "1 commit" GH_PR_JSON="$open" GH_CHECKS_JSON="[$(check ci pass SUCCESS)]"
@@ -168,6 +182,35 @@ describe() {
     (if .link // "" | length > 0 then ": \(.link)" else "" end)' <<<"$1"
 }
 
+# For each workflow run on HEAD, how long it took (or has taken so far) next to the same workflow's
+# last few successful runs on the default branch, so a run drifting slower than usual stands out. It
+# is context for the verdict rather than part of it, so a failed lookup says so and changes nothing.
+durations() {
+  local runs default name baseline
+  if ! runs=$(gh run list --commit "$head" --json workflowName,status,startedAt,updatedAt 2>&1) ||
+  ! default=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name 2>&1); then
+    echo "Couldn't read this commit's run durations: $runs$default"
+    return 0
+  fi
+  [[ "$(jq length <<<"$runs")" -gt 0 ]] || return 0
+  echo "How long this commit's workflow runs took, against the last 5 successful runs of each on $default:"
+  while IFS= read -r name; do
+    baseline=$(gh run list --workflow "$name" --branch "$default" --status success --limit 5 \
+      --json startedAt,updatedAt 2>/dev/null) || baseline='[]'
+    jq -r --arg name "$name" --arg default "$default" --argjson base "$baseline" '
+      def fmt: if . < 120 then "\(floor)s" else "\(. / 60 | floor)m" end;
+      def took: (.updatedAt | fromdate) - (.startedAt | fromdate);
+      (map(select(.workflowName == $name)) | max_by(.startedAt)) as $run
+      | ($base | map(took) | sort) as $b
+      | "  \($name): " +
+        (if $run.status == "completed" then ($run | took | fmt)
+         else "\(now - ($run.startedAt | fromdate) | fmt) so far" end) +
+        (if $b == [] then ", with no successful runs on \($default) to compare"
+         else ", against \($b[0] | fmt) to \($b[-1] | fmt) (median \($b[$b | length / 2 | floor] | fmt))" end)
+    ' <<<"$runs"
+  done < <(jq -r '.[].workflowName' <<<"$runs" | sort -u)
+}
+
 start=$(date +%s)
 while true; do
   elapsed=$(($(date +%s) - start))
@@ -207,6 +250,7 @@ while true; do
     failed=$(describe "$checks" fail,cancel)
     if [[ -n "$failed" ]]; then
       printf 'Checks failed on PR #%s:\n%s\n' "$number" "$failed"
+      durations
       echo "Read the failure (\`gh run view <run-id> --log-failed\`; the debug-gha skill covers it), fix it, and land again."
       exit 1
     fi
@@ -220,6 +264,7 @@ while true; do
       still=$(describe "$checks" pending)
       if [[ -z "$still" ]]; then
         echo "All $total checks passed on PR #$number."
+        durations
         exit 0
       fi
       pending=$(printf 'Still pending on PR #%s:\n%s' "$number" "$still")
@@ -228,6 +273,7 @@ while true; do
 
   if ((elapsed >= timeout)); then
     printf '%s\n' "$pending"
+    durations
     echo "Stopped waiting after $((elapsed / 60))m. Look at the runs still going for anything anomalous (a job queued with no runner, a step running far longer than it usually does, an external status that never reports) with \`gh run view <run-id>\`, then run claude-wait-checks in the background again."
     exit 4
   fi
