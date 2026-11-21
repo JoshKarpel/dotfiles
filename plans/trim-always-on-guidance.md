@@ -122,8 +122,13 @@ These are what the plan builds on.
   requires a prior Read, so editing an existing file does load it. Observed in
   the session that wrote this plan: `markdown.md` and `shell.md` loaded on Read,
   never on the earlier Bash reads of the same files.
-- A loaded rule arrives under a `Contents of <path>:` header, so the model sees
-  each rule's file name as well as its headings.
+- The always-on files arrive as one block: this session's transcript records
+  them as a single `instructions` attachment of 32 files. Each sits under a
+  header of about 130 characters (`Contents of <path> (user's private global
+  instructions for all projects):`), in directory order rather than by name. A
+  scoped rule arrives later, under the same header, as its own `nested_memory`
+  attachment. No documented limit on the number of rule files turned up, and 32
+  load without complaint; I haven't tested a larger count.
 - A skill's description sits in the skill listing in every session, and its
   body loads only when invoked. The listing has its own budget and truncates
   descriptions past it. The skills in `claude/skills/` already carry 14.3k
@@ -135,6 +140,30 @@ These are what the plan builds on.
 A mechanic that misses its scope costs little: it's the kind of fact a `--help`,
 a probe, or the tool's own error recovers.
 That's why mechanics can take the reads-only gap, and worldview can't.
+
+## How small can a slice be?
+
+Since every file lands in the same block, file boundaries cost little: about
+130 characters of header and a title apiece.
+A file name matters only as an address, the name another rule cites ("the
+verify-empirically rule"), and [standalone rules](#can-each-rule-stand-alone)
+need fewer addresses.
+So the unit of guidance can be as small as one idea, and the size of a file is
+an editing choice, not a loading one.
+
+That changes the two tiers differently:
+
+- **Always-on**: splitting or merging files doesn't change what loads. Keep
+  whatever boundaries make the text easy to edit and cite.
+- **Scoped**: a smaller slice can take a narrower glob, so it loads in fewer
+  sessions. Slice mechanics per tool or file format, not per topic: a Python
+  mocking gotcha belongs with Python test files, not with all testing.
+
+Two limits keep it from going to single sentences.
+A slice should outweigh its header, which a two-line rule barely does.
+And a narrower glob fires in fewer sessions, on top of the reads-only gap, so
+the glob should match the files that are open when the mechanic matters,
+not the narrowest pattern that names the tool.
 
 ## Where does each passage go?
 
@@ -149,15 +178,25 @@ changes no wording.
 | uv's `exclude-newer` and its per-package bypass | `supply-chain.md` | `pyproject.md` |
 | mise's `minimum_release_age` and the pin that bypasses it | `supply-chain.md` | `mise.md` |
 | npm's `min-release-age`, `ETARGET`, the exemption, and `npm audit fix` | `supply-chain.md` | new `npm.md` (`**/package.json`, `**/.npmrc`) |
-| "Patch where the name is looked up" | `testing.md` | `python.md` |
-| "Isolate a sandbox from the user's own config" | `testing.md` | new `testing-mechanics.md` |
-| "Exclude a platform-only branch per platform" | `testing.md` | new `testing-mechanics.md` |
+| "Patch where the name is looked up" | `testing.md` | new `python-tests.md` |
+| "Isolate a sandbox from the user's own config" | `testing.md` | new `test-sandboxes.md` |
+| "Exclude a platform-only branch per platform" | `testing.md` | new `coverage.md` |
 | The kubelet's `..data` symlink swap | `configuration.md` | `helm-crossplane.md` |
 
-`testing-mechanics.md` is scoped to test files: `**/test_*`, `**/*_test.*`,
-`**/*.test.*`, `**/tests/**`, `**/test/**`, and `**/conftest.py`.
-This repo's self-tests live inside `bin/` scripts that match none of those, so
-the repo's `.claude/rules/self-tests.md` points at it by path.
+The new rules are scoped to the files open when each mechanic matters:
+
+- `python-tests.md`: `**/test_*.py`, `**/*_test.py`, `**/conftest.py`, and
+  `**/tests/**/*.py`, since patching is decided while writing a Python test.
+- `test-sandboxes.md`: test files in any language (`**/test_*`, `**/*_test.*`,
+  `**/*.test.*`, `**/tests/**`, `**/test/**`, `**/conftest.py`). A throwaway
+  repo is built in a test of any kind, and no narrower file marks it.
+- `coverage.md`: `**/.coveragerc`, `**/pyproject.toml`, and
+  `.github/workflows/**`, where the exclusions and the per-platform gate are
+  configured.
+
+This repo's self-tests live inside `bin/` scripts that match none of the test
+globs, so the repo's `.claude/rules/self-tests.md` points at
+`test-sandboxes.md` by path.
 
 `supply-chain.md` keeps its principles: fewer dependencies, pin and lock, one
 installer per tool, floors not caps, how a resolver's model changes what a cap
@@ -352,6 +391,9 @@ Moves change no wording; compression changes no destination.
 - [ ] Confirm a global rule scoped to the test-file globs loads on the first Read
   of a matching file, using the session transcript (its `nested_memory`
   attachments) as the record, with hooks disabled.
+- [ ] Load a few hundred small path-less rules in a scratch config, and confirm
+  they all arrive in the `instructions` attachment, so slicing has no ceiling
+  nearby.
 - [ ] Find whether it loads on a Read outside the project root (the scratchpad,
   another clone).
 - [ ] Count, from recent transcripts, how often sessions that edit tests read a
@@ -370,7 +412,8 @@ Moves change no wording; compression changes no destination.
 
 - [ ] Move the ecosystem settings out of `supply-chain.md`.
 - [ ] Move the tool mechanics out of `testing.md` and `configuration.md`, and add
-  `testing-mechanics.md`, `npm.md`, and the self-tests rule's pointer.
+  `python-tests.md`, `test-sandboxes.md`, `coverage.md`, `npm.md`, and the
+  self-tests rule's pointer.
 - [ ] Create the `operations` skill, and rename what stays to `rollouts.md`.
 - [ ] Create the `plan-page` skill from the global `CLAUDE.md`'s plan bullet.
 - [ ] Scope `harness-context.md`, and point the global `CLAUDE.md` and the three
@@ -382,7 +425,7 @@ Moves change no wording; compression changes no destination.
   session and a coding session each loaded.
 - [ ] After a few weeks of use, run a `harvest-sessions` pass. Its readers use
   `read_sessions.py --loads` to compare what loaded against what each session
-  needed: a test edited without `testing-mechanics.md`, a plan written without
+  needed: a test edited without the test rules it needed, a plan written without
   the `plan-page` skill, an incident written up without the `operations` skill.
 - [ ] Move back to always-on anything the harvest finds missing where it was
   needed, before compression starts.
