@@ -307,8 +307,9 @@ So compression keeps ideas and spends words:
   wrong-abstraction signal restated in `tradeoffs.md` and `platforms.md`.
 - **Merge rules only where compression finds real overlap**, not by theme.
 - **No percentage target.** A target pushes cuts into the passages this guard
-  protects. My unreviewed guess is 10 to 20% of the always-on text; Phase 4
-  measures what it was.
+  protects. It came to about 5k characters, under 5% of the text it
+  covered: most passages came from corrections and kept their claims, and
+  reflowing to semantic line breaks gave some characters back.
 - **Replay known corrections for the largest rules.** For `writing.md`,
   `testing.md`, and `error-handling.md`, take two or three past prompts where
   the rule clearly changed the answer and run each through `claude -p` against
@@ -345,25 +346,24 @@ text, and get the same guard.
 
 ## What does a session load afterwards?
 
-These are estimates from character counts.
+Measured from the files at each stage, in characters.
 The skill listing loads in every session in every column, and isn't counted.
 
-| Session | Today | After the splits | After compression |
+| Stage | Path-less rules | Global `CLAUDE.md` | Always-on total |
 |---|---|---|---|
-| Chat or docs review | 121k | ~111k | lower, by what the guard leaves |
-| Coding | 121k | ~111k, plus the mechanics its files scope in | the same, compressed |
+| Before | 107.3k (30 files) | 13.8k | 121.2k |
+| After the splits | 98.9k (29 files) | 12.2k | 111.1k |
+| After compression | 94.9k (29 files) | 11.3k | 106.2k |
 
-The splits take about 10k out: 4.4k of mechanics, 1.6k and 1.8k into skills,
-and 4.1k of harness guidance.
-Headroom under the warning goes from about 29k to about 39k before compression.
+A coding session adds the mechanics its files scope in.
+Headroom under the warning went from about 29k to about 44k.
 
 ## What does this cost?
 
-- **Most of the token cost stays.** About 28k tokens of always-on text remain a
-  cache write in every session until compression lands, and compression's size
-  is unknown until it's done. Sorting rule by rule would save more, about 52k
-  characters in a chat session, which is the price of keeping the worldview
-  whole.
+- **Most of the token cost stays.** About 27k tokens of always-on text remain a
+  cache write in every session. Sorting rule by rule would have saved more,
+  about 52k characters in a chat session, which is the price of keeping the
+  worldview whole.
 - **Splitting is per passage, not per file.** Each move is a judgment about one
   bullet or paragraph, so there are more of them to review, and a reader of
   `testing.md` no longer sees testing's tool gotchas in the same file.
@@ -471,17 +471,21 @@ Moves change no wording; compression changes no destination.
 
 ### Phase 4: compress, guarded
 
-- [ ] Resolve the cross-rule duplicates listed above.
-- [ ] For each always-on rule and the global `CLAUDE.md`, sort its passages by
+- [x] Resolve the cross-rule duplicates listed above.
+- [x] For each always-on rule and the global `CLAUDE.md`, sort its passages by
   `git log -L` into those a correction added and those written up front, and
   compress under the guard, one commit per rule for Josh to review.
-- [ ] In the same pass, make each rule stand alone: gloss borrowed terms, turn
+- [x] In the same pass, make each rule stand alone: gloss borrowed terms, turn
   analogies into clauses or drop them, and delete topic-owner pointers.
-- [ ] Shrink each global `CLAUDE.md` bullet a hook enforces to what the hook's
+- [x] Shrink each global `CLAUDE.md` bullet a hook enforces to what the hook's
   message doesn't say, after reading the message.
-- [ ] Replay two or three known corrections each for `writing.md`, `testing.md`,
-  and `error-handling.md` against the old and new text.
-- [ ] Count the always-on total again, and record what the splits and the
+- [x] Replay two or three known corrections each for `writing.md`, `testing.md`,
+  and `error-handling.md` against the old and new text. Two prompts per rule,
+  each aimed at a corrected passage, ran under `--safe-mode` with only that
+  rule appended; old and new text gave equivalent answers in all six pairs. No
+  run without the rule was made, so this shows the new text keeps the
+  behavior, not that the rule causes it.
+- [x] Count the always-on total again, and record what the splits and the
   compression each saved.
 
 ### Phase 5: after a few weeks of use
