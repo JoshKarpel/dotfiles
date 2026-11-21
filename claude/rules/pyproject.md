@@ -50,8 +50,9 @@ supply-chain defense.
 exclude-newer = "7 days"
 ```
 
-Opt a package out with `exclude-newer-package` (registries lacking PEP 700
-upload-time data, or a package you need a fresh release of):
+`exclude-newer` hides every release inside the window, so a pin on one is
+unsatisfiable. Opt a package out with `exclude-newer-package` (registries
+lacking PEP 700 upload-time data, or a package you need a fresh release of):
 
 ```toml
 [tool.uv]

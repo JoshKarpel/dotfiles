@@ -59,22 +59,6 @@ application's committed lockfile is the exact resolution it deploys. Caps narrow
 the space for everyone downstream to buy a guarantee the lockfile already gives
 you.
 
-A PEP 723 inline script carries no lockfile, so pin its direct dependencies
-exactly (`counterweight==0.2.0`), making an upgrade a deliberate edit to the
-pin. Transitive dependencies still resolve afresh on each run, so the cooldown
-is what keeps them from floating to whatever published last. Set it in the
-script's own metadata, since it has no project config to inherit one from:
-
-```python
-# /// script
-# dependencies = ["counterweight==0.2.0"]
-#
-# [tool.uv]
-# exclude-newer = "7 days"
-# exclude-newer-package = { counterweight = false }
-# ///
-```
-
 Cap only what you can point at: exclude a known-broken release (`!=1.4.2`), or
 pin the single framework you extend (a pytest plugin, a Sphinx extension). Write
 both as temporary, and remove them when the reason expires.
@@ -93,18 +77,7 @@ Delay adopting a release until it has aged, as a defense against compromised or
 malicious publishes. Use a relative duration (a sliding "last N days" window):
 7 days is a reasonable default, with a longer window (e.g. 30 days) for major
 version bumps. Configure it with each ecosystem's own knob. How you take a fresh
-release anyway depends on what the knob filters. mise's `minimum_release_age`
-applies only to fuzzy resolution, so pinning a specific version bypasses it.
-uv's `exclude-newer` hides every release inside the window, so a pin on one is
-unsatisfiable, and the bypass is a per-package exemption
-(`exclude-newer-package = { <package> = false }`). npm's `min-release-age`,
-set in the project's `.npmrc`, filters the same way: the window is a bare
-number of days (`min-release-age=7`), an exact pin inside it fails with
-`ETARGET`, a dist-tag falls back to the newest version outside it, and the
-bypass is `min-release-age-exclude[]=<package>` (a name or glob, which exempts
-that package but not its dependencies). It also holds back `npm audit fix`: a
-patched release younger than the window stays uninstalled, and the command
-warns and exits non-zero, so a fresh security fix needs the exemption.
+release anyway depends on what the knob filters.
 
 ## References
 

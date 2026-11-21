@@ -328,6 +328,24 @@ pair genuinely can't express the invariant.
   distribution, pytest-randomly to surface isolation bugs before CI, and cutting
   collection/import/coverage startup cost.
 
+## Inline Script Dependencies
+
+A PEP 723 inline script carries no lockfile, so pin its direct dependencies
+exactly (`counterweight==0.2.0`), making an upgrade a deliberate edit to the
+pin. Transitive dependencies still resolve afresh on each run, so the cooldown
+is what keeps them from floating to whatever published last. Set it in the
+script's own metadata, since it has no project config to inherit one from:
+
+```python
+# /// script
+# dependencies = ["counterweight==0.2.0"]
+#
+# [tool.uv]
+# exclude-newer = "7 days"
+# exclude-newer-package = { counterweight = false }
+# ///
+```
+
 ## Preferred Libraries
 
 - **[`pydantic`](https://docs.pydantic.dev/)** for serialization/deserialization and
