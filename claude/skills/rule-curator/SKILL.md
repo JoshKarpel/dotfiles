@@ -29,7 +29,25 @@ tool behaves a certain way or a pattern works, try it or cross-check current
 docs. Blog posts and forum answers drift out of date faster than official
 references do.
 
-### 3. Survey the existing rules
+### 3. Sort it by kind
+
+Read `~/.claude/rules/harness-context.md` before deciding where anything goes;
+it's scoped to Claude Code config, so it may not be loaded yet. It sorts
+guidance three ways, and the kind decides the mechanism before any file does:
+
+- **Worldview**, a principle or a way of judging, goes in a path-less rule (or
+  `CLAUDE.md`), loaded in every session.
+- **Mechanics**, a fact about one tool, format, or platform, go in a rule scoped
+  to the files open when the fact matters.
+- **Procedure**, a checklist for a task someone names, goes in a skill: hand it
+  to the `skill-creator` skill.
+
+The test: would the passage still be true and useful if the tool it names
+didn't exist? One piece of material often holds more than one kind, so split
+it: the principle from a blog post goes in a path-less rule, its tool's flags
+in that tool's scoped rule. When the kind is in doubt, it's always-on.
+
+### 4. Survey the existing rules
 
 ```bash
 ls claude/rules/
@@ -42,20 +60,30 @@ Match on both axes:
 - **Topic**: does it extend something a rule already covers, or is it a
   genuinely new area for that format?
 
-### 4a. If it fits an existing rule, edit it in place
+### 5a. If it fits an existing rule, edit it in place
 
 - Find the right spot: an existing `##` heading to extend, or a new heading
   that matches the rule's existing structure and voice.
 - Match the target rule's example density and tone; don't import the source
   material's style wholesale.
+- A passage a correction added keeps its claim. `git log -L` on the lines shows
+  whether a `harvest-sessions` pass or a fix for an observed mistake added
+  them; reword such a passage tighter if you like, but don't drop the idea.
 - Run the proposed edit past the user before writing it. They may want it
   trimmed, placed elsewhere, or skipped.
 
-### 4b. If it doesn't fit any existing rule, propose a new one
+### 5b. If it doesn't fit any existing rule, propose a new one
 
 - Name it `<topic>.md` and place it in `claude/rules/`.
-- Add YAML frontmatter with `paths:` globs that match the relevant file types
-  so the rule loads automatically when Claude works with those files.
+- Worldview gets no frontmatter, so it loads in every session. Mechanics get
+  `paths:` globs for the files open when they matter (see below).
+- A small rule is fine: each file costs only a short header when it loads, so
+  slice by what loads it, not by topic. A slice should still outweigh that
+  header of about 130 characters.
+- Write it to stand alone: gloss any term it borrows from another rule, and
+  state an idea outright rather than as an analogy to another rule. A pointer
+  to another rule is somewhere to read more, never something this rule
+  depends on.
 - Per `CLAUDE.md`, new rules live in `claude/rules/` in this repo, never
   directly under `~/.claude/`, so they travel with the dotfiles and get
   symlinked into place by `bin/link-claude`.
@@ -67,6 +95,10 @@ Match on both axes:
 - Brace expansion works: `**/*.{py,rs}` normalizes to a list of globs.
 - Negation works: `**/*` with `!**/*.md` stays out on markdown files.
 - A project-level `.claude/rules/` loads alongside the user-level set.
+- A scoped rule loads only on a Read tool call inside the project root. Write,
+  Bash `cat`, and Grep load nothing, and neither does a Read in another clone or
+  the scratchpad. Aim the glob at the files a session will _read_ before the
+  mechanic matters, not the narrowest pattern that names the tool.
 - Prefer a broad glob with exclusions over an enumerated extension list. An
   include list fails by silently not firing when a new language arrives; an
   exclude list fails by firing where it doesn't belong, which is visible and
@@ -80,18 +112,18 @@ Both load unconditionally and cost the same, so the choice is editorial:
   this user and this tool (don't commit unprompted, don't grind on a blocker,
   prefer `ast-grep`). Coupled to the person and the harness, not portable, never
   cited by name.
-- A rule holds portable doctrine: a named, linkable (`[[slug]]`) unit that other
-  rules cite ("see the verify-empirically rule") and that carries its own
-  rationale and references. That machinery needs a discrete file, not a bullet in
-  a monolith.
+- A rule holds portable doctrine: a unit that carries its own rationale and
+  references, and that other rules can point at by name for more ("see the
+  verify-empirically rule") without depending on it.
 
-The test: could another rule cite it as a principle? Then it's a rule. Is it "how
+The test: is it a principle that holds past this user and this harness? Then
+it's a rule. Is it "how
 to work with me" or a harness quirk? Then it's `CLAUDE.md`. Where both apply, keep
 the personal framing in `CLAUDE.md` and the citable doctrine in the rule: "don't
 cite volatile metrics in replies" against "don't bake volatile metrics into
 durable docs".
 
-### 5. Prune as you go
+### 6. Prune as you go
 
 Keep only what's non-obvious, durable, and actionable. A rule that restates
 what any competent engineer already knows is a tax on every future session
