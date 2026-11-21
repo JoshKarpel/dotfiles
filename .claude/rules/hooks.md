@@ -36,7 +36,10 @@ does. What follows is only what neither source states.
   the git directory, keyed by `prompt_id`, and the stop checks compare against
   that. Comparing `HEAD` as well matters because a turn that ends in a commit
   leaves the tree clean, and comparing against the prompt's start rather than the
-  last nudge is what keeps edits made between prompts from counting. It also holds
+  last nudge is what keeps edits made between prompts from counting. A `!` command's
+  turn fires no `UserPromptSubmit`, so a prompt without a snapshot adopts the
+  worktree's last stop as its start; only with no earlier stop does it count as
+  changed. It also holds
   the once-per-prompt record every asking check shares (`ask`), which is what lets
   the question gate in `claude-stop` skip the model call once no check can still
   ask. The plan in `plans/letting-claude-commit-and-push.md` diagrams the whole
