@@ -451,9 +451,9 @@ moving files under an idle session. That's what Claude would have done with
 `git pull --ff` anyway, so neither `sync-branches` nor the stop checks change
 for it.
 Commits that arrive from `origin` between prompts are never a turn's work: a
-fresh snapshot (decision 7) starts after them, and a carried-forward one
-advances its starting `HEAD` past them whenever every commit between the two is
-one `origin` has.
+fresh snapshot (decision 7) starts after them, and a carried-forward or adopted
+one advances its starting `HEAD` past them whenever every commit between the two
+is one `origin` has.
 Nothing already tells Claude they arrived, since `claude-git-status` runs only
 at session start, so `claude-prompt-snapshot` does: it compares `HEAD` with the
 one the previous prompt's last stop recorded, and when they differ it adds the
