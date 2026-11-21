@@ -2,11 +2,12 @@
 # Wait, for a bounded time, on the checks of this branch's pull request, and say what happened.
 #
 # Claude runs this in the background after `git land`, and the harness re-invokes it when it exits.
-# `gh pr checks --watch` alone has no deadline, and it reads a PR that GitHub can't run checks for as
-# one still waiting: a PR with merge conflicts gets no `pull_request` runs, since GitHub can't build
-# the merge commit they check out, so the watch sits on whatever push-triggered checks there are, or
-# on an external status (pre-commit.ci) that never reports. This exits on the first state that will
-# not change by waiting longer, and otherwise at the deadline, with one verdict line and what to do.
+# `gh pr checks --watch` alone has no deadline, and says the same "no checks reported" for a push
+# GitHub hasn't registered yet as for a PR with merge conflicts, which gets no `pull_request` runs at
+# all, since GitHub can't build the merge commit they check out. Read as the first, the second turns
+# into restarting the watch, or a `sleep` loop, that waits on runs that will never exist. This exits
+# on the first state that will not change by waiting longer, and otherwise at the deadline, with a
+# verdict and what to do next.
 #
 # The deadline exists so a long run costs several short waits rather than one that outlives the prompt
 # cache (an hour): each wake is a chance to look at the runs still going for anything anomalous before
@@ -74,13 +75,14 @@ EOF
   pr() { printf '{"number":7,"url":"https://example.com/pull/7","state":"%s","mergeable":"%s","headRefOid":"%s"}' "$1" "$2" "$3"; }
   check() { printf '{"name":"%s","bucket":"%s","state":"%s","startedAt":"0001-01-01T00:00:00Z","link":"https://example.com/%s"}' "$1" "$2" "$3" "$1"; }
 
-  # t <want-exit> <output-substring> [VAR=value ...]: one poll with no time left, so every
-  # non-final state reports as the deadline.
+  # t <want-exit> <output-substring> [VAR=value ...]: by default one poll with no time left, so
+  # every non-final state reports as the deadline; FLAGS overrides that for a case needing two polls.
   t() {
     local want="$1" needle="$2" got out
     shift 2
+    # shellcheck disable=SC2086
     out=$(cd "$repo" && env -u GH_PR_JSON -u GH_CHECKS_JSON "$@" PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= \
-      "$SELF" --timeout 0 --grace 0 2>&1) && got=0 || got=$?
+      "$SELF" ${FLAGS:---timeout 0 --grace 0} 2>&1) && got=0 || got=$?
     [[ "$got" == "$want" && "$out" == *"$needle"* ]] ||
     { printf 'FAIL want=%s %q :: got=%s %s\n' "$want" "$needle" "$got" "$out"; fails=1; }
   }
@@ -91,8 +93,13 @@ EOF
   t 1 "https://example.com/ci" GH_PR_JSON="$open" GH_CHECKS_JSON="[$(check ci cancel CANCELLED)]"
   t 4 "lint (IN_PROGRESS)" GH_PR_JSON="$open" GH_CHECKS_JSON="[$(check ci pass SUCCESS),$(check lint pending IN_PROGRESS)]"
   t 5 "No checks registered" GH_PR_JSON="$open"
-  t 3 "merge conflicts" GH_PR_JSON="$(pr OPEN CONFLICTING "$head")" GH_CHECKS_JSON="[$(check ci pending IN_PROGRESS)]"
-  t 3 "resolve-conflicts" GH_PR_JSON="$(pr OPEN CONFLICTING "$head")"
+  # A conflicting PR gets no pull_request checks at all, and GitHub can still report CONFLICTING
+  # just after the push that resolved it, so it takes two polls in a row to count.
+  FLAGS="--timeout 1 --interval 1 --grace 0" \
+    t 3 "merge conflicts" GH_PR_JSON="$(pr OPEN CONFLICTING "$head")" GH_CHECKS_JSON="[$(check ci pending IN_PROGRESS)]"
+  FLAGS="--timeout 1 --interval 1 --grace 0" t 3 "resolve-conflicts" GH_PR_JSON="$(pr OPEN CONFLICTING "$head")"
+  t 4 "reports merge conflicts" GH_PR_JSON="$(pr OPEN CONFLICTING "$head")" GH_CHECKS_JSON="[$(check ci pending IN_PROGRESS)]"
+  t 4 "hasn't reached" GH_PR_JSON="$(pr OPEN CONFLICTING 0000000)"
   # GitHub computes mergeability lazily, so UNKNOWN is a state to wait through, not a verdict.
   t 0 "passed" GH_PR_JSON="$(pr OPEN UNKNOWN "$head")" GH_CHECKS_JSON="[$(check ci pass SUCCESS)]"
   # Checks on a head GitHub hasn't moved to `HEAD` yet belong to the previous push.
@@ -124,7 +131,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-head=$(git rev-parse HEAD)
 unlanded=$(git rev-list --count HEAD --not --remotes=origin)
 if [[ "$unlanded" -gt 0 ]]; then
   commits="$unlanded commits"
@@ -181,15 +187,21 @@ while true; do
     exit 6
   fi
 
-  if [[ "$(jq -r .mergeable <<<"$pr")" == CONFLICTING ]]; then
-    echo "PR #$number has merge conflicts with its base, so GitHub won't run its pull_request checks until they are resolved, however long this waits. Use the resolve-conflicts skill to merge the base branch in, then \`git land\` and wait again."
-    exit 3
-  fi
-
-  pending=""
+  # Mergeability is only read once the PR's head is this commit, and only believed when it repeats:
+  # GitHub can report the conflict a moment after the push that resolved it.
+  head=$(git rev-parse HEAD)
   if [[ "$(jq -r .headRefOid <<<"$pr")" != "$head" ]]; then
+    conflicts=0
     pending="PR #$number's head hasn't reached HEAD ($head) yet, so GitHub hasn't registered the push."
+  elif [[ "$(jq -r .mergeable <<<"$pr")" == CONFLICTING ]]; then
+    conflicts=$((${conflicts:-0} + 1))
+    if ((conflicts >= 2)); then
+      echo "PR #$number has merge conflicts with its base, so GitHub won't run its pull_request checks until they are resolved, however long this waits. Use the resolve-conflicts skill to merge the base branch in, then \`git land\` and wait again."
+      exit 3
+    fi
+    pending="PR #$number reports merge conflicts; looking once more, since GitHub can lag the push that resolved them."
   else
+    conflicts=0
     checks=$(read_checks)
     total=$(jq length <<<"$checks")
     failed=$(describe "$checks" fail,cancel)
