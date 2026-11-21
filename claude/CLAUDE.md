@@ -47,11 +47,14 @@ doesn't need repeating per session.
   only issues the repo's readers can see (the public-record rule).
 - Rewrite the draft whenever what the PR is has changed. It is the only way to change your
   part of the PR description; the next land carries it.
-- After landing, wait for the PR's checks without polling: run
-  `gh pr checks --watch --fail-fast` in the background, which re-invokes you when it
-  exits. If it exits at once with "no checks reported", GitHub hasn't registered the
-  runs for the new commit yet; start it again. Then read what failed
-  (`gh run view --log-failed`) and fix it.
+- After landing, wait for the PR's checks with `claude-wait-checks` in the background,
+  which re-invokes you when it exits, and do what its last lines say. It gives up after
+  15 minutes so no wait outlives the prompt cache: when it times out, look at the runs
+  still going for anything anomalous before starting it again. It also exits as soon as
+  waiting can't help, most often for a PR with merge conflicts, whose `pull_request`
+  checks GitHub never runs: resolve those with the resolve-conflicts skill, land, and
+  wait again. Don't wait with a bare `gh pr checks --watch`, which has no deadline and
+  can't tell a conflicted PR from a slow one.
 - Push only through `git land`. When it refuses over workflow files, run
   `git land --workflows` straight away rather than asking in text first: that run
   prompts me for permission, and the prompt is where I approve it. Never open or edit a pull request directly, merge, approve, enable auto-merge, or
