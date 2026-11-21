@@ -387,6 +387,9 @@ Josh reviews each reworded rule; a `harvest-sessions` pass after a few weeks of
 use, and ad-hoc changes, catch what review doesn't.
 One commit per move or per rule compressed, so each diff can be reviewed alone
 and a regression traces to its commit.
+The doctrine and the tools that build guidance change first, right after the
+probes, so the moves and the compression follow the new approach, and so does
+every session after merge that adds a rule, a skill, or a hook.
 Moves change no wording; compression changes no destination.
 
 ### Phase 1: verify the loading mechanics
@@ -402,13 +405,28 @@ Moves change no wording; compression changes no destination.
 - [ ] Count, from recent transcripts, how often sessions that edit tests read a
   test file with the Read tool first.
 
-### Phase 2: rewrite the doctrine this replaces
+### Phase 2: teach the doctrine and the guidance tools the new approach
 
 - [ ] Rewrite `harness-context.md` around the worldview, mechanics, and
   procedure split: the always-on set teaches a way of thinking and is judged as
-  a whole, conditional mechanisms carry mechanics and procedure, scoped rules
-  load on reads only, and each mechanism's cost is counted in tokens times the
-  sessions that load it, with caching measured rather than assumed.
+  a whole, each rule stands alone, a file boundary is cheap, conditional
+  mechanisms carry mechanics and procedure, scoped rules load on reads only,
+  and each mechanism's cost is counted in tokens times the sessions that load
+  it, with caching measured rather than assumed.
+- [ ] `rule-curator`: place new material by the worldview test, slice mechanics
+  per tool with the glob of the files open when they matter, write each rule to
+  stand alone, keep a correction's claim when editing, and read
+  `harness-context.md` by path before deciding.
+- [ ] `skill-creator`: correct what `paths:` does on a skill (it adds the
+  description to the listing on a matching Read, and the body still waits for
+  invocation), and say a skill carries procedure for a named task, never
+  worldview, and can read a rule by path.
+- [ ] `hook-creator`: read `harness-context.md` by path when deciding whether a
+  hook is the mechanism.
+- [ ] `harvest-sessions`: route a missing worldview idea to always-on, a missed
+  mechanic to its scope, and an idea compression dropped back into its rule.
+- [ ] `review-claude-config`: look for mechanics loading always-on, worldview
+  scoped away, and rules that lean on another rule to make sense.
 - [ ] Update the repo `CLAUDE.md`'s "Claude Code Rules" section to match.
 
 ### Phase 3: split without rewording
