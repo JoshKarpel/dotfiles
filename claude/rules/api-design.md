@@ -22,7 +22,7 @@ the records consumers write back.
   ordering) becomes a promise you must keep after swapping it out. Start from
   deny-all and grant what you mean to support.
 - **Remove features that invite misuse.** Before supporting a variant, ask
-  whether anyone uses it. An API that's harder to misuse is worth a little
+  whether anyone uses it: an API that's harder to misuse is worth a little
   convenience.
 - **Reuse established vocabulary.** Where major vendors or standards already
   name a parameter or endpoint, use their name.
@@ -32,8 +32,8 @@ the records consumers write back.
 ## Shape the Data to the Domain
 
 - **Add a sibling type instead of specializing a general one.** When one use
-  needs fields a generic type lacks, add a new type that produces the generic
-  one rather than growing the generic one into a special case.
+  needs fields a generic type lacks, add a type that produces the generic one
+  rather than growing the generic one into a special case.
 - **A required field must apply to every entity.** Attributes only some
   entities have go in a general metadata mechanism, not a column apiece. If
   you aren't ready to commit to a universal concept, name the field narrowly
