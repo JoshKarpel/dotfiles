@@ -79,6 +79,13 @@ malicious publishes. Use a relative duration (a sliding "last N days" window):
 version bumps. Configure it with each ecosystem's own knob. How you take a fresh
 release anyway depends on what the knob filters.
 
+Before scripting a cooldown yourself (a wrapper that filters versions by publish
+date, a CI job that rejects fresh releases), look for the tool's own mechanism:
+its `--help` on the installed version, its docs, and its issue tracker.
+Cooldown support is arriving across package managers release by release,
+sometimes behind an unstable flag first, and a hand-rolled filter is a second
+resolver to maintain that goes stale the day the built-in one ships.
+
 ## References
 
 - [Should You Use Upper Bound Version Constraints?](https://iscinumpy.dev/post/bound-version-constraints/)

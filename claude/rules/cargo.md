@@ -58,6 +58,16 @@ cargo add <crate>@<version>
 `cargo update -p <package> --offline` refreshes just that entry without touching
 dependencies or reaching the network.
 
+## Cooldown
+
+Stable cargo (1.100) has no cooldown. Nightly has `cargo generate-lockfile
+-Zunstable-options --publish-time <yyyy-mm-ddThh:mm:ssZ>`, which resolves as of
+an absolute timestamp, not a relative window, and only regenerates the whole
+lockfile: `cargo update` and `cargo add` don't take it. Follow
+[rust-lang/cargo#5221](https://github.com/rust-lang/cargo/issues/5221) for a
+stable form, and check `cargo help generate-lockfile` on the toolchain in use
+before reaching for anything hand-rolled.
+
 ## Formatting
 
 Standard `rustfmt.toml`:
