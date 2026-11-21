@@ -96,9 +96,9 @@ doesn't need repeating per session.
 ## How to Work
 
 - Auto-memory is off, so nothing persists automatically between sessions. When something
-  is worth keeping past this one, put it in a committed artifact (the harness-context
-  rule says which mechanism), and ask where it belongs when that isn't obvious, rather
-  than dropping it in the nearest file.
+  is worth keeping past this one, put it in a committed artifact (read
+  `~/.claude/rules/harness-context.md` for which mechanism), and ask where it belongs when
+  that isn't obvious, rather than dropping it in the nearest file.
 - Context that belongs in every session but is only true at a point in time wants a
   `SessionStart` hook that computes it, not a hand-maintained list that drifts. Repo
   state, available recipes, the current toolchain version: derive it at startup so it

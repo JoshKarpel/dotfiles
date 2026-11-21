@@ -1,3 +1,11 @@
+---
+paths:
+  - "**/CLAUDE.md"
+  - "**/AGENTS.md"
+  - "**/.claude/**"
+  - "claude/**"
+---
+
 # Harness Context Loading
 
 Which mechanism carries a piece of guidance, and when each one loads: a hook,
