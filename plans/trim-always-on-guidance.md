@@ -127,8 +127,19 @@ These are what the plan builds on.
   header of about 130 characters (`Contents of <path> (user's private global
   instructions for all projects):`), in directory order rather than by name. A
   scoped rule arrives later, under the same header, as its own `nested_memory`
-  attachment. No documented limit on the number of rule files turned up, and 32
-  load without complaint; I haven't tested a larger count.
+  attachment. No documented limit on the number of rule files turned up, and a
+  probe with 300 extra one-line rules in a project's `.claude/rules/` delivered
+  all 332 files in one `instructions` attachment, with no warning.
+- A scoped rule loads only on a Read inside the project root. In a probe with
+  hooks disabled, reading `tests/test_probe.py` in the project loaded a global
+  rule scoped to test files (and `python.md`); reading a test file in the
+  scratchpad loaded neither, with or without that directory passed through
+  `--add-dir`. So a Read in another clone, or in a `git worktree add --detach`
+  copy in the scratchpad, loads no scoped rule.
+- Across this machine's transcripts, about two-thirds of the sessions that
+  changed a test file had read one with Read first, so a rule scoped to test
+  files would have loaded before the change. About a fifth started by writing
+  a new test file without reading any, which loads nothing until a later Read.
 - A skill's description sits in the skill listing in every session, and its
   body loads only when invoked. The listing has its own budget and truncates
   descriptions past it. The skills in `claude/skills/` already carry 14.3k
@@ -394,15 +405,14 @@ Moves change no wording; compression changes no destination.
 
 ### Phase 1: verify the loading mechanics
 
-- [ ] Confirm a global rule scoped to the test-file globs loads on the first Read
+- [x] Confirm a global rule scoped to the test-file globs loads on the first Read
   of a matching file, using the session transcript (its `nested_memory`
   attachments) as the record, with hooks disabled.
-- [ ] Find whether it loads on a Read outside the project root (the scratchpad,
-  another clone).
-- [ ] Load a few hundred small path-less rules in a scratch config, and confirm
-  they all arrive in the `instructions` attachment, so slicing has no ceiling
-  nearby.
-- [ ] Count, from recent transcripts, how often sessions that edit tests read a
+- [x] Find whether it loads on a Read outside the project root (the scratchpad,
+  another clone). It doesn't, even with `--add-dir`.
+- [x] Load a few hundred small path-less rules, and confirm they all arrive in
+  the `instructions` attachment, so slicing has no ceiling nearby.
+- [x] Count, from recent transcripts, how often sessions that edit tests read a
   test file with the Read tool first.
 
 ### Phase 2: teach the doctrine and the guidance tools the new approach
