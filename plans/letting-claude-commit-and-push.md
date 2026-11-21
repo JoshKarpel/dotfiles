@@ -973,7 +973,10 @@ a declining line under it.
   `claude-stop` fails closed as far as it can without trapping the session:
   the first stop blocks to have Claude tell Josh the checks are broken, and
   the stop that follows (`stop_hook_active`) passes with a warning.
-- A prompt with no snapshot (a session older than the hook, or a failed write)
+- A prompt with no snapshot (a `!` command's turn, which fires no
+  `UserPromptSubmit`) adopts the worktree's last stop as its start: where the
+  previous prompt left the repo, or where it started if it was gated. With no
+  earlier stop to adopt (a session older than the hook, a failed write), it
   counts as changed, so the cost of a gap is an extra pass rather than a
   missing report.
 - `claude-stop-commit` and `claude-stop-land` don't use it: they ask about
