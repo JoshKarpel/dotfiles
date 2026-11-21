@@ -20,6 +20,7 @@ pr=$(claude-fetch-pr 2>/dev/null | jq -c 'select(.state == "OPEN")' 2>/dev/null)
 if [[ -n "$pr" ]]; then
   pr_number=$(jq -r '.number' <<<"$pr")
   pr_url=$(jq -r '.url' <<<"$pr")
+  deploy_url=$(jq -r '.deployment.url // empty' <<<"$pr")
   pr_review_state=$(jq -r '
     if .isDraft then "draft"
     elif .reviewDecision == "APPROVED" then "approved"
@@ -81,23 +82,12 @@ colorize() {
 else echo "$text"; fi
 }
 
-# The branch links to its PR while the PR is open. An OSC 8 hyperlink: ESC ] 8 ; ; URL BEL,
-# the text, then an empty one to close.
-if [[ -n "$branch" && -n "${pr_url:-}" ]]; then
-  branch="\033]8;;${pr_url}\a${branch}\033]8;;\a"
-fi
+# An OSC 8 hyperlink: ESC ] 8 ; ; URL BEL, the text, then an empty one to close.
+link() {
+  echo "\033]8;;$1\a$2\033]8;;\a"
+}
 
-status="${date_str}${branch:+ | ${branch}} | ${model}${effort:+ (${effort})} $(colorize "$context_pct" "ctx:${context_pct}%")"
-if [[ -n "${pr_number:-}" ]]; then
-  pr_info="pr:#${pr_number}"
-  if [[ -n "${pr_review_state:-}" ]]; then
-    pr_info+=" (${pr_review_state})"
-  fi
-  status+=" | ${pr_info}"
-fi
-if [[ -n "$vscode_url" ]]; then
-  status+=" | \033]8;;${vscode_url}\avscode\033]8;;\a"
-fi
+status="${date_str} | ${model}${effort:+ (${effort})} $(colorize "$context_pct" "ctx:${context_pct}%")"
 if [[ -n "${five_hour_pct:-}" && -n "${seven_day_pct:-}" ]]; then
   five_hour_val=${five_hour_pct%\%}
   seven_day_val=${seven_day_pct%\%}
@@ -107,5 +97,21 @@ if [[ -n "${five_hour_pct:-}" && -n "${seven_day_pct:-}" ]]; then
 fi
 if [[ -n "${extra_pct:-}" ]]; then
   status+=" | $(colorize "${extra_pct}" "extra:${extra_pct}% \$${extra_used}/\$${extra_limit}")"
+fi
+# The branch and its open PR as one segment, `branch #123 (approved) deploy`: the
+# branch and number link to the PR, and `deploy` to its newest live deployment.
+if [[ -n "$branch" ]]; then
+  if [[ -n "${pr_number:-}" ]]; then
+    branch_info="$(link "$pr_url" "${branch} #${pr_number}") (${pr_review_state})"
+    if [[ -n "${deploy_url:-}" ]]; then
+      branch_info+=" $(link "$deploy_url" deploy)"
+    fi
+  else
+    branch_info="$branch"
+  fi
+  status+=" | ${branch_info}"
+fi
+if [[ -n "$vscode_url" ]]; then
+  status+=" | $(link "$vscode_url" vscode)"
 fi
 echo -e "$status"
