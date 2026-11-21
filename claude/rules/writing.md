@@ -101,17 +101,11 @@ READMEs, PR and issue bodies, review comments, and commit messages.
   and every seam has an enabling point. Using it for any interface, type, or
   module boundary asserts that condition where it doesn't hold, so the reader
   who knows the term is misled and the one who doesn't learns nothing.
-- **Don't tell the reader a step is easy.** `Simply`, `just` (in the sense of
-  "merely"), `easily`, and `obviously` claim the step will be easy for whoever
-  reads it, and ease is relative to the reader: one who finds it hard is told
-  they're failing at something trivial, and learns nothing about why it's
-  small. The writer usually means the step is simple, unentangled with
-  anything else, but simple and easy are distinct claims (see the
-  simple-vs-easy rule), and a reader who doesn't know Hickey's terms can't tell
-  which one is meant. State the objective property instead: "one command", "no
-  other file changes", "nothing outside this module calls it". Often the word
-  can go with nothing in its place: "just run `make`" says no more than "run
-  `make`".
+- **Don't tell the reader a step is easy.** `Simply`, `just` (as "merely"),
+  `easily`, and `obviously` claim ease, which depends on the reader. The writer
+  usually means simple (see the simple-vs-easy rule), a distinction most
+  readers won't catch. State the objective fact instead ("one command", "no
+  other file changes"), or drop the word: "just run `make`" means "run `make`".
 
 ## Scope and register
 
