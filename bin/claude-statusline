@@ -10,22 +10,21 @@ effort=$(echo "$data" | jq -r '.effort.level // empty')
 
 cwd=$(echo "$data" | jq -r '.workspace.current_dir // .cwd // "."')
 
-date_str=$(date +%Y-%m-%d\ %H:%M)
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
 
 # The branch's open PR, from claude-fetch-pr rather than the payload's `pr`, which
-# Claude Code's own lookup leaves empty behind exe.dev's gh proxy. Review states
-# follow the names the payload uses.
+# Claude Code's own lookup leaves empty behind exe.dev's gh proxy. The review
+# state is a glyph: draft, awaiting review, approved, changes requested.
 pr=$(claude-fetch-pr 2>/dev/null | jq -c 'select(.state == "OPEN")' 2>/dev/null)
 if [[ -n "$pr" ]]; then
   pr_number=$(jq -r '.number' <<<"$pr")
   pr_url=$(jq -r '.url' <<<"$pr")
   deploy_url=$(jq -r '.deployment.url // empty' <<<"$pr")
   pr_review_state=$(jq -r '
-    if .isDraft then "draft"
-    elif .reviewDecision == "APPROVED" then "approved"
-    elif .reviewDecision == "CHANGES_REQUESTED" then "changes_requested"
-    else "pending" end' <<<"$pr")
+    if .isDraft then "◌"
+    elif .reviewDecision == "APPROVED" then "✓"
+    elif .reviewDecision == "CHANGES_REQUESTED" then "✗"
+    else "●" end' <<<"$pr")
 fi
 
 # The link that opens the session's directory in VS Code in the browser, on an
@@ -74,12 +73,27 @@ if [[ -n "$usage" ]]; then
   fi
 fi
 
-# Colorize a value: red >80%, yellow >60%
+# A rate limit shows only once it passes HIGH_PCT, which is also where it turns
+# yellow, so it appears exactly when it would have changed color.
+HIGH_PCT=60
+
+# Between segments, the middle dot Claude Code's own TUI separates fields with.
+SEP=" · "
+
+# Colorize a value: red >80%, yellow >HIGH_PCT
 colorize() {
   local val=$1 text=$2
   if (( val > 80 )); then echo "\033[31m${text}\033[0m"
-  elif (( val > 60 )); then echo "\033[33m${text}\033[0m"
+  elif (( val > HIGH_PCT )); then echo "\033[33m${text}\033[0m"
 else echo "$text"; fi
+}
+
+# A rate limit window as `5h:83% 1h23m`, or nothing while it is below HIGH_PCT.
+# Takes the label, the percentage without its sign, and the time to reset.
+rate_limit() {
+  local label=$1 pct=$2 remaining=$3
+  [[ -n "$pct" ]] && (( pct > HIGH_PCT )) || return 0
+  colorize "$pct" "${label}:${pct}%${remaining:+ ${remaining}}"
 }
 
 # An OSC 8 hyperlink: ESC ] 8 ; ; URL BEL, the text, then an empty one to close.
@@ -87,31 +101,31 @@ link() {
   echo "\033]8;;$1\a$2\033]8;;\a"
 }
 
-status="${date_str} | ${model}${effort:+ (${effort})} $(colorize "$context_pct" "ctx:${context_pct}%")"
-if [[ -n "${five_hour_pct:-}" && -n "${seven_day_pct:-}" ]]; then
-  five_hour_val=${five_hour_pct%\%}
-  seven_day_val=${seven_day_pct%\%}
-  local_5h="${five_hour_pct}${five_hour_remaining:+ (${five_hour_remaining})}"
-  local_7d="${seven_day_pct}${seven_day_remaining:+ (${seven_day_remaining})}"
-  status+=" | $(colorize "${five_hour_val}" "5h:${local_5h}") $(colorize "${seven_day_val}" "7d:${local_7d}")"
+status="${model}${effort:+ ${effort}} $(colorize "$context_pct" "ctx:${context_pct}%")"
+rate_limits=$(rate_limit 5h "${five_hour_pct%\%}" "${five_hour_remaining:-}")
+seven_day=$(rate_limit 7d "${seven_day_pct%\%}" "${seven_day_remaining:-}")
+rate_limits+="${rate_limits:+${seven_day:+ }}${seven_day}"
+if [[ -n "$rate_limits" ]]; then
+  status+="${SEP}${rate_limits}"
 fi
+# Extra usage is money rather than a quota, so it shows whenever it is enabled.
 if [[ -n "${extra_pct:-}" ]]; then
-  status+=" | $(colorize "${extra_pct}" "extra:${extra_pct}% \$${extra_used}/\$${extra_limit}")"
+  status+="${SEP}$(colorize "${extra_pct}" "extra:\$${extra_used}/\$${extra_limit}")"
 fi
-# The branch and its open PR as one segment, `branch #123 (approved) deploy`: the
+# The branch and its open PR as one segment, `branch #123 ✓ deploy`: the
 # branch and number link to the PR, and `deploy` to its newest live deployment.
 if [[ -n "$branch" ]]; then
   if [[ -n "${pr_number:-}" ]]; then
-    branch_info="$(link "$pr_url" "${branch} #${pr_number}") (${pr_review_state})"
+    branch_info="$(link "$pr_url" "${branch} #${pr_number}") ${pr_review_state}"
     if [[ -n "${deploy_url:-}" ]]; then
       branch_info+=" $(link "$deploy_url" deploy)"
     fi
   else
     branch_info="$branch"
   fi
-  status+=" | ${branch_info}"
+  status+="${SEP}${branch_info}"
 fi
 if [[ -n "$vscode_url" ]]; then
-  status+=" | $(link "$vscode_url" vscode)"
+  status+="${SEP}$(link "$vscode_url" vscode)"
 fi
 echo -e "$status"
