@@ -48,6 +48,14 @@ What sorts a passage is what kind of guidance it is:
 - **Procedure** is a checklist for a task someone names out loud: an incident
   review, publishing a plan's page. It goes in a skill.
 
+Some mechanics are keyed to an action rather than a file: a shell construct
+that triggers a permission prompt, a `sleep` to wait on background work, an
+unset variable in a path. Nobody frames that moment as a task, so a skill won't
+load for it. Where the command text shows the action, a `PreToolUse` hook
+matching it is the scope, and its block message carries the guidance at the
+moment it applies; the always-on text keeps only the reason the message can't
+give. Where no hook can recognize the action, the mechanic stays always-on.
+
 The test for a passage: would it still be true and useful if the tool it names
 didn't exist? Worldview passes, even when it uses a tool as its example. When a
 passage's kind is in doubt, it stays always-on: missing doctrine costs a wrong

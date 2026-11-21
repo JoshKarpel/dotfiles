@@ -102,12 +102,25 @@ Worldview passes it, even when it uses a tool as its example; mechanics fail it.
 A third kind, **procedure**, is a checklist for a task someone names out loud,
 such as an incident review.
 
+Some mechanics are keyed to an action rather than a file: a shell loop that
+makes Claude Code ask for approval, a `sleep` to wait on background work, an
+unset `$TMPDIR` in a path.
+A skill won't load for those, since nobody frames the moment as a task.
+But the command text shows the action, so a `PreToolUse` hook matching it is
+their scope, and its block message teaches at the moment it applies.
+`claude-sleep-poll-check`, `claude-tmpdir-check`, `claude-uv-check`, and
+`claude-avoid-approval-prompts` already work this way, which makes the global
+`CLAUDE.md` bullets for the same cases a second copy of what their messages
+say.
+
 Each goes where its trigger is reliable:
 
 - Worldview stays always-on, whole, and gets compressed.
 - Mechanics move to a rule scoped to the files of the tool they're about.
   Where a scoped rule for that tool already exists, they join it.
 - Procedure moves to a skill.
+- Mechanics keyed to an action move to the message of a hook that recognizes
+  it, and the always-on text keeps only the reason the message can't give.
 
 ## How does each mechanism load?
 
@@ -261,6 +274,12 @@ small code rules (`naming.md`, `functions.md`, `local-conventions.md`), stay
 always-on and get compressed.
 So does the global `CLAUDE.md`: guidance about this machine's own hooks and
 harness has to be in context before the first tool call.
+Its compression shrinks each bullet a hook enforces to what the hook's message
+doesn't say, since the message arrives exactly when the bullet would have
+mattered, at the cost of one blocked call.
+Bullets with no hook behind them (bundling `sudo` into a compound command,
+`pkill` on a harness-tracked task) stay, and are candidates for a hook after
+this plan, each with its own self-tests.
 
 ## How is the compression guarded?
 
@@ -458,6 +477,8 @@ Moves change no wording; compression changes no destination.
   compress under the guard, one commit per rule for Josh to review.
 - [ ] In the same pass, make each rule stand alone: gloss borrowed terms, turn
   analogies into clauses or drop them, and delete topic-owner pointers.
+- [ ] Shrink each global `CLAUDE.md` bullet a hook enforces to what the hook's
+  message doesn't say, after reading the message.
 - [ ] Replay two or three known corrections each for `writing.md`, `testing.md`,
   and `error-handling.md` against the old and new text.
 - [ ] Count the always-on total again, and record what the splits and the
