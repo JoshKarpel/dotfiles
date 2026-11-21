@@ -1,9 +1,12 @@
-# Trim the always-on guidance
+# Compress and split the always-on guidance
 
 Artifact: https://claude.ai/code/artifact/d72bc831-cded-4014-abec-11270c567955
 
-This plan sorts the global guidance in `claude/` by what should make each
-piece load, then moves and trims it to match.
+This plan makes the global guidance in `claude/` smaller without breaking it
+apart.
+It keeps the way of thinking the guidance teaches in every session, moves out
+the mechanics that only matter around a specific tool or file, and compresses
+what stays.
 It covers the global `CLAUDE.md` and the path-less rules in `claude/rules/`.
 Splitting a single repo's `CLAUDE.md` is out of scope: dotfiles' own split is
 earlier on this branch, and claude-scriptorium's needs the same thing in that
@@ -16,16 +19,16 @@ the session is for:
 
 | Source | Chars |
 |---|---|
-| `claude/CLAUDE.md` | 13.2k |
-| Path-less rules in `claude/rules/` | 107.0k |
-| **Always-on global total** | **120.2k** |
+| `claude/CLAUDE.md` | 13.8k |
+| Path-less rules in `claude/rules/` | 107.3k |
+| **Always-on global total** | **121.2k** |
 
 Claude Code warns once a session's always-on instructions pass 150k
-characters, so a project gets about 30k characters before it trips the warning:
-exe-dev-atlas and counterweight, at about 23k each, are within 7k of it.
+characters, so a project gets about 29k characters before it trips the warning:
+exe-dev-atlas and counterweight, at about 23k each, are within 6k of it.
 
-The headroom is the visible symptom; the cost is the real one.
-The global layer's 120k characters are roughly 30k tokens, by a crude
+The warning is the visible symptom, and the cost is the real one.
+The global layer's 121k characters are roughly 30k tokens, by a crude
 4-characters-per-token estimate, loaded at every session start and again by
 every subagent that loads it.
 
@@ -45,33 +48,66 @@ The cache read is the same in every session, so it's a fixed prefix shared
 across all of them, and it ends before the instructions: the system prompt
 carries per-session values (the scratchpad path, git status, the date) ahead
 of the `CLAUDE.md` and rules text.
-The roughly 30k tokens of global guidance land in each session's own cache
-write.
-So always-on text pays a cache write in every session, and a rule or skill
-loaded mid-session pays the same write later, only in the sessions that load
-it; within a session both are cache reads from then on.
-Caching shrinks the per-turn cost of either one but doesn't favor always-on.
-
-The sessions vary more than the guidance assumes.
-A coding session needs the testing, comments, and dependency rules.
-A docs review over an MCP connector reads no local file and writes no code,
-but needs the design and prose doctrine, and loads the coding rules anyway.
+So the roughly 30k tokens of global guidance are a cache write in every
+session, and only later turns within a session read them cheaply.
 
 ## What are the goals, in order?
 
-1. Doctrine is in context wherever it would change the answer.
-2. Sessions don't pay for doctrine unlikely to apply to them.
-3. The always-on set stays the same in every session, so the contract is
+1. **The whole way of thinking is in every session.** The guidance is written
+   in sections, but its purpose is to teach how I think, and I bring all of it
+   to every problem.
+2. **Every idea a correction taught stays.** Much of the text was added after a
+   session got something wrong, which is the best evidence of what sessions
+   rely on.
+3. **The always-on set is the same in every session**, so the contract is
    predictable.
+4. **Sessions don't pay for mechanics that don't apply to them**, and projects
+   get headroom under the warning.
 
-The first outranks the second: a session missing doctrine it needed costs a
-wrong answer, while a session carrying doctrine it didn't need costs tokens.
-The third gives way to the second, which is the change to the current
-harness-context rule this plan makes.
+The first three outrank the fourth: a session missing part of the worldview
+gives a worse answer, and the tokens are the price of not missing it.
 
-When it's unclear whether a rule's trigger is reliable, it stays always-on.
-A rule moves out only when the sessions that need it are clearly the ones that
-will load it.
+The rules already work as a whole, and the cross-references show it.
+`verify-empirically.md` calls itself "parse-don't-validate applied to your own
+knowledge", and `error-handling.md` cites the same rule.
+`durable-docs.md` cites the comments rule, and `public-record.md` cites the
+secrets rule.
+`control-plane.md` and `declarative.md` are written in `simple-vs-easy.md`'s
+vocabulary.
+Sorting rule by rule, by which sessions need each one, would leave a chat
+session reading a rule that points at another it doesn't have.
+
+That coupling is partly a matter of how the rules are written, not of what
+they say, and [making each rule stand alone](#can-each-rule-stand-alone) loosens
+it: the worldview stays whole in every session, and a later split no longer
+breaks it.
+
+## What separates worldview from mechanics?
+
+**Worldview** is a principle or a way of judging: it holds across languages,
+tools, and kinds of work, and it's often needed when nobody has framed the
+situation as the one it covers.
+"Suspect the check on a pass as well as a failure" is worldview.
+
+**Mechanics** are facts about one tool, format, or platform: a flag, a config
+knob, a gotcha.
+They matter only when that tool is in play, which is usually when its file is
+open.
+"npm's `min-release-age` fails an exact pin inside the window with `ETARGET`"
+is mechanics.
+
+The test for a passage: would it still be true and useful if the tool it names
+didn't exist?
+Worldview passes it, even when it uses a tool as its example; mechanics fail it.
+A third kind, **procedure**, is a checklist for a task someone names out loud,
+such as an incident review.
+
+Each goes where its trigger is reliable:
+
+- Worldview stays always-on, whole, and gets compressed.
+- Mechanics move to a rule scoped to the files of the tool they're about.
+  Where a scoped rule for that tool already exists, they join it.
+- Procedure moves to a skill.
 
 ## How does each mechanism load?
 
@@ -88,312 +124,285 @@ These are what the plan builds on.
   never on the earlier Bash reads of the same files.
 - A loaded rule arrives under a `Contents of <path>:` header, so the model sees
   each rule's file name as well as its headings.
-- A session that only talks, or only reads through an MCP connector, loads no
-  scoped rule at all.
 - A skill's description sits in the skill listing in every session, and its
   body loads only when invoked. The listing has its own budget and truncates
   descriptions past it. The skills in `claude/skills/` already carry 14.3k
   characters of frontmatter, so each new skill adds a description that has to
   earn its place too.
-- A skill with `paths:` is not loaded by its glob. Its description joins the
-  listing (a mid-session `skill_listing` delta) when a matching file is read,
-  and its body still waits for the model to invoke it. Observed with a probe
-  skill in a scratch repo: the description arrived after the matching Read, the
-  body never did.
-- A skill can tell the model to read a file by path, including a rule file.
-  So one rule file can load by glob in a coding session and through a skill in
-  a docs review, with no second copy.
+- A skill or an always-on line can tell the model to read a rule file by path,
+  so a scoped rule can also be reached from a task that opens no matching file.
 
-Nothing loads one body both ways, by a glob and by invocation. The rule-plus-
-wrapper-skill pairing above is the nearest thing that exists today.
+A mechanic that misses its scope costs little: it's the kind of fact a `--help`,
+a probe, or the tool's own error recovers.
+That's why mechanics can take the reads-only gap, and worldview can't.
 
-## Where does each rule go?
+## Where does each passage go?
 
-Each rule goes to one of four places, sorted by what triggers the need for it.
+### Mechanics that move to scoped rules
 
-### Always-on: doctrine needed when nobody is thinking about it
+Each moves verbatim, as a whole bullet, sentence, or paragraph, so the move
+changes no wording.
 
-These apply in chat replies, docs reviews, and code alike, and are needed
-precisely when the session hasn't framed the situation as the one they cover.
-They stay always-on and get trimmed.
-
-| Rule | Chars | Why it stays always-on |
+| Passage | From | To |
 |---|---|---|
-| `writing.md` | 7.8k | Every reply is prose |
-| `error-handling.md` | 7.2k | Fallback is chosen without being named |
-| `tradeoffs.md` | 5.2k | Every recommendation is a choice on an axis |
-| `durable-docs.md` | 4.9k | Docs reviews are prose about the present state |
-| `making-changes.md`, less its refactoring half | ~4.7k | Abstraction choices happen in designs and code |
-| `verify-empirically.md` | 4.3k | Any session can state a remembered fact |
-| `api-design.md` | 3.9k | An endpoint gets designed while coding, unframed |
-| `supply-chain.md`, less its ecosystem settings | ~3.0k | A dependency gets added at `cargo add`, before any file is read |
-| `declarative.md` | 2.7k | Applies to designs as much as to code |
-| `public-record.md` | 2.4k | Anything can end up in a commit or issue |
-| `blameless.md` | 2.3k | Any write-up can assign fault |
-| `simple-vs-easy.md` | 1.8k | Cited by the others as the base vocabulary |
-| `control-plane.md` | 1.8k | Applies to designs as much as to code |
-| `values-over-places.md` | 1.7k | Applies to designs as much as to code |
-| `functional-core.md` | 1.2k | Applies to designs as much as to code |
+| The PEP 723 paragraph and its example | `supply-chain.md` | `python.md` (`**/*.py`, `bin/**`) |
+| uv's `exclude-newer` and its per-package bypass | `supply-chain.md` | `pyproject.md` |
+| mise's `minimum_release_age` and the pin that bypasses it | `supply-chain.md` | `mise.md` |
+| npm's `min-release-age`, `ETARGET`, the exemption, and `npm audit fix` | `supply-chain.md` | new `npm.md` (`**/package.json`, `**/.npmrc`) |
+| "Patch where the name is looked up" | `testing.md` | `python.md` |
+| "Isolate a sandbox from the user's own config" | `testing.md` | new `testing-mechanics.md` |
+| "Exclude a platform-only branch per platform" | `testing.md` | new `testing-mechanics.md` |
+| The kubelet's `..data` symlink swap | `configuration.md` | `helm-crossplane.md` |
 
-That's about 54.9k after the two splits.
-They get a narrow trim in a later pull request, with no percentage target; see
-[how the trim is guarded](#how-is-the-trim-guarded).
+`testing-mechanics.md` is scoped to test files: `**/test_*`, `**/*_test.*`,
+`**/*.test.*`, `**/tests/**`, `**/test/**`, and `**/conftest.py`.
+This repo's self-tests live inside `bin/` scripts that match none of those, so
+the repo's `.claude/rules/self-tests.md` points at it by path.
 
-`making-changes.md` splits along the wrong-abstraction line. "Make the Change
-Easy", "Don't Factor Ahead of the Evidence", "Duplication Is Cheaper Than the
-Wrong Abstraction", "Read Clustered Review Findings as One Finding", and "Slice
-Thin, End to End" are about how to shape a change, in a design as much as in
-code, and stay. "Keep Refactors Small" and "Chesterton's Fence" are about
-editing code that exists, and move to a code-tier `refactoring.md` (about
-1.4k).
+`supply-chain.md` keeps its principles: fewer dependencies, pin and lock, one
+installer per tool, floors not caps, how a resolver's model changes what a cap
+costs, and cooldowns as a defense.
+Its cooldown section keeps the duration and why, and loses the per-ecosystem
+knobs.
+`testing.md` keeps everything else, including `git checkout --` discarding a
+whole file, since that's about how Claude undoes a deliberate break in any repo.
 
-`supply-chain.md` keeps its principles (fewer dependencies, pin and lock,
-floors not caps, cooldowns) and moves each ecosystem's settings to the scoped
-rule that already governs that file:
-uv's `exclude-newer` and the PEP 723 example to `pyproject.md`,
-mise's `minimum_release_age` to `mise.md`,
-and npm's `min-release-age` to a new rule scoped to `package.json` and `.npmrc`.
+That's about 4.4k out of the always-on set.
 
-### Scoped to any file: doctrine for writing code
+### Procedure that moves to skills
 
-These matter when code or config is being written, which usually starts by
-reading the code around it.
-They get `paths: ["**/*"]`, so they're free in docs and chat sessions and load
-at the first Read in a coding one.
-A session that reads only through Bash and creates only new files never loads
-them; see the costs.
+- **An `operations` skill**, from `operations.md`'s "Alerts" and "Incident
+  Follow-Up" sections, plus "Don't destroy evidence others are using". Adding an
+  alert and writing an incident review are tasks someone names, which is when a
+  skill's trigger is reliable. "Rollouts and Migrations" is worldview that
+  shapes designs (make the safe intermediate state the steady state, run the
+  new path beside the old), so it stays always-on as `rollouts.md`. About 1.6k
+  out.
+- **A `plan-page` skill**, from the global `CLAUDE.md`'s long bullet on
+  publishing a plan's HTML page (about 1.8k): `plan-artifact`, the `Artifact:`
+  line, and publishing with `force: true`. Writing or revising a plan is a named
+  task, and plan mode names it outright. In a repo, the
+  `claude-stop-plan-artifact` check catches a missed publish. Plan mode's file
+  has no such check, so a miss there goes unnoticed until I look for the page;
+  `CLAUDE.md` keeps one line saying every plan has a published page, which is
+  what a session needs to recognize the task.
 
-| Rule | Chars |
-|---|---|
-| `testing.md` | 9.6k |
-| `comments.md` | 5.2k |
-| `configuration.md` | 2.6k |
-| `locality-of-behavior.md` | 2.4k |
-| `parse-dont-validate.md` | 1.8k |
-| `refactoring.md` (new, from `making-changes.md`) | ~1.4k |
-| `dependency-injection.md` | 1.1k |
-| `naming.md` | 0.6k |
-| `local-conventions.md` | 0.3k |
-| `functions.md` | 0.2k |
+`designs.md` and `platforms.md` stay always-on.
+Their questions (what does this proposal fix, what happens on partial failure,
+who gets paged first) are how I judge any proposal, including one talked
+through in chat, so a skill would be loading the worldview by the model's
+judgment.
 
-That's about 25.2k, loaded only in sessions that read files.
+### Guidance about the harness, by path
 
-### Design doctrine: by path for plans, by skill for everything else
+`harness-context.md` (4.1k) governs where guidance goes, which only comes up
+while editing Claude Code config or deciding to keep a lesson.
+It gets `paths:` for `**/CLAUDE.md`, `**/AGENTS.md`, `**/.claude/**`, and
+`claude/**`.
+The global `CLAUDE.md`'s bullet on keeping lessons past a session names the
+rule's path, so a session deciding where a lesson goes reads it first, and
+`rule-curator`, `skill-creator`, and `hook-creator` read it by path too.
 
-`designs.md` and `platforms.md` (12.4k) apply when writing or reviewing a
-design. Two triggers cover that:
+### Everything else stays always-on
 
-- **A path scope on the plan and design files themselves**: `**/plans/**`,
-  `**/*plan*.md`, `**/*design*.md`, `**/rfcs/**`, and `**/adr*/**`. A session
-  that reads a plan is very likely reviewing or revising one, and this loads the
-  doctrine without asking the model to recognize that. A plan written fresh
-  with Write doesn't trigger it, since scopes fire on reads only.
-- **A `design-review` skill** for the cases with no local file: a design doc
-  reviewed over an MCP connector, a design talked through in chat, a new plan.
-  Its body is a pointer: read `designs.md` and `platforms.md` by path, and
-  `secrets.md` when the design handles credentials.
+All the remaining rules, including `testing.md`, `comments.md`,
+`parse-dont-validate.md`, `locality-of-behavior.md`, `secrets.md`, and the
+small code rules (`naming.md`, `functions.md`, `local-conventions.md`), stay
+always-on and get compressed.
+So does the global `CLAUDE.md`: guidance about this machine's own hooks and
+harness has to be in context before the first tool call.
 
-`operations.md` (3.0k) becomes an `operations` skill: rollouts, migrations,
-alerts, and incident follow-up, all named tasks.
+## How is the compression guarded?
 
-### Scoped to the files they govern
+Moving fails in a way a transcript shows: the rule still loads somewhere, and
+a harvest can find sessions that needed it and didn't load it.
+Compressing fails without a trace: a cut idea is gone from every session, and
+nothing records that it was doing any work.
+So compression keeps ideas and spends words:
 
-| Rule | Chars | Scope |
-|---|---|---|
-| `harness-context.md` | 4.1k | `**/CLAUDE.md`, `**/AGENTS.md`, `**/.claude/**`, `claude/**` |
-| `secrets.md` | 3.7k | Helm and Kubernetes manifests, `Dockerfile`, `.github/workflows/**`, `**/.env*`, `**/*.tf` |
-| `rfc2119.md` | 0.8k | `**/*.md` |
-
-`secrets.md`'s code-side half (wrap secrets in a redacting type) is already in
-`python.md`.
-`rule-curator`, `skill-creator`, and `hook-creator` read `harness-context.md` by
-path, since they're the tasks that decide where guidance goes.
-
-### The global `CLAUDE.md`
-
-Everything stays. Guidance about working with this machine's own hooks and
-harness has to be in context before the first tool call, and much of "How to
-Work" is that: the scratchpad path (`claude-tmpdir-check`), `uv run`
-(`claude-uv-check`), `sleep` (`claude-sleep-poll-check`), loops and `$(...)`
-(`claude-avoid-approval-prompts`), `sudo`, and the plan page
-(`claude-stop-plan-artifact`).
-It gets the same guarded trim as the always-on rules, in the same later pull
-request.
-
-## How is the trim guarded?
-
-Moving and trimming fail differently.
-A moved rule still exists and still loads somewhere; the failure is a session
-that needed it and didn't load it, and the transcript records which rules
-loaded, so a harvest can find those sessions.
-A trimmed sentence is gone from every session, and nothing records that it was
-doing any work.
-That's where reliance I don't know about would be lost, so the trim is the
-step that needs the guard.
-
-It's also the smaller saving.
-Moves alone take a chat session from 120k to about 68k; the trim takes about
-18k more (roughly 4.5k tokens) off every session.
-
-The evidence of reliance is in the history.
-Much of the always-on text was added by `harvest-sessions` passes, each from a
-correction Claude needed in a real session, so `git log -L` on a passage shows
-whether it was added after an observed failure or written up front.
-The guard follows from that:
-
-- **Protect what a correction added.** A passage added by a harvest, or by a
-  commit fixing an observed mistake, stays unless it duplicates another rule.
-  It may be reworded, keeping its claim.
-- **Cut only from text written up front**, and only where it's plainly
-  redundant: restated elsewhere, a second example making the same point, or
-  framing that carries no claim.
-- **No percentage target.** A target pushes the cut into exactly the text this
-  guard protects.
+- **Protect what a correction added.** `git log -L` on a passage shows whether
+  a `harvest-sessions` pass or a commit fixing an observed mistake added it, or
+  whether it was written up front. A corrected passage keeps its claim and may
+  be reworded tighter; it goes only when another rule says the same thing.
+- **One statement per idea.** Within a rule, cut restatements, a second example
+  making the same point, and framing that carries no claim. Keep the example a
+  correction added, when there is one.
+- **One home per idea across rules.** Where two rules say the same thing, the
+  one that owns it keeps it, and the other keeps a clause of its own (see
+  [the standalone test](#can-each-rule-stand-alone)) rather than the full
+  statement. The known cases:
+  `durable-docs.md`'s "Volatile Metrics" against the global `CLAUDE.md`,
+  `verify-empirically.md`'s "run the control" against `testing.md`'s "suspect
+  the check on a pass", `error-handling.md`'s "get the data off the request
+  path" against `control-plane.md`'s "distribute results, not work", and the
+  wrong-abstraction signal restated in `tradeoffs.md` and `platforms.md`.
+- **Merge rules only where compression finds real overlap**, not by theme.
+- **No percentage target.** A target pushes cuts into the passages this guard
+  protects. My unreviewed guess is 10 to 20% of the always-on text; Phase 5
+  measures what it was.
 - **Replay known corrections for the largest rules.** For `writing.md`,
-  `error-handling.md`, and `testing.md`, take two or three past prompts where
+  `testing.md`, and `error-handling.md`, take two or three past prompts where
   the rule clearly changed the answer and run each through `claude -p` against
-  the old and new text. It's noisy and costs a few runs, which is why it's
-  limited to the rules where a lost sentence would cost the most.
+  the old and new text. It's noisy and costs a few runs, so it's limited to the
+  rules where a lost idea would cost the most.
+
+## Can each rule stand alone?
+
+The always-on rules and the code rules carry about two dozen references to each
+other, of four kinds, and each kind has its own fix:
+
+| Kind | Example | Fix |
+|---|---|---|
+| A borrowed term | `control-plane.md` and `declarative.md` say "complecting", defined in `simple-vs-easy.md`; `tradeoffs.md` and `platforms.md` lean on making-changes' wrong-abstraction signal | Gloss the term in a clause where it's used ("complecting, braiding independent concerns together") |
+| An analogy | `verify-empirically.md`: "parse-don't-validate applied to your own knowledge"; `configuration.md` says the same of config | Keep the idea as a clause of its own, or drop the analogy |
+| A pointer for the action | `values-over-places.md`: "confirm empirically that nothing mutates it (see the verify-empirically rule)" | Keep, when the citing sentence already says what to do |
+| A topic owner | `public-record.md`: "Secrets are the secrets rule's concern"; `configuration.md` deferring to "the secrets style guide" | Delete: it's maintenance guidance for whoever edits the corpus, which the repo `CLAUDE.md` already keeps out of rules |
+
+The test for a rule: read alone, every sentence makes sense and can be acted on
+without opening another rule.
+A pointer can remain as somewhere to read more, as long as nothing in the
+citing rule depends on it.
+
+The fixes cost a clause here and there, which is a little duplication: a term
+glossed in three rules is defined three times.
+It buys two things.
+A rule that stands alone can later be scoped, or moved to a skill, on the
+evidence for that rule alone, without breaking the others.
+And a rule read in isolation, as the scoped mechanics will be, still makes
+sense.
+
+The fixes go into each rule's compression pass, since both reword the same
+text, and get the same guard.
 
 ## What does a session load afterwards?
 
-These are estimates from character counts, before any trim.
+These are estimates from character counts.
 The skill listing loads in every session in every column, and isn't counted.
 
-| Session | Today (chars) | After the moves (chars) |
-|---|---|---|
-| Chat or docs review | 120k | ~68k always-on |
-| Design review | 120k | ~68k, plus ~12k design doctrine |
-| Coding | 120k | ~68k, plus ~25k on the first Read |
+| Session | Today | After the splits | After compression |
+|---|---|---|---|
+| Chat or docs review | 121k | ~111k | lower, by what the guard leaves |
+| Coding | 121k | ~111k, plus the mechanics its files scope in | the same, compressed |
 
-The 68k is the always-on rules after the two splits (~55k) and the global
-`CLAUDE.md` (~13k).
-The guarded trim lowers it, by an amount the guard decides rather than a
-target.
+The splits take about 10k out: 4.4k of mechanics, 1.6k and 1.8k into skills,
+and 4.1k of harness guidance.
+Headroom under the warning goes from about 29k to about 39k before compression.
 
 ## What does this cost?
 
-- A conversation about how to structure code, with no file opened, lacks the
-  coding doctrine until something is read. The design-review skill covers
-  the case that's framed as a design; the unframed one goes uncovered.
-- A coding session that reads only through Bash gets the scoped rules at its
-  first Edit, which needs a Read first. One that only creates new files with
-  Write never gets them at all. Auto mode steers reads toward Bash, so this is
-  not a corner case; Phase 1 measures how often coding sessions here use Read.
-- A skill loads only when its description matches, which is the model's call.
-  The design-review and operations triggers are named tasks, which is the
-  case where that call is reliable; a design question asked in passing may
-  not trigger it.
-- The always-on set is no longer the whole contract. A session's guidance now
-  depends on what it read, so a behavior seen in one session can be absent
-  from another for that reason alone.
-- More files and more indirection: a rule read by both a glob and a skill has
-  two ways in, and renaming it means updating the skill too.
-- A trimmed sentence I relied on without knowing it is lost without a trace.
-  The guard protects what a correction added, but text written up front can
-  still have been doing work no harvest saw.
-- Landing in stages takes weeks rather than one review, and the savings arrive
+- **Most of the token cost stays.** About 28k tokens of always-on text remain a
+  cache write in every session until compression lands, and compression's size
+  is unknown until it's done. Sorting rule by rule would save more, about 52k
+  characters in a chat session, which is the price of keeping the worldview
+  whole.
+- **Splitting is per passage, not per file.** Each move is a judgment about one
+  bullet or paragraph, so there are more of them to review, and a reader of
+  `testing.md` no longer sees testing's tool gotchas in the same file.
+- **A mechanic can miss its scope.** A session that reads only through Bash, or
+  creates files with Write, never loads a scoped rule. Auto mode steers reads
+  toward Bash, so this happens; it costs a rediscovered flag, not a worse
+  judgment.
+- **The new skills load by the model's judgment.** A `plan-page` miss in plan
+  mode leaves a plan without its page until I notice.
+- **Compression can still drop an idea written up front** that was doing work
+  no harvest saw.
+- **Staged landing takes weeks rather than one review**, and the savings arrive
   in steps.
 
 ## What did I consider and reject?
 
+- **Sorting rule by rule, by which sessions need each one**: the code-tier rules
+  scoped to `**/*`, the design rules scoped to plan files with a
+  `design-review` skill for the rest. It saves the most in chat and docs
+  sessions, but it splits the worldview by what a session happened to read, and
+  the always-on rules would cite rules that aren't loaded. Once the rules stand
+  alone, it comes back as a per-rule question in Phase 6, decided on harvest
+  evidence rather than up front.
+- **A `design-review` skill** carrying `designs.md` and `platforms.md`. Those
+  are how I judge any proposal, so they shouldn't wait on the model deciding a
+  conversation is a design review. A skill carrying only a review procedure on
+  top of the always-on doctrine stays an option if harvests show one missing.
+- **Compressing to a percentage target**, which forces cuts into corrected
+  passages.
+- **Everything in one pull request.** A regression couldn't then be traced to
+  any one change.
 - **Merging the Hickey cluster** (simple-vs-easy, values-over-places,
-  functional-core, declarative, locality-of-behavior) into one file up front.
-  The cross-references would survive it, since they resolve by rule name and
-  heading and the model sees both, but the saving is about 1.5k of headings
-  and references. Phase 4 merges wherever trimming turns up real overlap,
-  rather than merging by theme in advance.
+  functional-core, declarative, locality-of-behavior) up front. It saves about
+  1.5k of headings and references, and the cross-references already resolve by
+  rule name. Compression merges where it finds real overlap.
 - **Naming skills in `CLAUDE.md`.** The skill listing already loads every
-  description in every session; a pointer in `CLAUDE.md` is a second copy of
-  it that drifts.
-- **Moving the shell and repo mechanics out of the global `CLAUDE.md`** into a
-  scoped rule. Several govern Bash calls a session makes before reading any
-  file, and several are how to work with this machine's own hooks.
-- **A `UserPromptSubmit` hook that injects a skill** when a prompt carries a docs
-  link. It would make the design-review trigger structural rather than the
-  model's call, at the price of a hook that guesses intent from URLs. Worth
-  revisiting if the skill misses in practice.
-- **A hook that loads scoped rules on every file operation**, Write and Bash
-  included, closing the reads-only gap. It would match tool input against each
-  rule's `paths:` and inject the body once per session. It reimplements Claude
-  Code's own loader beside it, and a Bash command's file arguments are a parse
-  of shell text, so it's held until Phase 1 shows the gap matters.
-- **One mechanism that loads a body both by a glob and by invocation.** That's
-  the right shape, and it doesn't exist; it would be a Claude Code feature
-  (for instance a skill option that injects the body when `paths:` matches,
-  instead of only listing the skill). The wrapper skill that reads a rule file
-  by path is the nearest approximation, and it's what this plan uses.
-- **Scoping only, without trimming.** Scoping saves only in sessions that don't
-  read the scope; trimming saves in all of them, so the always-on tier gets
-  both, with the trim guarded and landed after the moves have been used.
-- **A trim to a percentage target** (25 to 30% of the always-on tier). It
-  saves more, but it forces cuts into the passages corrections added, which are
-  the best evidence of what sessions rely on.
-- **Everything in one pull request.** About twenty changes landing at once
-  would leave a regression that couldn't be traced to any one of them.
+  description in every session, so a pointer in `CLAUDE.md` is a second copy
+  that drifts.
+- **Moving the shell and repo mechanics out of the global `CLAUDE.md`.** Several
+  govern Bash calls a session makes before reading any file, and several are
+  how to work with this machine's own hooks.
 
 ## How does this land?
 
 In stages, so a regression can be traced to the change that caused it.
-The verification, the doctrine rewrite, and the moves land on this branch, in
+The verification, the doctrine rewrite, and the splits land on this branch, in
 this pull request.
-The trims land in later pull requests, after the moves have been used for a few
-weeks and a harvest has checked them.
-One commit per move or per rule trimmed, so each diff can be reviewed alone.
-Moves change no wording; trims change no destination.
+Compression lands in later pull requests, a few rules at a time, after the
+splits have been used for a few weeks and a harvest has checked them.
+One commit per move or per rule compressed, so each diff can be reviewed alone.
+Moves change no wording; compression changes no destination.
 
 ### Phase 1: verify the loading mechanics
 
-- [ ] Confirm a global rule with `paths: ["**/*"]` loads on the first Read in a
-  project, using the session transcript (its `nested_memory` attachments) as the
-  record, with hooks disabled.
+- [ ] Confirm a global rule scoped to the test-file globs loads on the first Read
+  of a matching file, using the session transcript (its `nested_memory`
+  attachments) as the record, with hooks disabled.
 - [ ] Find whether it loads on a Read outside the project root (the scratchpad,
-  another clone, plan mode's plan file).
-- [ ] Confirm an MCP-only session loads none.
-- [ ] Count, from recent transcripts, how many coding sessions here read a file
-  with the Read tool before writing code, which is how many would get the code
-  tier at all.
+  another clone).
+- [ ] Count, from recent transcripts, how often sessions that edit tests read a
+  test file with the Read tool first.
 
 ### Phase 2: rewrite the doctrine this replaces
 
-- [ ] Rewrite `harness-context.md` around the ranking above: always-on for
-  doctrine needed when the situation isn't framed, a file scope for doctrine
-  tied to reading a kind of file, a skill for doctrine tied to a named task,
-  always-on whenever the trigger is in doubt, and the cost of each counted in
-  tokens times the sessions that load it, with caching measured rather than
-  assumed.
+- [ ] Rewrite `harness-context.md` around the worldview, mechanics, and
+  procedure split: the always-on set teaches a way of thinking and is judged as
+  a whole, conditional mechanisms carry mechanics and procedure, scoped rules
+  load on reads only, and each mechanism's cost is counted in tokens times the
+  sessions that load it, with caching measured rather than assumed.
 - [ ] Update the repo `CLAUDE.md`'s "Claude Code Rules" section to match.
 
-### Phase 3: move without rewording
+### Phase 3: split without rewording
 
-- [ ] Split `refactoring.md` out of `making-changes.md`.
 - [ ] Move the ecosystem settings out of `supply-chain.md`.
-- [ ] Scope the code tier to `**/*`.
-- [ ] Scope `designs.md` and `platforms.md` to plan and design files, and add
-  the `design-review` skill that points at them.
-- [ ] Create the `operations` skill from `operations.md`.
-- [ ] Scope `harness-context.md`, `secrets.md`, and `rfc2119.md`.
+- [ ] Move the tool mechanics out of `testing.md` and `configuration.md`, and add
+  `testing-mechanics.md`, `npm.md`, and the self-tests rule's pointer.
+- [ ] Create the `operations` skill, and rename what stays to `rollouts.md`.
+- [ ] Create the `plan-page` skill from the global `CLAUDE.md`'s plan bullet.
+- [ ] Scope `harness-context.md`, and point the global `CLAUDE.md` and the three
+  curator skills at its path.
 
-### Phase 4: measure the moves
+### Phase 4: use and measure the splits
 
 - [ ] Count the always-on total again, and record from transcripts what a chat
-  session, a design review, and a coding session each loaded.
+  session and a coding session each loaded.
 - [ ] After a few weeks of use, run a `harvest-sessions` pass. Its readers use
   `read_sessions.py --loads` to compare what loaded against what each session
-  needed: sessions that edited code without the code tier, discussed a design
-  without `designs.md`, or ran a rollout without the `operations` skill.
-- [ ] Move back to always-on any rule the harvest finds missing where it was
-  needed, before any trim starts.
+  needed: a test edited without `testing-mechanics.md`, a plan written without
+  the `plan-page` skill, an incident written up without the `operations` skill.
+- [ ] Move back to always-on anything the harvest finds missing where it was
+  needed, before compression starts.
 
-### Phase 5: trim, guarded, in later pull requests
+### Phase 5: compress, guarded, in later pull requests
 
-- [ ] Deduplicate `durable-docs.md`'s "Volatile Metrics" against the global
-  `CLAUDE.md` bullet, and `verify-empirically.md`'s "run the control" against
-  `testing.md`'s "suspect the check on a pass".
+- [ ] Resolve the cross-rule duplicates listed above.
 - [ ] For each always-on rule and the global `CLAUDE.md`, sort its passages by
   `git log -L` into those a correction added and those written up front, and
-  cut only redundant text from the second group.
-- [ ] Replay two or three known corrections each for `writing.md`,
-  `error-handling.md`, and `testing.md` against the old and new text.
-- [ ] Land the trims a few rules per pull request, with use between them, each
-  for Josh to review, merging rules where the trim turns up overlap.
+  compress under the guard.
+- [ ] In the same pass, make each rule stand alone: gloss borrowed terms, turn
+  analogies into clauses or drop them, and delete topic-owner pointers.
+- [ ] Replay two or three known corrections each for `writing.md`, `testing.md`,
+  and `error-handling.md` against the old and new text.
+- [ ] Land a few rules per pull request, with use between them, each for Josh to
+  review.
+- [ ] Count the always-on total once more, and record what compression saved.
+
+### Phase 6: reconsider splits rule by rule
+
+- [ ] For each rule that now stands alone, check the harvests for whether
+  sessions that never read a matching file needed it. Scope it, or move it to a
+  skill, only where they clearly didn't; otherwise it stays always-on.
