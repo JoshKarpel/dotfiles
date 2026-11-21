@@ -436,37 +436,37 @@ Moves change no wording; compression changes no destination.
 
 ### Phase 2: teach the doctrine and the guidance tools the new approach
 
-- [ ] Rewrite `harness-context.md` around the worldview, mechanics, and
+- [x] Rewrite `harness-context.md` around the worldview, mechanics, and
   procedure split: the always-on set teaches a way of thinking and is judged as
   a whole, each rule stands alone, a file boundary is cheap, conditional
   mechanisms carry mechanics and procedure, scoped rules load on reads only,
   and each mechanism's cost is counted in tokens times the sessions that load
   it, with caching measured rather than assumed.
-- [ ] `rule-curator`: place new material by the worldview test, slice mechanics
+- [x] `rule-curator`: place new material by the worldview test, slice mechanics
   per tool with the glob of the files open when they matter, write each rule to
   stand alone, keep a correction's claim when editing, and read
   `harness-context.md` by path before deciding.
-- [ ] `skill-creator`: correct what `paths:` does on a skill (it adds the
+- [x] `skill-creator`: correct what `paths:` does on a skill (it adds the
   description to the listing on a matching Read, and the body still waits for
   invocation), and say a skill carries procedure for a named task, never
   worldview, and can read a rule by path.
-- [ ] `hook-creator`: read `harness-context.md` by path when deciding whether a
+- [x] `hook-creator`: read `harness-context.md` by path when deciding whether a
   hook is the mechanism.
-- [ ] `harvest-sessions`: route a missing worldview idea to always-on, a missed
+- [x] `harvest-sessions`: route a missing worldview idea to always-on, a missed
   mechanic to its scope, and an idea compression dropped back into its rule.
-- [ ] `review-claude-config`: look for mechanics loading always-on, worldview
+- [x] `review-claude-config`: look for mechanics loading always-on, worldview
   scoped away, and rules that lean on another rule to make sense.
-- [ ] Update the repo `CLAUDE.md`'s "Claude Code Rules" section to match.
+- [x] Update the repo `CLAUDE.md`'s "Claude Code Rules" section to match.
 
 ### Phase 3: split without rewording
 
-- [ ] Move the ecosystem settings out of `supply-chain.md`.
-- [ ] Move the tool mechanics out of `testing.md` and `configuration.md`, and add
+- [x] Move the ecosystem settings out of `supply-chain.md`.
+- [x] Move the tool mechanics out of `testing.md` and `configuration.md`, and add
   `python-tests.md`, `test-sandboxes.md`, `coverage.md`, `npm.md`, and the
   self-tests rule's pointer.
-- [ ] Create the `operations` skill, and rename what stays to `rollouts.md`.
-- [ ] Create the `plan-page` skill from the global `CLAUDE.md`'s plan bullet.
-- [ ] Scope `harness-context.md`, and point the global `CLAUDE.md` and the three
+- [x] Create the `operations` skill, and rename what stays to `rollouts.md`.
+- [x] Create the `plan-page` skill from the global `CLAUDE.md`'s plan bullet.
+- [x] Scope `harness-context.md`, and point the global `CLAUDE.md` and the three
   curator skills at its path.
 
 ### Phase 4: compress, guarded
