@@ -137,7 +137,10 @@ the house style and the existing-vs-new decision:
 | A convention, preference, or style point | `rule-curator` skill |
 | A repeatable multi-step workflow worth its own command | `skill-creator` skill |
 | An automatic behavior, guardrail, or context injection | `hook-creator` skill |
-| Guidance that missed when needed, or loaded where it didn't apply | `rule-curator` skill for a rule's `paths:` or always-on placement, `skill-creator` for a skill's description |
+| A principle the session lacked, which no file it read would have scoped in | `rule-curator` skill, to make it always-on |
+| A tool's mechanic that missed its scope, or a scoped rule that loaded where it didn't apply | `rule-curator` skill, for the rule's `paths:` |
+| An idea the session needed that an earlier edit compressed out of a rule (`git log -L` on the rule shows it) | `rule-curator` skill, to restore it |
+| A procedure skill that didn't fire when its task came up | `skill-creator` skill, for its description |
 
 ## 5. Present, then implement
 
