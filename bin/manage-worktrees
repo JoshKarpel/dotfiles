@@ -339,6 +339,10 @@ def new(
     path = worktrees_root(clone) / branch
 
     if not path.exists():
+        # A worktree whose directory was deleted outside git stays registered,
+        # and `worktree add` refuses its path, and its branch, until it is pruned.
+        # Pruning drops only registrations whose directory is gone and that are not locked.
+        git(clone, "worktree", "prune")
         base = git(clone, "base-remote")
         git(clone, "fetch", "--quiet", "--multiple", *dict.fromkeys(("origin", base)))
         exists = any(
