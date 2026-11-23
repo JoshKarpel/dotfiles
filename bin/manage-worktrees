@@ -319,7 +319,8 @@ def new(
     default branch of the remote `git-base-remote` names, a fork's parent when
     the clone has one, with no upstream, so the first push tracks
     origin/<branch> rather than the default branch. Running this again for a
-    worktree that exists opens another tab on it.
+    worktree that exists opens another tab on it, and one whose directory was
+    deleted outside git is pruned and checked out afresh.
 
     The tab is named <repo>:<branch>, and every pane opened in it, floating
     ones included, starts in the worktree. When the clone has a pre-commit
