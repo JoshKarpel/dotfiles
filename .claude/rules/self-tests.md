@@ -24,7 +24,7 @@ or through a chain of other scripts, all in parallel; with no arguments, as in C
 `python3`) surfaces as a failed run rather than a silent pass, since the hook whose
 tests can't run exits non-zero.
 
-- **Bash hooks** embed a block right after the `set` line, before reading stdin. A
+- **Bash hooks** embed a block after the `set` line and the `--help` check, before reading stdin. A
   matching hook defines a `t <want-exit> <command>` helper that re-invokes the hook
   (`CLAUDE_HOOK_SELFTEST= "$0"`) with a crafted `{tool_input:{command:…}}` payload and
   asserts the exit code; `claude-http-server-bind-check` is the copy-paste template.
