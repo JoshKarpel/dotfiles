@@ -30,6 +30,11 @@ Do not rely on memory for event types, JSON schemas, exit code semantics,
 - **You want to gate a destructive action** → PreToolUse permission control
 - **You want to inject per-project env vars** → SessionStart writing to `$CLAUDE_ENV_FILE`
 
+A hook is the one mechanism that enforces whatever the model concludes. When the guidance
+only advises, read `~/.claude/rules/harness-context.md` first: it's scoped to Claude Code
+config, so it may not be loaded yet, and it says whether the advice belongs in an
+always-on rule, a scoped rule, or a skill instead.
+
 ## Where to Put Hooks
 
 ### Global (Personal) Hooks

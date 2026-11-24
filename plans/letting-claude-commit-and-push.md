@@ -451,9 +451,9 @@ moving files under an idle session. That's what Claude would have done with
 `git pull --ff` anyway, so neither `sync-branches` nor the stop checks change
 for it.
 Commits that arrive from `origin` between prompts are never a turn's work: a
-fresh snapshot (decision 7) starts after them, and a carried-forward one
-advances its starting `HEAD` past them whenever every commit between the two is
-one `origin` has.
+fresh snapshot (decision 7) starts after them, and a carried-forward or adopted
+one advances its starting `HEAD` past them whenever every commit between the two
+is one `origin` has.
 Nothing already tells Claude they arrived, since `claude-git-status` runs only
 at session start, so `claude-prompt-snapshot` does: it compares `HEAD` with the
 one the previous prompt's last stop recorded, and when they differ it adds the
@@ -973,7 +973,10 @@ a declining line under it.
   `claude-stop` fails closed as far as it can without trapping the session:
   the first stop blocks to have Claude tell Josh the checks are broken, and
   the stop that follows (`stop_hook_active`) passes with a warning.
-- A prompt with no snapshot (a session older than the hook, or a failed write)
+- A prompt with no snapshot (a `!` command's turn, which fires no
+  `UserPromptSubmit`) adopts the worktree's last stop as its start: where the
+  previous prompt left the repo, or where it started if it was gated. With no
+  earlier stop to adopt (a session older than the hook, a failed write), it
   counts as changed, so the cost of a gap is an extra pass rather than a
   missing report.
 - `claude-stop-commit` and `claude-stop-land` don't use it: they ask about

@@ -28,6 +28,7 @@ lsof sees no one else's sockets without root.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import os
 import signal
@@ -544,6 +545,7 @@ def _selftest() -> int:
 
 
 def main() -> int:
+    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
     if os.environ.get("CLAUDE_HOOK_SELFTEST"):
         return _selftest()
 

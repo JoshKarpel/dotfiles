@@ -101,8 +101,10 @@ Key fields beyond `description` and `when_to_use`:
   aren't meaningful as direct commands.
 - `allowed-tools`: Pre-approves listed tools while the skill is active, skipping per-use
   permission prompts. E.g. `allowed-tools: Bash(git *) Read`.
-- `paths`: Glob patterns limiting when the skill auto-activates. E.g. `paths: "**/*.py"`
-  to activate only when working with Python files.
+- `paths`: Glob patterns limiting when the skill is listed. It doesn't load the skill: on
+  a Read of a matching file inside the project, the description joins the skill listing,
+  and the body still waits for the model to invoke it. E.g. `paths: "**/*.py"` keeps a
+  Python-only skill's description out of other sessions' listings.
 - `context: fork` + `agent`: Runs the skill in an isolated subagent. Set `agent` to
   `Explore`, `Plan`, or a custom agent name.
 - `hooks`: Scopes hooks to the skill's own lifecycle instead of registering them globally in
@@ -123,6 +125,19 @@ the session. After compaction:
 
 Keep `SKILL.md` under ~500 lines; move detailed reference material to supporting files in
 the skill directory.
+
+## A Skill or Something Else?
+
+Read `~/.claude/rules/harness-context.md` before deciding; it's scoped to Claude Code
+config, so it may not be loaded yet. A skill loads only when the model invokes it from its
+description, so it carries a **procedure** for a task someone names (a failed CI run, a plan
+to publish, an incident to write up), or a toolbox. It never carries **worldview**, a
+principle needed precisely when nobody has framed the situation, which goes in a path-less
+rule. The **mechanics** of one tool or file format go in a rule scoped to those files.
+
+A skill can name a rule's path for the model to read (`Read ~/.claude/rules/designs.md
+first`), so one rule reaches both a session that opened a matching file and a task that
+opened none, with no second copy.
 
 ## Skill Categories
 

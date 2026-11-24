@@ -18,8 +18,13 @@
 #
 # "Changed" means HEAD or the change-set fingerprint (the tracked diff against HEAD plus the list of
 # untracked files) differs from the prompt's start. HEAD counts as well as the tree because a turn
-# that ends in a commit leaves the tree clean. A prompt with no snapshot counts as changed, so a gap
-# costs an extra finishing pass rather than a missing report.
+# that ends in a commit leaves the tree clean.
+#
+# A prompt can arrive without a snapshot: a `!` command's turn fires no UserPromptSubmit. Such a
+# prompt adopts the worktree's last stop as its start, the repo as the previous prompt left it (or,
+# when that prompt was gated, as it started), so a `!` turn that touched nothing reads as unchanged.
+# With no earlier stop to adopt, a prompt with no snapshot counts as changed, so a gap costs an
+# extra finishing pass rather than a missing report.
 #
 # Two things carry between prompts, both keyed by session:
 #
@@ -33,6 +38,23 @@
 # State lives under the git dir, which is per worktree, one file per prompt.
 
 set -euo pipefail
+
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+# Each subcommand's arguments, checked before the payload is read or anything is recorded.
+case "${1:-}:$#" in
+  :0 | fingerprint:1 | changed:2 | start:2 | stop:2 | ask:3 | asked:3) ;;
+  stop:3) [[ "$3" == --gated ]] || {
+      echo "claude-prompt-snapshot: unrecognized arguments: $*; see --help" >&2
+      exit 2
+    } ;;
+  *)
+    echo "claude-prompt-snapshot: unrecognized arguments: $*; see --help" >&2
+    exit 2
+    ;;
+esac
 
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker line is how
 # `claude-hook-selftests` discovers participating hooks. Every case is a git state across a sequence
@@ -84,6 +106,8 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   { printf 'FAIL outside a repo exited non-zero :: %s\n' "$OUT"; fails=1; }
   silent "outside a repo says nothing"
 
+  changed "a prompt with no snapshot and no earlier stop counts as changed" never-recorded yes
+
   prompt p1
   silent "a first prompt says nothing"
   changed "a prompt that changed nothing" p1 no
@@ -108,7 +132,12 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   changed "removing it again is no change" p3 no
   stop p3
 
-  changed "a prompt with no snapshot counts as changed" never-recorded yes
+  # --- a prompt with no snapshot (a `!` command's turn) adopts the last stop ---
+  changed "a prompt with no snapshot after a stop that changed nothing is unchanged" gap1 no
+  echo gap-edit >>"$repo/file"
+  changed "a prompt with no snapshot that then changes the repo counts" gap1 yes
+  git -C "$repo" checkout -q -- file
+  stop gap1
 
   # --- commits that arrived between prompts are reported, and aren't the next prompt's work ---
   git -C "$repo" push -q origin HEAD:main
@@ -123,6 +152,11 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   prompt p5
   silent "nothing arrived, nothing said"
   stop p5
+
+  git -C "$workdir/origin" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "upstream before a gap"
+  git -C "$repo" pull -q --ff-only origin main
+  changed "a prompt with no snapshot doesn't count origin's commits as its own" gap3 no
+  stop gap3
 
   # --- a gated prompt's edits carry into the next prompt ---
   prompt p6
@@ -171,6 +205,14 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   ask "no prompt id never asks" ask "" finish 1
   ask "no prompt id counts as having asked" asked "" finish 0
 
+  # --- a prompt with no snapshot after a gated one keeps the gated turn's edits ---
+  stop p21
+  prompt p22
+  echo gated-edit >>"$repo/file"
+  stop p22 --gated
+  changed "a prompt with no snapshot after a gated one carries its edits" gap2 yes
+  git -C "$repo" checkout -q -- file
+
   # --- sessions don't share a previous prompt ---
   SESSION=session-2
   prompt p12
@@ -204,6 +246,40 @@ field() {
   { sed -n "s/^$name=//p" "$file" 2>/dev/null || true; } | head -n1
 }
 
+# Give a prompt that never got a snapshot the worktree's last stop as its start, written into the
+# prompt's own record so every later check this prompt runs reads the same start. The last stop is
+# per worktree, not per session: two sessions in one worktree can adopt each other's, which only
+# moves a gap prompt's baseline. With nothing to adopt, the prompt keeps no start.
+adopt_start() {
+  local file="$1" key="$2" prev prev_file head fp now
+  [[ -n "$(field "$file" start_fp)" ]] && return 0
+  prev=$(cat "$STATE_DIR/last-stop" 2>/dev/null || true)
+  [[ -n "$prev" && "$prev" != "$key" && -f "$STATE_DIR/$prev" ]] || return 0
+  prev_file="$STATE_DIR/$prev"
+  if [[ "$(field "$prev_file" gated)" == yes ]]; then
+    head=$(field "$prev_file" start_head)
+    fp=$(field "$prev_file" start_fp)
+  else
+    head=$(field "$prev_file" stop_head)
+    fp=$(field "$prev_file" stop_fp)
+  fi
+  [[ -n "$fp" ]] || return 0
+  # Commits that arrived since then and that `origin` has (`sync-branches` fast-forwarding) aren't
+  # this prompt's work, so the start advances past them, as a carried start does for a prompt with
+  # a snapshot.
+  now=$(head_sha)
+  if [[ -n "$head" && -n "$now" && "$head" != "$now" ]] &&
+  git merge-base --is-ancestor "$head" HEAD 2>/dev/null &&
+  [[ -z "$(git rev-list "$head..HEAD" --not --remotes=origin 2>/dev/null)" ]]; then
+    head=$now
+  fi
+  {
+    printf 'start_head=%s\nstart_fp=%s\n' "$head" "$fp"
+    cat "$file" 2>/dev/null || true
+  } >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
 # As a hook, read the payload before anything can exit: a writer still sending it would otherwise
 # hit a closed pipe.
 [[ -z "${1:-}" ]] && INPUT=$(cat)
@@ -219,6 +295,7 @@ case "${1:-}" in
 
   changed)
     FILE="$STATE_DIR/$(key "$2")"
+    adopt_start "$FILE" "$(key "$2")"
     START_HEAD=$(field "$FILE" start_head)
     START_FP=$(field "$FILE" start_fp)
     if [[ -n "$START_FP" && "$START_HEAD" == "$(head_sha)" && "$START_FP" == "$(fingerprint)" ]]; then
@@ -233,6 +310,7 @@ case "${1:-}" in
     ;;
 
   start)
+    [[ -n "${2:-}" ]] && adopt_start "$STATE_DIR/$(key "$2")" "$(key "$2")"
     field "$STATE_DIR/$(key "${2:-}")" start_head
     exit 0
     ;;
@@ -259,8 +337,8 @@ case "${1:-}" in
     mkdir -p "$STATE_DIR"
     FILE="$STATE_DIR/$(key "$2")"
     {
-      grep -vE '^(stop_head|gated)=' "$FILE" 2>/dev/null || true
-      printf 'stop_head=%s\n' "$(head_sha)"
+      grep -vE '^(stop_head|stop_fp|gated)=' "$FILE" 2>/dev/null || true
+      printf 'stop_head=%s\nstop_fp=%s\n' "$(head_sha)" "$(fingerprint)"
       if [[ "${3:-}" == "--gated" ]]; then
         echo "gated=yes"
       else
@@ -268,15 +346,11 @@ case "${1:-}" in
       fi
     } >"$FILE.tmp"
     mv "$FILE.tmp" "$FILE"
+    key "$2" >"$STATE_DIR/last-stop"
     exit 0
     ;;
 
   "") ;;
-
-  *)
-    echo "usage: claude-prompt-snapshot [changed <prompt-id> | stop <prompt-id> [--gated] | ask <prompt-id> <check> | asked <prompt-id> <check> | start <prompt-id> | fingerprint]" >&2
-    exit 2
-    ;;
 esac
 
 PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")

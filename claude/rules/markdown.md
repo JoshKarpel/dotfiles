@@ -14,19 +14,6 @@ paths:
 - Don't skip heading levels (e.g. `##` → `####`). Step down one level at a time.
 - One blank line before a heading, one blank line after.
 
-## Line Length
-
-- Keep lines short: aim for ~80 characters, hard limit ~100.
-- Wrap bullet list items onto continuation lines (indent 2 spaces) rather than
-  letting them run long. Long bullets are hard to read in narrow windows and
-  hard to edit in-place.
-- Break at natural break points: after a period, comma, colon, or closing
-  parenthesis. Try not to break mid-phrase or mid-clause. This is the
-  *semantic line break* (or "one sentence per line") convention, and the payoff
-  is in the diff: a reworded clause changes one line instead of reflowing the
-  paragraph, so review shows what actually changed.
-- Prose paragraphs should also be wrapped, not left as single long lines.
-
 ## Code Blocks
 
 - Always use fenced code blocks (` ``` `), never indented ones. Fences are

@@ -7,7 +7,9 @@
 # whoever invokes it; what it can't check is whether someone went around it.
 #
 # The PR description's title and body come from a draft Claude writes at `git land --path`, which
-# resolves per worktree and per branch under the XDG state directory, so it is never committed. Beside it
+# resolves per worktree and per branch under the XDG state directory, so it is never committed. It isn't
+# under the git directory because that is a protected path in Claude Code: no allow rule can pre-approve
+# Claude's write of the draft there, so every land would prompt. Beside it
 # land keeps the copy it last landed (`landed.md`), which is how it knows whether the draft changed,
 # and the commit it last pushed (`pushed`), which is how it knows a directory belongs to an earlier
 # branch of the same name: one whose recorded commit isn't in `HEAD`'s history. A push whose PR then
@@ -776,6 +778,13 @@ $push_output"
   cp "$DRAFT" "$LANDED"
   echo "git land: pushed to #$number and updated its description from the draft."
 }
+
+# Every form takes at most one argument, so a stray second one is refused
+# before any of them acts on it.
+if (($# > 1)); then
+  usage >&2
+  exit 2
+fi
 
 case "${1:-}" in
   -h | --help)

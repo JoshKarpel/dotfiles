@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # Run Claude Code against exe.dev's LLM integration instead of the claude.ai subscription
+# Arguments other than --help go to `claude` unchanged.
 
 set -euo pipefail
+
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
 
 # The default `llm` integration, which exe.dev attaches to auto:all. Resolvable
 # only from a VM the integration is attached to, and only over the integration

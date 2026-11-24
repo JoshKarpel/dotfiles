@@ -10,6 +10,15 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+if (($#)); then
+  echo "$(basename "$0"): takes no arguments; see --help" >&2
+  exit 2
+fi
+
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
 # line is how `claude-hook-selftests` discovers participating scripts.
 if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then

@@ -70,10 +70,15 @@ mechanically tick. Lead with high-confidence, high-value findings.
   that: is each hook still earning its place, or has it become noise? Is there
   a repeated manual correction or guardrail that a new hook could automate?
   Use the `hook-creator` skill for the event/JSON details.
-- **Rules.** Look for overlap (two rules covering the same ground), staleness
-  (advice that no longer matches how the user works), and missing `paths:`
-  scoping that makes a narrow rule load globally. Flag rules that just restate
-  what any competent engineer knows: they tax every session that loads them.
+- **Rules.** Read `~/.claude/rules/harness-context.md` first; it sorts guidance
+  into worldview (always-on), mechanics (scoped to their tool's files), and
+  procedure (skills). Look for overlap (two rules covering the same ground),
+  staleness (advice that no longer matches how the user works), a tool's
+  mechanics loading in every session, worldview scoped away by `paths:`, and a
+  rule that only makes sense alongside another (a borrowed term left undefined,
+  an idea stated only as an analogy to another rule). Flag rules that just
+  restate what any competent engineer knows: they tax every session that loads
+  them.
 - **Skills.** Weak or keyword-thin `description`s hurt discoverability (the
   single most important skill property). Look for skills that overlap, that
   have gone stale, or for recurring multi-step workflows that deserve a new

@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # Show current Claude Code API usage limits
 
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+if (($#)); then
+  echo "$(basename "$0"): takes no arguments; see --help" >&2
+  exit 2
+fi
+
 # claude-fetch-usage writes a specific reason to stderr on failure (missing
 # token vs. an HTTP status and body); surface it instead of a generic message.
 err_file=$(mktemp)

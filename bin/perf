@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# Run the newest perf that linux-tools-generic installed, skipping Ubuntu's wrapper
+# Run the newest perf that linux-tools-generic installed, skipping Ubuntu's wrapper.
+# Arguments go to perf, whose own help is `perf help`.
 
 set -euo pipefail
+
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
 
 # /usr/bin/perf from linux-tools-common refuses to run unless it finds a build for
 # exactly `uname -r`, and no Ubuntu package matches the kernel an exe.dev VM (or

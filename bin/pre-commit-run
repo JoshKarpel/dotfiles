@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Run pre-commit through whichever runner is available, forwarding all arguments.
+# Run pre-commit through whichever runner is available, forwarding all arguments
+# (`pre-commit-run help` for pre-commit's own help).
 #
 # A project's own pre-commit comes first, then the one on PATH (mise's, set
 # globally), and uvx only where neither exists. `pre-commit install` pins the
@@ -7,6 +8,11 @@
 # environment in the uv cache that the next `uv cache prune` deletes.
 
 set -euo pipefail
+
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
 
 if is-uv-project 2>/dev/null; then
   exec uv run pre-commit "$@"

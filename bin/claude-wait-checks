@@ -13,8 +13,11 @@
 # cache (an hour): each wake is a chance to look at the runs still going for anything anomalous before
 # waiting again.
 #
-# It reads the checks of the commit the PR's head points at, and keeps waiting until that is `HEAD`,
-# so a wait started straight after a push doesn't report the previous commit's results as this one's.
+# It pins `HEAD` once at startup and waits on that commit alone: until the PR's head reaches it, so a
+# wait started straight after a push doesn't report the previous commit's results as this one's, and
+# no longer once a later push moves the PR's head past it. A land soon after another leaves two waits
+# running, and the older one then exits as superseded rather than following the new head, so every
+# verdict belongs to the commit it names and a stale one says so.
 #
 # Beside the verdict it looks for signs of trouble the verdict alone hides: a run slower than the
 # default branch's, one queued with no runner, a step stuck far past its usual time, a failure the
@@ -40,6 +43,7 @@ Exit status:
   1  a check failed                5  no checks registered within the grace period
   2  usage error                   6  no open PR for this branch
   3  the PR has merge conflicts    7  HEAD has commits origin lacks
+                                   8  a later push superseded this commit
 EOF
 }
 
@@ -138,6 +142,11 @@ EOF
   # Checks on a head GitHub hasn't moved to `HEAD` yet belong to the previous push.
   t 4 "hasn't reached" GH_PR_JSON="$(pr OPEN MERGEABLE 0000000)" GH_CHECKS_JSON="[$(check ci pass SUCCESS)]"
   t 6 "MERGED" GH_PR_JSON="$(pr MERGED UNKNOWN "$head")"
+  # A PR head that descends from HEAD is a later push, whose own wait reports on it.
+  next=$(git -C "$repo" commit-tree -p "$head" -m two "$(git -C "$repo" rev-parse "HEAD^{tree}")")
+  t 8 "superseded" GH_PR_JSON="$(pr OPEN MERGEABLE "$next")" GH_CHECKS_JSON="[$(check ci pass SUCCESS)]"
+  short=$(git -C "$repo" rev-parse --short HEAD)
+  t 0 "passed on PR #7 at $short" GH_PR_JSON="$open" GH_CHECKS_JSON="[$(check ci pass SUCCESS)]"
   t 6 "No pull request"
 
   # Signals. Times in 2020 are long past, so anything measured against now is far over its threshold.
@@ -202,6 +211,8 @@ if [[ "$unlanded" -gt 0 ]]; then
   echo "HEAD has $commits that origin lacks, so no check can run on it yet. Land them with \`git land\`, then wait again."
   exit 7
 fi
+head=$(git rev-parse HEAD)
+short=$(git rev-parse --short HEAD)
 
 # Prints the checks as a JSON array, empty when GitHub has none for the PR's head yet. `gh pr checks`
 # reports that case as an error, and its exit status says nothing about the checks under --json.
@@ -377,11 +388,15 @@ while true; do
   fi
 
   # Mergeability is only read once the PR's head is this commit, and only believed when it repeats:
-  # GitHub can report the conflict a moment after the push that resolved it.
-  head=$(git rev-parse HEAD)
-  if [[ "$(jq -r .headRefOid <<<"$pr")" != "$head" ]]; then
+  # GitHub can report the conflict a moment after the push that resolved it. A head this clone has
+  # never seen can't be a later push from here, so it counts as GitHub not having caught up.
+  pr_head=$(jq -r .headRefOid <<<"$pr")
+  if [[ "$pr_head" != "$head" ]] && git merge-base --is-ancestor "$head" "$pr_head" 2>/dev/null; then
+    echo "PR #$number's head moved from $short to $(git rev-parse --short "$pr_head"), so a later push superseded this wait. A land from here started its own wait, which reports on it; if nothing is waiting on that commit (a push from elsewhere, or GitHub updating the branch), pull it and run claude-wait-checks again."
+    exit 8
+  elif [[ "$pr_head" != "$head" ]]; then
     conflicts=0
-    pending="PR #$number's head hasn't reached HEAD ($head) yet, so GitHub hasn't registered the push."
+    pending="PR #$number's head hasn't reached HEAD ($short) yet, so GitHub hasn't registered the push."
   elif [[ "$(jq -r .mergeable <<<"$pr")" == CONFLICTING ]]; then
     conflicts=$((${conflicts:-0} + 1))
     if ((conflicts >= 2)); then
@@ -395,14 +410,14 @@ while true; do
     total=$(jq length <<<"$checks")
     failed=$(describe "$checks" fail,cancel)
     if [[ -n "$failed" ]]; then
-      printf 'Checks failed on PR #%s:\n%s\n' "$number" "$failed"
+      printf 'Checks failed on PR #%s at %s:\n%s\n' "$number" "$short" "$failed"
       anomalies fail
       echo "Read the failure (\`gh run view <run-id> --log-failed\`; the debug-gha skill covers it), fix it, and land again."
       exit 1
     fi
     if [[ "$total" == 0 ]]; then
       if ((elapsed >= grace)); then
-        echo "No checks registered on PR #$number after ${elapsed}s. The repo may run no CI for this change (path filters, or no workflows at all); \`gh run list --branch $(git branch --show-current)\` says whether anything ran."
+        echo "No checks registered on PR #$number at $short after ${elapsed}s. The repo may run no CI for this change (path filters, or no workflows at all); \`gh run list --branch $(git branch --show-current)\` says whether anything ran."
         anomalies none
         exit 5
       fi
@@ -410,11 +425,11 @@ while true; do
     else
       still=$(describe "$checks" pending)
       if [[ -z "$still" ]]; then
-        echo "All $total checks passed on PR #$number."
+        echo "All $total checks passed on PR #$number at $short."
         anomalies pass
         exit 0
       fi
-      pending=$(printf 'Still pending on PR #%s:\n%s' "$number" "$still")
+      pending=$(printf 'Still pending on PR #%s at %s:\n%s' "$number" "$short" "$still")
     fi
   fi
 

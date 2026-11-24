@@ -11,6 +11,11 @@
 # No `-e`: a failing pre-commit run is expected and handled, not fatal.
 set -uo pipefail
 
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+
 # The hooks only see what the index holds, so a new file nobody has staged passes by never being
 # checked. Say so rather than staging it: whether it belongs in the repo is the caller's decision
 # (`claude-stop-precommit` makes it one at stop time), and a silent `git add --all` would take it.

@@ -7,15 +7,17 @@ paths:
 
 ## Version Constraints
 
-`uv add` writes a floor and no ceiling (`rich>=15.0.0`), and `uv init` writes an
-uncapped `requires-python`. Leave both alone: caps arrive by hand, or from
-Poetry's `^1.2`, which means `<2`.
+`uv add` writes a floor and no ceiling (`rich>=15.0.0`),
+and `uv init` writes an uncapped `requires-python`.
+Leave both alone: caps arrive by hand, or from Poetry's `^1.2`,
+which means `<2`.
 
-Never cap `requires-python`. `>=3.13` says which Pythons are too old, which is
-knowable; `<4` claims a Python nobody has seen will break the package.
+Never cap `requires-python`.
+`>=3.13` says which Pythons are too old, which is knowable;
+`<4` claims a Python nobody has seen will break the package.
 
-Exclude a specific broken release rather than everything after it, and say when
-it goes:
+Exclude a specific broken release rather than everything after it,
+and say when it goes:
 
 ```toml
 dependencies = [
@@ -23,12 +25,13 @@ dependencies = [
 ]
 ```
 
-`[build-system] requires` is the one place a cap is cheap, since it resolves in a
-throwaway environment that never has to satisfy anyone else's constraints.
+`[build-system] requires` is the one place a cap is cheap, since it resolves
+in a throwaway environment that never has to satisfy anyone else's constraints.
 
-To hold a dependency back locally without publishing that opinion, use a
-constraints file (`uv pip compile --constraints`, or `UV_CONSTRAINT` /
-`PIP_CONSTRAINT`) so the limit stays out of package metadata.
+To hold a dependency back locally without publishing that opinion,
+use a constraints file (`uv pip compile --constraints`,
+or `UV_CONSTRAINT` / `PIP_CONSTRAINT`)
+so the limit stays out of package metadata.
 
 Uncapped dependencies make CI the early-warning system, so let warnings fail:
 
@@ -37,19 +40,22 @@ Uncapped dependencies make CI the early-warning system, so let warnings fail:
 filterwarnings = ["error"]
 ```
 
-Add a narrow `"ignore::SomeWarning:module"` entry when a dependency's warning is
-outside your control; don't relax the `error` default to silence one case.
+Add a narrow `"ignore::SomeWarning:module"` entry
+when a dependency's warning is outside your control;
+don't relax the `error` default to silence one case.
 
 ## uv Cooldown
 
-Set an `exclude-newer` cooldown (a relative duration) under `[tool.uv]` as a
-supply-chain defense.
+Set an `exclude-newer` cooldown (a relative duration)
+under `[tool.uv]` as a supply-chain defense.
 
 ```toml
 [tool.uv]
 exclude-newer = "7 days"
 ```
 
+`exclude-newer` hides every release inside the window,
+so a pin on one is unsatisfiable.
 Opt a package out with `exclude-newer-package` (registries lacking PEP 700
 upload-time data, or a package you need a fresh release of):
 
@@ -61,35 +67,39 @@ exclude-newer-package = { internal-pkg = false }
 
 ## Classifiers
 
-Draw `[project]` `classifiers` values from the canonical
-[trove classifier list](https://pypi.org/classifiers/); PyPI rejects uploads
-with unrecognized classifiers. The uv build backend adds none automatically
-(unlike Poetry), so list every classifier explicitly.
+Draw `[project]` `classifiers` values
+from the canonical [trove classifier list](https://pypi.org/classifiers/);
+PyPI rejects uploads with unrecognized classifiers.
+The uv build backend adds none automatically (unlike Poetry),
+so list every classifier explicitly.
 
-- Add a `Programming Language :: Python :: 3.X` line per supported minor
-  version so the supported range is discoverable on PyPI.
-- Prefer the SPDX `license` expression over a `License ::` classifier; the
-  classifiers are deprecated for licensing.
-- For a package that must never reach PyPI, add
-  `Private :: Do Not Upload` so an accidental upload is rejected.
+- Add a `Programming Language :: Python :: 3.X` line per supported minor version
+  so the supported range is discoverable on PyPI.
+- Prefer the SPDX `license` expression over a `License ::` classifier;
+  the classifiers are deprecated for licensing.
+- For a package that must never reach PyPI,
+  add `Private :: Do Not Upload` so an accidental upload is rejected.
 
 ## Coverage
 
 Exclude a platform-only branch with
 [`coverage-conditional-plugin`](https://github.com/wemake-services/coverage-conditional-plugin)
-rather than a blanket `# pragma: no cover`. Each rule maps a pragma name to an
-environment marker (`not-win32 = "sys_platform != 'win32'"`), and a line carrying
-that pragma is excluded only where the marker is true. One plugin with shared rule
-names beats each project hand-rolling its own scheme. Don't name a rule
-`no cover-…`: coverage's default exclusion matches that prefix on every platform.
-Use it where CI runs a platform matrix too, gating each job on its own data rather
-than on `coverage combine`.
+rather than a blanket `# pragma: no cover`.
+Each rule maps a pragma name
+to an environment marker (`not-win32 = "sys_platform != 'win32'"`),
+and a line carrying that pragma is excluded only where the marker is true.
+One plugin
+with shared rule names beats each project hand-rolling its own scheme.
+Don't name a rule `no cover-…`:
+coverage's default exclusion matches that prefix on every platform.
+Use it where CI runs a platform matrix too,
+gating each job on its own data rather than on `coverage combine`.
 
 ## Test Watchdog
 
-Give the suite a process-level timeout that dumps every thread's stack and exits,
-so a hang fails with a location instead of running until CI cancels the job.
-pytest (9.0+) has it built in, with no plugin:
+Give the suite a process-level timeout that dumps every thread's stack
+and exits, so a hang fails with a location instead of running
+until CI cancels the job. pytest (9.0+) has it built in, with no plugin:
 
 ```toml
 [tool.pytest.ini_options]
@@ -102,10 +112,12 @@ Without the second line the stacks are dumped and the hang carries on.
 
 ## Ruff
 
-Use `line-length = 120`. Select broadly; each selected group links its
-documentation, and each ignore states its rationale. `isort.force-single-line`
-keeps one import per line so adding or removing an import touches a single line
-rather than reflowing a combined `from x import a, b, c`.
+Use `line-length = 120`.
+Select broadly; each selected group links its documentation,
+and each ignore states its rationale.
+`isort.force-single-line` keeps one import per line
+so adding or removing an import touches a single line rather
+than reflowing a combined `from x import a, b, c`.
 
 ```toml
 [tool.ruff]

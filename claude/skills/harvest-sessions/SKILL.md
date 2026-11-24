@@ -8,7 +8,8 @@ description: >
   synthesizes cross-session themes. Ships a script that turns noisy jsonl
   transcripts into clean, labeled conversation. MUST be invoked when asked to
   review or analyze recent sessions, mine transcripts for rule or skill ideas,
-  find "what I've been correcting Claude on", or turn session history into config
+  find "what I've been correcting Claude on", check whether rules and skills
+  loaded when sessions needed them, or turn session history into config
   improvements. Routes findings to the rule-curator, skill-creator, and
   hook-creator skills.
 ---
@@ -76,7 +77,7 @@ where the reasoning actually lives. Give each reader a self-contained task like:
 > Read it (user/assistant text and tool calls/errors, labeled and in order) with:
 >
 > ```bash
-> uv run ${CLAUDE_SKILL_DIR}/scripts/read_sessions.py --project=<PROJECT> --session <ID> --tools
+> uv run ${CLAUDE_SKILL_DIR}/scripts/read_sessions.py --project=<PROJECT> --session <ID> --tools --loads
 > ```
 >
 > Read the whole thing and report what a future Claude should learn from it. Look
@@ -84,6 +85,14 @@ where the reasoning actually lives. Give each reader a self-contained task like:
 > debates, friction hit more than once, insights you surfaced that aren't obvious,
 > and tool-usage lessons (repeated wrong flags, denied commands, hook blocks).
 > Don't work from a fixed checklist; report whatever is genuinely instructive.
+>
+> Also check the guidance that loaded against what the session needed. The `load`
+> lines say which instruction files were in context from the start, which
+> path-scoped rules loaded and when, and which skills were invoked; the files
+> themselves are at those paths. Report a rule or skill that should have been in
+> context and wasn't (a correction its text would have prevented, a task its
+> description names that went ahead without it, a scoped rule that loaded only
+> after the work it governs), and one that loaded and plainly didn't apply.
 >
 > For each finding give: a one-line general principle, the evidence (quote the
 > message(s), with role), and whether it's **general** (applies to any project) or
@@ -128,6 +137,10 @@ the house style and the existing-vs-new decision:
 | A convention, preference, or style point | `rule-curator` skill |
 | A repeatable multi-step workflow worth its own command | `skill-creator` skill |
 | An automatic behavior, guardrail, or context injection | `hook-creator` skill |
+| A principle the session lacked, which no file it read would have scoped in | `rule-curator` skill, to make it always-on |
+| A tool's mechanic that missed its scope, or a scoped rule that loaded where it didn't apply | `rule-curator` skill, for the rule's `paths:` |
+| An idea the session needed that an earlier edit compressed out of a rule (`git log -L` on the rule shows it) | `rule-curator` skill, to restore it |
+| A procedure skill that didn't fire when its task came up | `skill-creator` skill, for its description |
 
 ## 5. Present, then implement
 
@@ -146,10 +159,14 @@ session cheaply.
 - `--session <id>` — dump one session (the per-session subagent view).
 - `--tools` — also include tool calls and tool errors/denials (the tool-usage
   signal); without it you get just user/assistant text.
+- `--loads` — also include what put guidance into context and when, labeled
+  `load`: the always-on instruction files, each path-scoped rule or nested
+  `CLAUDE.md` as it loaded, skills added to the listing mid-session, and skill
+  invocations.
 - `--project` (omit to scan all projects), `--sessions N`, `--min-len`,
   `--max-chars` — scope and trim.
 
-Output labels each line by role: `user`, `assistant`, `tool`, or `error`.
+Output labels each line by role: `user`, `assistant`, `tool`, `error`, or `load`.
 
 ## Gotchas
 
