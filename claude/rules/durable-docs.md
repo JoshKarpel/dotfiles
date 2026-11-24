@@ -10,10 +10,12 @@ since a docstring documents an interface for the people who use it.
 Reference docs (READMEs, API references, guides) describe the present state of
 the code as if it always was.
 Don't narrate the process that produced it: no "recently", "now refactored
-to", "carried over from the last checkpoint", or "deferred for now".
-That scaffolding is working context that rots as the code moves on; it belongs
-in commit messages and PR descriptions.
-Capture the non-obvious *why*, never the history of how the code got here.
+to", "carried over from the last checkpoint", or "deferred for now", and in
+code comments no `# Now handles the empty case`, `# Switched to the async
+client`, or `# As requested`.
+That scaffolding addresses whoever reads today's diff, and rots as the code
+moves on: history belongs in commit messages and PR descriptions, and the
+current task and the PR go nowhere in the file.
 Write section and issue titles in the imperative ("Add X", "Fix Y"), not as
 status reports.
 
@@ -45,8 +47,6 @@ of how you assembled it.
 "Initially the data suggested X, but after more samples we found Y" should be
 "the data shows Y", and "after further investigation" or "upon revisiting"
 narrates a journey whose reader wants the destination.
-A note that the analysis uses Q2 because the Q3 numbers weren't in yet should
-go, with the analysis redone on Q3.
 Where the process itself is the point (a methodology section, a research log,
 a retrospective), narrating it is correct.
 
@@ -95,4 +95,4 @@ What survives it is what no single source states:
 
 Where the toolchain can generate the list at build time (a docs-site plugin or
 hook, an autodoc extension, a preprocessor), derive it from the source and
-render it in full.
+render it.

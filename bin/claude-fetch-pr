@@ -21,10 +21,7 @@
 # deployment lookup leaves `deployment` out, for the same reason.
 #
 # `gh pr view` has no deployments field, so they come from the PR's DEPLOYED_EVENT
-# timeline over GraphQL, addressed by owner, name, and number from the PR's URL
-# rather than by node id. A box without its own github.com login routes gh through
-# exe.dev's GitHub integration (`GH_HOST`, see sources/exe.sh), which refuses a
-# `node(id:)` query, since it can't tell which repository an opaque id belongs to.
+# timeline over GraphQL, addressed by owner, name, and number from the PR's URL.
 
 set -euo pipefail
 

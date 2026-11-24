@@ -6,16 +6,17 @@ The *control plane* manages system state; the *data plane* handles individual
 requests.
 Entangling them is complecting: braiding independent concerns together.
 
-The separation is worth pursuing at any scale, not only across services: even
-within a single process, keep management work on a background thread or
-scheduled task rather than in request handlers, even where separating it at
-the system or architecture layer isn't feasible or worth the effort.
+The separation is worth pursuing at any scale.
+Across services, the control plane is a separate process or a scheduled job.
+Within a single process, where separating it at the system or architecture
+layer isn't feasible or worth the effort, it's a background thread or a
+scheduled task.
+Either way, request handlers do no management work.
 
 - **Keep management off the hot path.** Expiring a cache entry or refreshing a
   config during request handling makes the latency-sensitive request bear the
   cost of the management work, and makes request volume rather than policy
   trigger it.
-  Move it to a background process or scheduled job.
 - **Run each task the right number of times.** In a horizontally scaled
   deployment, code that runs once per process runs once per replica, N times
   per logical unit.

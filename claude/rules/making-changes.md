@@ -13,6 +13,12 @@ If not, restructure so that this and future changes become easy.
 Avoid one-off solutions: build from composable blocks, so each new requirement
 snaps into place rather than needing bespoke logic.
 
+When asked to solve a problem, build something that solves that _kind_ of
+problem, not only this instance of it.
+The general version often turns out easier to write, and better in other ways
+too: it tends to separate the control plane from the data plane, and to keep a
+pure core with the I/O at its edges.
+
 ## Don't Factor Ahead of the Evidence
 
 Beck's rule applies to a change you can see coming, not to one you're

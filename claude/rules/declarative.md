@@ -21,8 +21,7 @@ something else (a compiler, a query planner, a reconciliation loop).
   Decoupling "what do you want" from "how and when it happens" (the leverage
   behind command-query separation) leaves the engine room to reorder, batch,
   cache, or parallelize: a SQL query says "give me X", and the planner picks
-  the index, the join order, and the plan, none of which the caller could
-  safely hardcode.
+  the index, the join order, and the plan.
 - **One declaration, recovered not restated.** Whichever layer parses or
   produces a value owns the description of its shape.
   Secondary representations (an API schema, a diagram, a dependency graph) are

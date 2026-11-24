@@ -2,8 +2,22 @@
 paths:
   - "**/CLAUDE.md"
   - "**/AGENTS.md"
+  - "**/GEMINI.md"
   - "**/.claude/**"
   - "claude/**"
+  - "**/.agents/**"
+  - "**/.codex/**"
+  - "**/.cursor/**"
+  - "**/.github/copilot-instructions.md"
+  - "**/.github/instructions/**"
+  - "**/.clinerules/**"
+  - "**/.devin/**"
+  - "**/.windsurf/**"
+  - "**/.kiro/**"
+  - "**/.opencode/**"
+  - "**/.roo/**"
+  - "**/.junie/**"
+  - "**/.rulesync/**"
 ---
 
 # Harness Context Loading
@@ -37,13 +51,19 @@ hour, is the signal to say where the lesson belongs before moving on.
 | Skill | The model, from the description | When the model judges it relevant | Silent, and self-referential |
 
 A hook is the only one that _enforces_ rather than advises. It runs outside the
-model, so it can block an action or gate a stop whatever the model concluded.
+model, so it can block an action or gate a stop whatever the model concluded:
+anything that must happen regardless is a hook. A command costs nothing until
+typed, so it suits what the user wants to trigger deliberately.
+
+A hook can also supply context. What every session needs but is only true at a
+point in time (repo state, available recipes, the current toolchain version)
+wants a `SessionStart` hook that computes it at startup, not a hand-maintained
+list that drifts.
 
 ## Worldview, Mechanics, and Procedure
 
 The always-on set teaches how I think, and I bring all of it to every problem,
-so it's judged as a whole rather than rule by rule. It is also
-the contract: the part of the environment that is identical in every session.
+so it's judged holistically. It is also the contract: the part of the environment that is identical in every session.
 What sorts a passage is what kind of guidance it is:
 
 - **Worldview** is a principle or a way of judging. It holds across languages,
@@ -69,11 +89,9 @@ didn't exist? Worldview passes, even when it uses a tool as its example. When a
 passage's kind is in doubt, it stays always-on: missing doctrine costs a wrong
 answer, and carrying it costs tokens.
 
-Those tokens are real. The prompt cache doesn't share always-on text across
-sessions, since the system prompt carries per-session values (the scratchpad
-path, git status, the date) ahead of it, so every session and every subagent
-pays a cache write for all of it. Count a mechanism's cost as its tokens times
-the sessions that load it, and measure caching rather than assuming it.
+`CLAUDE.md` and a path-less rule cost the same, so that choice is editorial: how
+to work with this user and this harness goes in `CLAUDE.md`, and portable
+doctrine goes in a rule.
 
 ## A Skill Cannot Correct the Judgment That Loads It
 
@@ -128,21 +146,3 @@ sessions rely on: it keeps its claim, may be reworded tighter, and goes only
 when another rule says the same thing. Cut restatements, second examples making
 the same point, and framing with no claim. Don't compress to a percentage
 target, which forces the cuts into the corrected passages.
-
-## Choosing a Mechanism
-
-First match wins.
-
-- **Must it happen whatever the model concludes?** A hook.
-- **Is it worldview?** Always-on: `CLAUDE.md` or a path-less rule. Never a skill.
-- **Should the user trigger it deliberately?** A command. It costs nothing until
-  typed.
-- **Is it a procedure for a task someone will name?** A skill. Size it freely,
-  since it only loads when invoked.
-- **Is it a mechanic of a tool whose files will be open?** A rule with
-  `paths:`.
-- **Still unsure?** Always-on.
-
-`CLAUDE.md` and a path-less rule cost the same, so that choice is editorial: how
-to work with this user and this harness goes in `CLAUDE.md`, and portable
-doctrine goes in a rule.

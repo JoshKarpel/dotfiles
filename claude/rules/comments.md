@@ -1,7 +1,8 @@
 # Comments
 
-Prose in the implementation: comments, and whether a docstring is worth
-writing.
+Prose in the implementation: comments and docstrings.
+Both are guidance for whoever changes the code, and a docstring has a second,
+co-equal reader: the user of the API reference generated from it.
 
 ## A Comment Is Guidance at the Tightest Scope
 
@@ -55,8 +56,8 @@ Each of these is a comment to delete rather than reword.
 
 - **The phase label.** `# Validate the payload`, above the block that validates
   the payload.
-  The phase wants to be a call to a named function, which says the same thing
-  in a form that can be read on its own, tested, and reused.
+  The phase wants to be a call to a named function, which can be read on its
+  own, tested, and reused.
 - **The signature restated.** An `Args:`/`Returns:` block listing parameters
   the types already carry, or a summary line that is the function's name in a
   sentence.
@@ -65,13 +66,6 @@ Each of these is a comment to delete rather than reword.
   Document the contract the signature can't hold: what an empty input does,
   what it raises, which argument combinations are illegal.
   The padding is the failure here, not the docstring.
-- **The change narrated.** `# Now handles the empty case`,
-  `# Switched to the async client`, `# Kept for the old signature`,
-  `# As requested`.
-  These address whoever is reading today's diff, and describe a past the file
-  can't confirm once it moves again.
-  History goes in the commit message; the current task, the PR, and the calling
-  code go nowhere.
 - **The assumption flagged.** `# Assumes the API returns ISO-8601 timestamps`
   records that the author was unsure.
   Confirm it and write the constraint instead
@@ -81,7 +75,14 @@ Each of these is a comment to delete rather than reword.
 - **The reasoning shown.** A comment demonstrating that the author understood
   the request belongs in the answer to the request.
 
-## Docstrings Load Wherever the Name Appears
+## A Docstring Serves Two Readers
+
+A docstring is guidance that travels with the symbol, and in many ecosystems it
+is also the published documentation: rustdoc, Sphinx's autodoc, and
+mkdocstrings render it for people who will never open the source.
+Write for both readers.
+The documentation reader needs what the thing is for and how to use it (an
+example, the errors it raises), and the prose rules for durable docs apply.
 
 A comment reaches only whoever reads that region of that file.
 A docstring travels with the symbol, surfacing on a grep hit, an editor hover,

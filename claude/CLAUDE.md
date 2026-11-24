@@ -17,8 +17,7 @@
 
 ## Committing and Landing
 
-This is a durable authorization: you needn't ask before any of it, in this session or any
-other.
+This is a durable authorization: you needn't ask before any of it, in any session.
 
 - Commit on any branch but the default without waiting to be asked, once pre-commit
   passes. The `claude-git-commit-check` hook refuses a commit on the default branch or a
@@ -36,13 +35,13 @@ other.
   `<summary>` names your model, such as `<summary>Claude Opus 5.5</summary>`, without the
   effort level: you can't see it, so a stated one is a guess. After that, land again at
   the end of each turn that committed, so the PR and its CI stay current.
-- When the work resolves a GitHub issue, link it from the draft with a closing keyword
+- When the work resolves GitHub issues, link each from the draft with a closing keyword
   on a line of its own above the fold (`Closes #12`), so the PR appears in the issue's
   Development sidebar and merging closes it
   ([linking a pull request to an issue](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue)).
-  Use the issue I named when starting the session; otherwise search the repo's open
-  issues, link one only if it clearly describes this work, and else name the near misses
-  in the report. Work that only advances an issue mentions it without a keyword
+  Use the issues I named when starting the session; otherwise search the repo's open
+  issues, link those that clearly describe this work, and name the near misses in the
+  report. Work that only advances an issue mentions it without a keyword
   (`Part of #12`), since a keyword closes the issue on merge. Link only issues the repo's
   readers can see (the public-record rule).
 - Rewrite the draft whenever what the PR is has changed: it is the only way to change
@@ -93,19 +92,13 @@ other.
 
 - Auto-memory is off, so nothing persists between sessions on its own. Put what's worth
   keeping in a committed artifact (read `~/.claude/rules/harness-context.md` for which
-  mechanism), and when where it belongs isn't obvious, ask rather than dropping it in the
+  mechanism). If where it belongs isn't obvious, ask rather than dropping it in the
   nearest file.
-- Context every session needs but that is only true at a point in time (repo state,
-  available recipes, the current toolchain version) wants a `SessionStart` hook that
-  computes it at startup, not a hand-maintained list that drifts.
-- A command that was blocked or that failed did nothing. Don't assume any artifact it
-  would have produced exists; re-run it before anything downstream reads that output,
-  or you'll debug a stale file instead of the actual change.
 - Don't grind on a blocker. After a few turns without real progress (repeated failures,
-  going in circles, missing context only I can supply), stop and ask me for help rather
-  than burning time and tokens. Above all for third-party tool bugs (a type-checker
-  artifact, a linter quirk): timebox it and reach for a workaround rather than
-  root-causing someone else's tool.
+  going in circles, missing context only I can supply), stop and ask me for help.
+- When a third-party tool misbehaves (a type checker, a linter), first check that the
+  code works the way the tool expects; then look for a bug in that intended behavior to
+  fix or report upstream. A workaround comes last, not first.
 - When you stop because you're stuck, hand off rather than only reporting the dead end:
   write a brief a fresh session could act on cold, with the failure signature, what's
   established and how you know, what you ruled out and with what evidence, what to read
@@ -126,9 +119,9 @@ other.
 - Never `sleep` to wait for a backgrounded command: it re-invokes you when it exits, and
   its output file reads mid-flight with the Read tool.
 - Clone a GitHub repo with `gh repo clone <owner>/<repo>`, not `git clone`. For a fork it
-  adds the parent as an `upstream` remote, which is where `git new` and
-  `manage-worktrees new` start branches (`git base-remote` says which remote), so a pull
-  request back to the parent doesn't carry the fork's lag. A fork cloned some other way
+  adds the parent as an `upstream` remote, which is where `git new` starts branches
+  (`git base-remote` says which remote), so a pull request back to the parent doesn't
+  carry the fork's lag. A fork cloned some other way
   needs `git remote add upstream <parent-url>` before branching.
 - Spell the scratchpad path out literally in every command rather than through a variable:
   shell state doesn't persist between calls, and Claude Code refuses an `rm` whose target
@@ -149,9 +142,3 @@ other.
   uncommitted change on whatever branch that clone has checked out.
 - When you start a server just to check something, assume I may already be running the
   app on the default port; pick a non-default port and clean it up when done.
-- Every markdown plan (plan mode's, or a plan doc in a repo) has a published HTML Artifact,
-  derived from the `.md` and republished whenever the plan changes; the `plan-page` skill
-  has the procedure.
-- Reach past plain `grep` when a code search is structural rather than textual. `ast-grep`
-  matches and rewrites by AST pattern (a bare `except`, a call with a literal argument) where
-  regex can't. Run `--help` for the interface.

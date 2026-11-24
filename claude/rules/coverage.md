@@ -21,3 +21,10 @@ paths:
   (deleting the attribute the code probes for, constructing the other event loop
   directly) to test it for real everywhere is an option where it's cheap, not a
   prerequisite.
+- **In Python, write the per-platform pragmas with
+  [coverage-conditional-plugin](https://pypi.org/project/coverage-conditional-plugin/).**
+  Each rule under `[tool.coverage.coverage_conditional_plugin.rules]` names a
+  pragma and a condition over the PEP 496 environment markers
+  (`has-windows = "sys_platform == 'win32'"`), and a line carrying that pragma
+  is measured only where its condition holds. List it in
+  `[tool.coverage.run] plugins`.

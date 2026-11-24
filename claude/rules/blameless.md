@@ -8,8 +8,7 @@ only durable docs.
 
 This isn't about being nice, and the analysis needn't be balanced: keeping the
 focus on systems rather than people is a truth-finding discipline.
-Blame buries the information you need to fix things and leaves the trap set
-for the next person.
+Blame buries the information you need to fix things.
 
 ## Attribute to Systems, Not People
 
@@ -30,9 +29,8 @@ artifact, not the author.
 Reconstructing *why* a past decision was made (Chesterton's Fence: find out why
 something is there before removing it) and tracing a failure to its root cause
 (five whys) exist to fix the system, not to assign blame.
-Follow the chain to the systemic cause (the missing check, the ambiguous
-interface, the absent feedback loop) and stop there, not at the person who hit
-it.
+Follow the chain to the systemic cause: the missing check, the ambiguous
+interface, the absent feedback loop.
 A why that ends in "someone should have been more careful" hasn't reached a
 root cause; it's found a place to point.
 

@@ -60,7 +60,8 @@ dependencies or reaching the network.
 
 ## Cooldown
 
-Stable cargo (1.100) has no cooldown. Nightly has `cargo generate-lockfile
+Stable cargo has no cooldown as of 1.100: recheck on each toolchain upgrade,
+and tell me when it gains one. Nightly has `cargo generate-lockfile
 -Zunstable-options --publish-time <yyyy-mm-ddThh:mm:ssZ>`, which resolves as of
 an absolute timestamp, not a relative window, and only regenerates the whole
 lockfile: `cargo update` and `cargo add` don't take it. Follow

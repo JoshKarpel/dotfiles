@@ -29,14 +29,6 @@ Watch for configuration that keeps gaining conditionals and loops:
 it is becoming a programming language, and a home-grown one is the most
 expensive kind.
 
-## Pin and Lock
-
-Commit a lockfile so resolution is reproducible and auditable:
-everyone, CI included, installs the exact same versions,
-and a changed dependency shows up as a reviewable diff.
-Don't float production dependencies on unpinned ranges that silently pull
-whatever published most recently.
-
 ## One Installer per Tool
 
 Every repo we control has a `mise.toml` alongside the package manager of each

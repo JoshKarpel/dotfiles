@@ -5,7 +5,7 @@ Separate pure business logic from code that has side effects.
 - **Core:** pure functions: data in, data out, with no I/O, no mutation, and
   no global state.
 - **Shell:** orchestrates I/O (reading files, calling APIs, writing to
-  databases), then feeds the results into the core.
+  databases), then feeds results into the core.
 
 Push side effects to the outermost layer so the interesting logic can be tested
 without mocking.

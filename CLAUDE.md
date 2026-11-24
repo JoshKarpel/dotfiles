@@ -76,7 +76,7 @@ A dev box holds one long-lived zellij session named after its short hostname.
 side effect of a shell starting. `zellij-restart-session` is how a changed unit
 environment, config, or zellij release reaches it, and it ends every pane.
 `.claude/rules/work-session.md` covers the units, socket pinning, the web client,
-and the failure modes, and loads when one of the files it governs is read.
+and the failure modes, and loads when one of the files it governs is Read.
 
 ## Shell Startup Chain
 
@@ -99,7 +99,7 @@ can just use the name.
 Each script in `bin/` takes `--help`. What `--help` doesn't say is which ones
 run on their own, so running them by hand is only for wanting it now:
 `install.sh` schedules `sync-branches` hourly on every machine, `tidy` daily on
-exe.dev, and `cloister-codex` and `converge-atlas` daily on dev boxes.
+exe.dev, and `cloister-codex` and `converge-atlas` daily on exe.dev dev boxes.
 
 - `./install.sh` applies the dotfiles and installs dependencies;
   `pre-commit run` runs the hooks.
@@ -219,7 +219,7 @@ would apply a style to every session on every machine. The `harry` alias in
   block declaring `requires-python` (and `dependencies` if any), so the script is
   self-contained and reproducible. A script with dependencies pins each exactly
   (`==`) and sets the cooldown under `[tool.uv]` with my own packages exempted (as
-  `config/mise/config.toml` exempts my tools), per the python rule.
+  `config/mise/config.toml` exempts my tools), per the supply-chain rule.
   `count-claude-tokens` is
   the exemplar with third-party dependencies; the Python hooks (`claude-rm-scope-check`,
   `claude-gh-api-check`) use the same shebang with an empty dependency set. `--quiet`

@@ -51,9 +51,11 @@ tests can't run exits non-zero.
   `GIT_DIR` and `GIT_INDEX_FILE` would point every sandbox back at this clone,
   so `claude-hook-selftests` clears them before running anything; a self-test
   reached only through it needs no guard of its own. A sandbox repo still reads
-  the global gitconfig and ignore file, so read
-  `~/.claude/rules/test-sandboxes.md` before building one: these self-tests
-  live in `bin/` scripts, which match none of its test-file globs.
+  the global gitconfig and ignore file, so a fixture can be silently ignored by a
+  pattern in nobody's code. `GIT_CONFIG_GLOBAL=/dev/null` alone doesn't stop it:
+  with no `core.excludesFile` set, git falls back to `$XDG_CONFIG_HOME/git/ignore`
+  (or `~/.config/git/ignore`), so point `HOME` and `XDG_CONFIG_HOME` at the
+  sandbox too, as `claude-wait-checks` does.
 - The installed environment is ambient state too, and CI has none of it: no `dotfiles/bin`
   on PATH and no gitconfig, so a hook that calls a sibling script by name reaches nothing
   and its guard clause passes every case. A hook that shells out to `bin/` prepends its own
