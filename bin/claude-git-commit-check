@@ -312,10 +312,10 @@ def read_state(cwd: str) -> BranchState:
     )
 
 
-DEFAULT_REASON = "on the default branch master, which takes changes through pull requests: Claude commits on a worktree branch"
+DEFAULT_REASON = "on the default branch main, which takes changes through pull requests: Claude commits on a worktree branch"
 FEATURE = BranchState(None, "feature", True, frozenset({"origin", "upstream"}))
-DEFAULT = BranchState(DEFAULT_REASON, "master", True, frozenset({"origin", "upstream"}))
-DEFAULT_NO_PULL_FF = BranchState(DEFAULT_REASON, "master", False, frozenset({"origin"}))
+DEFAULT = BranchState(DEFAULT_REASON, "main", True, frozenset({"origin", "upstream"}))
+DEFAULT_NO_PULL_FF = BranchState(DEFAULT_REASON, "main", False, frozenset({"origin"}))
 DETACHED = BranchState("HEAD is detached", None, True, frozenset({"origin"}))
 
 # (command, state, should_block). A safety hook without a test is theater; run these with
@@ -327,8 +327,8 @@ CASES: list[tuple[str, BranchState, bool]] = [
     ("git add -A && git commit -am 'step'", FEATURE, False),
     ("git commit", FEATURE, False),
     ("git cherry-pick abc123", FEATURE, False),
-    ("git merge origin/master", FEATURE, False),
-    ("git rebase origin/master", FEATURE, False),
+    ("git merge origin/main", FEATURE, False),
+    ("git rebase origin/main", FEATURE, False),
     # --- commits on the default branch or a detached HEAD: refused ---
     ("git commit -m 'fix'", DEFAULT, True),
     ("git --no-pager commit -m 'fix'", DEFAULT, True),
@@ -349,7 +349,7 @@ CASES: list[tuple[str, BranchState, bool]] = [
     ("git commit --no-verify -m x", FEATURE, True),
     ("git commit -n -m x", FEATURE, True),
     ("git commit -anm x", FEATURE, True),
-    ("git merge --no-verify origin/master", FEATURE, True),
+    ("git merge --no-verify origin/main", FEATURE, True),
     ("git pull --no-verify", FEATURE, True),
     # --- a message or value containing n is not the flag ---
     ("git commit -m 'nothing new'", FEATURE, False),
@@ -358,7 +358,7 @@ CASES: list[tuple[str, BranchState, bool]] = [
     ("git commit --message -n", FEATURE, False),
     ("git commit -C HEAD", FEATURE, False),
     # merge's and pull's -n is --no-stat, not --no-verify
-    ("git merge -n origin/master", FEATURE, False),
+    ("git merge -n origin/main", FEATURE, False),
     # --- syncing with the branch's own upstream: allowed on the default branch ---
     ("git pull", DEFAULT, False),
     ("git pull --ff-only", DEFAULT, False),
@@ -366,8 +366,8 @@ CASES: list[tuple[str, BranchState, bool]] = [
     ("git pull --ff-only", DEFAULT_NO_PULL_FF, False),
     ("git fetch origin && git merge --ff-only @{u}", DEFAULT, False),
     ("git merge --ff-only @{upstream}", DEFAULT, False),
-    ("git merge --ff-only master@{u}", DEFAULT, False),
-    ("git merge --ff-only origin/master", DEFAULT, False),
+    ("git merge --ff-only main@{u}", DEFAULT, False),
+    ("git merge --ff-only origin/main", DEFAULT, False),
     ("git merge --ff-only", DEFAULT, False),
     # --- naming another ref, or not fast-forward-only: refused on the default branch ---
     ("git pull --ff-only origin feature", DEFAULT, True),
@@ -377,10 +377,10 @@ CASES: list[tuple[str, BranchState, bool]] = [
     ("git pull --rebase", DEFAULT, True),
     ("git merge --ff-only origin/feature", DEFAULT, True),
     ("git merge --ff-only feature", DEFAULT, True),
-    ("git merge origin/master", DEFAULT, True),
+    ("git merge origin/main", DEFAULT, True),
     ("git merge --ff-only -m msg origin/feature", DEFAULT, True),
     ("git merge --ff-only @{u}", DETACHED, False),
-    ("git merge --ff-only origin/master", DETACHED, True),
+    ("git merge --ff-only origin/main", DETACHED, True),
     # --- compound commands: the later bad segment still blocks ---
     ("git status && git commit -m x", DEFAULT, True),
     ("git commit -m ok; git commit --no-verify -m bad", FEATURE, True),
