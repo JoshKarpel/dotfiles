@@ -319,7 +319,8 @@ def new(
     default branch of the remote `git-base-remote` names, a fork's parent when
     the clone has one, with no upstream, so the first push tracks
     origin/<branch> rather than the default branch. Running this again for a
-    worktree that exists opens another tab on it.
+    worktree that exists opens another tab on it, and one whose directory was
+    deleted outside git is pruned and checked out afresh.
 
     The tab is named <repo>:<branch>, and every pane opened in it, floating
     ones included, starts in the worktree. When the clone has a pre-commit
@@ -339,6 +340,10 @@ def new(
     path = worktrees_root(clone) / branch
 
     if not path.exists():
+        # A worktree whose directory was deleted outside git stays registered,
+        # and `worktree add` refuses its path, and its branch, until it is pruned.
+        # Pruning drops only registrations whose directory is gone and that are not locked.
+        git(clone, "worktree", "prune")
         base = git(clone, "base-remote")
         git(clone, "fetch", "--quiet", "--multiple", *dict.fromkeys(("origin", base)))
         exists = any(
