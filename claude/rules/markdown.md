@@ -14,28 +14,6 @@ paths:
 - Don't skip heading levels (e.g. `##` → `####`). Step down one level at a time.
 - One blank line before a heading, one blank line after.
 
-## Line Breaks
-
-Break prose by meaning, not by width,
-following [Semantic Line Breaks](https://sembr.org/).
-The payoff is in the diff:
-a reworded clause changes one line instead of reflowing the paragraph,
-so review shows what actually changed.
-
-- Break after every sentence.
-- Break after an independent clause (at a comma, semicolon, or colon)
-  when the sentence is long enough to need it.
-  A dependent clause or a closing parenthesis is a break point too,
-  where it clarifies the structure or keeps the line short.
-- Never break inside a phrase, a hyphenated word, a link, or inline code.
-- In a bullet that opens with a bolded lead sentence,
-  put the lead on a line of its own and the body on continuation lines
-  (indented 2 spaces).
-- Aim for lines under about 80 characters.
-  Width is the tiebreaker, not the rule:
-  a line holding a long URL or code span may run past it,
-  and a short sentence stays on one line rather than being split to look even.
-
 ## Code Blocks
 
 - Always use fenced code blocks (` ``` `), never indented ones. Fences are

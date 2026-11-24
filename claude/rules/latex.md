@@ -112,9 +112,6 @@ placement:
 
 ## Source Formatting
 
-- One sentence per line, breaking at commas and clause boundaries within a long
-  sentence. A reworded clause then shows up as a one-line diff instead of
-  reflowing the paragraph.
 - Quote with `` `` `` and `` '' ``, not the ASCII double quote.
 
 ## References
