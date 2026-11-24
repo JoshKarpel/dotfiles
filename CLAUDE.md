@@ -96,7 +96,10 @@ can just use the name.
 
 ## Key Commands
 
-Each script in `bin/` takes `--help`. What `--help` doesn't say is which ones
+Most scripts in `bin/` take `--help`; several don't, and ignore their
+arguments and run (`tidy`, `sync-branches`, `zellij-restart-session`,
+`converge-atlas`, `cloister-codex`), so read a script's header comment before
+running it to learn what it does. What neither says is which ones
 run on their own, so running them by hand is only for wanting it now:
 `install.sh` schedules `sync-branches` hourly on every machine, `tidy` daily on
 exe.dev, and `cloister-codex` and `converge-atlas` daily on exe.dev dev boxes.

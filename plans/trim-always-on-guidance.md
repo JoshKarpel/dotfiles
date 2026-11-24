@@ -219,8 +219,8 @@ The new rules are scoped to the files open when each mechanic matters:
   configured.
 
 This repo's self-tests live inside `bin/` scripts that match none of the test
-globs, so the repo's `.claude/rules/self-tests.md` points at
-`test-sandboxes.md` by path.
+globs, so the repo's `.claude/rules/self-tests.md` carries the sandbox
+isolation facts itself.
 
 `supply-chain.md` keeps its principles: fewer dependencies, pin and lock, one
 installer per tool, floors not caps, how a resolver's model changes what a cap
@@ -246,9 +246,9 @@ That's about 4.4k out of the always-on set.
   line, and publishing with `force: true`. Writing or revising a plan is a named
   task, and plan mode names it outright. In a repo, the
   `claude-stop-plan-artifact` check catches a missed publish. Plan mode's file
-  has no such check, so a miss there goes unnoticed until I look for the page;
-  `CLAUDE.md` keeps one line saying every plan has a published page, which is
-  what a session needs to recognize the task.
+  has no such check, so a miss there goes unnoticed until I look for the page.
+  The skill's description, in the listing every session loads, is what a
+  session has to recognize the task by; `CLAUDE.md` names no skills.
 
 `designs.md` and `platforms.md` stay always-on.
 Their questions (what does this proposal fix, what happens on partial failure,
@@ -462,8 +462,8 @@ Moves change no wording; compression changes no destination.
 
 - [x] Move the ecosystem settings out of `supply-chain.md`.
 - [x] Move the tool mechanics out of `testing.md` and `configuration.md`, and add
-  `python-tests.md`, `test-sandboxes.md`, `coverage.md`, `npm.md`, and the
-  self-tests rule's pointer.
+  `python-tests.md`, `test-sandboxes.md`, `coverage.md`, and `npm.md`, with
+  the sandbox facts inlined into the self-tests rule.
 - [x] Create the `operations` skill, and rename what stays to `rollouts.md`.
 - [x] Create the `plan-page` skill from the global `CLAUDE.md`'s plan bullet.
 - [x] Scope `harness-context.md`, and point the global `CLAUDE.md` and the three

@@ -392,7 +392,7 @@ while true; do
   # never seen can't be a later push from here, so it counts as GitHub not having caught up.
   pr_head=$(jq -r .headRefOid <<<"$pr")
   if [[ "$pr_head" != "$head" ]] && git merge-base --is-ancestor "$head" "$pr_head" 2>/dev/null; then
-    echo "PR #$number's head moved from $short to $(git rev-parse --short "$pr_head"), so a later push superseded this wait. The wait started after that push reports on it; nothing to do for this one."
+    echo "PR #$number's head moved from $short to $(git rev-parse --short "$pr_head"), so a later push superseded this wait. A land from here started its own wait, which reports on it; if nothing is waiting on that commit (a push from elsewhere, or GitHub updating the branch), pull it and run claude-wait-checks again."
     exit 8
   elif [[ "$pr_head" != "$head" ]]; then
     conflicts=0

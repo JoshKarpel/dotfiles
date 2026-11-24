@@ -326,6 +326,7 @@ def main() -> int:
     roles = {"user", "assistant"}
     seen: set[tuple[str, str]] = set()
     total = 0
+    printed = 0
     for label, transcript in transcripts:
         tag = f"{label} | " if multi else ""
         session_id = transcript.stem[:8]
@@ -340,11 +341,12 @@ def main() -> int:
                 if key in seen:
                     continue
                 seen.add(key)
+            printed += 1
             print(f"\n=== [{tag}{session_id} | {role} | {len(text)} chars] ===")
             print(text[: args.max_chars])
 
     print(
-        f"\n\n{len(transcripts)} transcripts | {total} messages | {len(seen)} unique",
+        f"\n\n{len(transcripts)} transcripts | {total} messages | {printed} unique",
         file=sys.stderr,
     )
     return 0
