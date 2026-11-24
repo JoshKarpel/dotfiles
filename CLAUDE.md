@@ -98,7 +98,7 @@ can just use the name.
 
 Most scripts in `bin/` take `--help`; several don't, and ignore their
 arguments and run (`tidy`, `sync-branches`, `zellij-restart-session`,
-`converge-atlas`, `cloister-codex`), so read a script's header comment before
+`converge-atlas`, `cloister-codex`, `link-claude`), so read a script's header comment before
 running it to learn what it does. What neither says is which ones
 run on their own, so running them by hand is only for wanting it now:
 `install.sh` schedules `sync-branches` hourly on every machine, `tidy` daily on
