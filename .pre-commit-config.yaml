@@ -54,11 +54,17 @@ repos:
         # are selected once and run together rather than split across batches.
         require_serial: true
         files: ^bin/
+      - id: check-bin-help
+        name: bin scripts answer --help
+        entry: bin/check-bin-help
+        language: script
+        files: ^bin/
 
 ci:
   # The self-tests shell out to hooks that expect a real dev environment
-  # (jq, python3, git state); skip them on pre-commit.ci and rely on the
-  # GitHub workflow, which has one. gitleaks is installed by mise, which neither
+  # (jq, python3, git state), and check-bin-help runs the uv scripts, which
+  # needs uv; skip both on pre-commit.ci and rely on the GitHub workflow,
+  # which has them. gitleaks is installed by mise, which neither
   # runner has; it guards the commit and `git land`, both before anything is
   # published, so a scan after the push would catch nothing in time.
-  skip: [claude-hook-selftests, gitleaks]
+  skip: [claude-hook-selftests, check-bin-help, gitleaks]

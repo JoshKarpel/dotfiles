@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
 # Play a notification sound, cross-platform (macOS + Linux).
-# Usage: claude-sound <stop|notify>
+# Usage: claude-sound [stop|notify], where no argument means stop.
 
 set -euo pipefail
+
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+if (($# > 1)) || [[ $# -eq 1 && "$1" != stop && "$1" != notify ]]; then
+  echo "claude-sound: unrecognized arguments: $*; see --help" >&2
+  exit 2
+fi
 
 # CLAUDE_HOOK_SELFTEST: set this env var to run the hook's embedded self-tests. This
 # marker line is how `claude-hook-selftests` discovers participating hooks. The hook

@@ -6,6 +6,15 @@
 # over the rest is a pass over part of the change. Deciding about them first is what makes the run
 # that follows cover everything.
 
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+if (($#)); then
+  echo "$(basename "$0"): takes no arguments; see --help" >&2
+  exit 2
+fi
+
 # No `-e`: a repository without hooks and a failing run are both expected answers, not faults, and
 # this hook's own exit status is read by `claude-stop` as whether the hook itself worked.
 set -uo pipefail

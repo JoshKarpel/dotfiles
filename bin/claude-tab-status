@@ -14,6 +14,11 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+
 # Strip a status glyph from a tab name, then apply the one for a state. Pure, so
 # the self-tests reach it without a zellij.
 render() {
@@ -125,11 +130,12 @@ EOF
 fi
 
 STATE="${1:-}"
+(($# == 1)) || STATE=""
 case "$STATE" in
   idle | working | waiting | paused | finished) ;;
   *)
     # Exit 1, never 2: on UserPromptSubmit a 2 would block the prompt itself.
-    echo "usage: claude-tab-status <idle|working|waiting|paused|finished>" >&2
+    echo "claude-tab-status: expected one of idle, working, waiting, paused, or finished; see --help" >&2
     exit 1
     ;;
 esac

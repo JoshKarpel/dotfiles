@@ -96,10 +96,10 @@ can just use the name.
 
 ## Key Commands
 
-Most scripts in `bin/` take `--help`; several don't, and ignore their
-arguments and run (`tidy`, `sync-branches`, `zellij-restart-session`,
-`converge-atlas`, `cloister-codex`, `link-claude`), so read a script's header comment before
-running it to learn what it does. What neither says is which ones
+Every script in `bin/` takes `--help` (`-h` through git, as in `git land -h`),
+prints its help, and rejects arguments it doesn't recognize,
+so asking a script what it does never runs it.
+What `--help` doesn't say is which ones
 run on their own, so running them by hand is only for wanting it now:
 `install.sh` schedules `sync-branches` hourly on every machine, `tidy` daily on
 exe.dev, and `cloister-codex` and `converge-atlas` daily on exe.dev dev boxes.
@@ -235,7 +235,7 @@ would apply a style to every session on every machine. The `harry` alias in
 - Shell scripts use 2-space indentation (enforced by beautysh via pre-commit)
 - Target files in `targets/` are auto-sorted by the `file-contents-sorter` pre-commit hook
 - Pre-commit hooks run via [pre-commit.ci](https://pre-commit.ci) on push; see
-  `.pre-commit-config.yaml` for the set. pre-commit.ci skips `claude-hook-selftests`
-  (it needs a real dev environment), so the `.github/workflows/pre-commit.yml`
+  `.pre-commit-config.yaml` for the set. pre-commit.ci skips `claude-hook-selftests` and `check-bin-help`
+  (they need a real dev environment), so the `.github/workflows/pre-commit.yml`
   workflow runs the full suite (that included) on push and PRs. Dependabot keeps the workflow's actions updated.
 - The `exists` helper function (from `sources/exists.sh`) is used throughout to check command availability before use

@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
+# Symlink every file under this repo's claude/ into ~/.claude/ at the same
+# relative path, moving a real file that's in the way to ~/.dotfiles-backups,
+# then prune links into claude/ whose source is gone. install.sh runs it.
+#
+# The links point at the clone this script runs from,
+# so running it from a worktree repoints ~/.claude at that worktree.
 
 set -euo pipefail
+
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+if (($#)); then
+  echo "$(basename "$0"): takes no arguments; see --help" >&2
+  exit 2
+fi
 
 BASEDIR="$(dirname "$(dirname "$(realpath "$0")")")"
 CLAUDE="$BASEDIR/claude"

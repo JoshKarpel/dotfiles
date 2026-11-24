@@ -39,6 +39,23 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+# Each subcommand's arguments, checked before the payload is read or anything is recorded.
+case "${1:-}:$#" in
+  :0 | fingerprint:1 | changed:2 | start:2 | stop:2 | ask:3 | asked:3) ;;
+  stop:3) [[ "$3" == --gated ]] || {
+      echo "claude-prompt-snapshot: unrecognized arguments: $*; see --help" >&2
+      exit 2
+    } ;;
+  *)
+    echo "claude-prompt-snapshot: unrecognized arguments: $*; see --help" >&2
+    exit 2
+    ;;
+esac
+
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker line is how
 # `claude-hook-selftests` discovers participating hooks. Every case is a git state across a sequence
 # of prompts and stops, so each runs against throwaway repositories; run these with
@@ -334,11 +351,6 @@ case "${1:-}" in
     ;;
 
   "") ;;
-
-  *)
-    echo "usage: claude-prompt-snapshot [changed <prompt-id> | stop <prompt-id> [--gated] | ask <prompt-id> <check> | asked <prompt-id> <check> | start <prompt-id> | fingerprint]" >&2
-    exit 2
-    ;;
 esac
 
 PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")

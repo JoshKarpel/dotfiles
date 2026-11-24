@@ -33,6 +33,7 @@ from __future__ import annotations
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests (`selftest`).
 # This marker line is how `claude-hook-selftests` discovers participating hooks.
 
+import argparse
 import json
 import os
 import re
@@ -471,6 +472,7 @@ def selftest() -> int:
 
 
 def main() -> int:
+    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
     if os.environ.get("CLAUDE_HOOK_SELFTEST"):
         return selftest()
     try:

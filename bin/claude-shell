@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 # Claude Code's CLAUDE_CODE_SHELL_PREFIX (set in claude/settings.json): every
 # Bash tool command, hook, and stdio MCP server runs through here, arriving as a
 # single argument to hand to a shell.
@@ -16,6 +15,11 @@
 # test. A failing systemd-run fails the command rather than running it uncapped.
 
 set -euo pipefail
+
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
 
 if [[ -d /run/systemd/system ]]; then
   exec systemd-run --user --scope --quiet --collect --slice=claude-work.slice -- bash -c "$1"

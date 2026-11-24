@@ -779,6 +779,13 @@ $push_output"
   echo "git land: pushed to #$number and updated its description from the draft."
 }
 
+# Every form takes at most one argument, so a stray second one is refused
+# before any of them acts on it.
+if (($# > 1)); then
+  usage >&2
+  exit 2
+fi
+
 case "${1:-}" in
   -h | --help)
     usage

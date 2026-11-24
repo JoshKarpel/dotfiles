@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Check that scripts in bin/ answer --help: exit 0 and print their help, without
+# running. Given paths (pre-commit passes the changed files under bin/), checks
+# those; with none, checks every script in bin/. Exits non-zero if any fails.
+#
+# A script is run with --help only once its source shows it handles the flag
+# (bash naming `--help` outside a comment, Python using argparse or typer), since
+# one that ignores its arguments would do its real work. The run happens in an
+# empty directory with no stdin, as a second guard rather than a sandbox.
+#
+# What this can't check is the other half of the convention, that a script
+# rejects an argument it doesn't recognize: running one with a bogus argument
+# would run it for real if it didn't.
+
+set -euo pipefail
+
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+
+bin_dir="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+
+scripts=()
+if (($#)); then
+  for path in "$@"; do
+    if [[ "$path" == -* ]]; then
+      echo "check-bin-help: unknown option '$path'; see --help" >&2
+      exit 2
+    fi
+    scripts+=("$bin_dir/$(basename "$path")")
+  done
+else
+  for path in "$bin_dir"/*; do
+    scripts+=("$path")
+  done
+fi
+
+sandbox="$(mktemp -d)"
+trap 'rm -rf "$sandbox"' EXIT
+
+# macOS has no `timeout` unless coreutils is installed; the bound is a guard
+# against a hang, not part of what's checked.
+# Bash 3.2 treats an empty array as unset under -u, hence the ${bound[@]+...} below.
+bound=()
+if command -v timeout >/dev/null 2>&1; then
+  bound=(timeout 120)
+fi
+
+failed=0
+for script in "${scripts[@]}"; do
+  name="$(basename "$script")"
+  [[ -f "$script" && -x "$script" ]] || continue
+
+  if [[ "$(head -n1 "$script")" == *"uv run"* ]]; then
+    handles='^(import argparse|import typer|from typer)'
+    grep -qE "$handles" "$script" || {
+      echo "$name: uses neither argparse nor typer, so --help isn't handled" >&2
+      failed=1
+      continue
+    }
+  else
+    # Not `grep -q`: it exits at the first match, and under pipefail the SIGPIPE
+    # that kills the `grep -v` still feeding it fails the pipeline.
+    grep -vE '^[[:space:]]*#' "$script" | grep -- '--help' >/dev/null || {
+      echo "$name: never handles --help" >&2
+      failed=1
+      continue
+    }
+  fi
+
+  status=0
+  output="$(cd "$sandbox" && ${bound[@]+"${bound[@]}"} "$script" --help </dev/null 2>&1)" || status=$?
+  if ((status != 0)); then
+    echo "$name: --help exited $status:" >&2
+    printf '%s\n' "$output" | sed 's/^/  /' >&2
+    failed=1
+  elif [[ -z "${output//[[:space:]]/}" ]]; then
+    echo "$name: --help printed nothing" >&2
+    failed=1
+  fi
+done
+
+exit "$failed"

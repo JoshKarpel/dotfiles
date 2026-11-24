@@ -5,6 +5,15 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+if (($#)); then
+  echo "$(basename "$0"): takes no arguments; see --help" >&2
+  exit 2
+fi
+
 # A stall shorter than this is doing something else (letting a port open, pacing a
 # loop); past it, the command is waiting, and waiting is the harness's job.
 STALL_SECONDS=30

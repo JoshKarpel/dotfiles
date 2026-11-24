@@ -1,8 +1,22 @@
 #!/bin/bash -l
-
-# https://stackoverflow.com/questions/10374520/gsettings-with-cron
+# Set the GNOME desktop background to a random image from $WALLPAPERS.
+#
+# Written to run from cron, whose environment has no session bus,
+# so it borrows DBUS_SESSION_BUS_ADDRESS from the running gnome-session
+# (https://stackoverflow.com/questions/10374520/gsettings-with-cron).
+# The login shell (`-l`) is what defines `random_file` and
+# `background_set_ubuntu`, from sources/.
 
 set -euo pipefail
+
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+if (($#)); then
+  echo "$(basename "$0"): takes no arguments; see --help" >&2
+  exit 2
+fi
 
 PID=$(pgrep gnome-session | tail -n1)
 if [[ -z "$PID" ]]; then

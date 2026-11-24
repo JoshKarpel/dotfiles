@@ -26,6 +26,7 @@ following them is what made room reset the highlight whenever any tab updated (r
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import os
@@ -341,6 +342,7 @@ def list_tabs(attempts: int = 3) -> str:
 
 
 def main() -> int:
+    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
     if os.environ.get("CLAUDE_HOOK_SELFTEST"):
         return _selftest()
 

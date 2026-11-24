@@ -25,6 +25,15 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+if (($# > 1)) || [[ $# -eq 1 && "$1" != --refresh ]]; then
+  echo "claude-fetch-pr: unrecognized arguments: $*; see --help" >&2
+  exit 2
+fi
+
 TTL=60 # seconds
 
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker

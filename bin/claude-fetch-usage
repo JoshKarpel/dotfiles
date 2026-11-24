@@ -6,6 +6,15 @@
 # discards it since it renders every prompt.
 # Cache is stored globally (shared across Claude Code instances on this machine).
 
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+if (($#)); then
+  echo "$(basename "$0"): takes no arguments; see --help" >&2
+  exit 2
+fi
+
 CACHE_FILE="${TMPDIR:-/tmp}/claude-usage-cache.json"
 LOCK_FILE="${TMPDIR:-/tmp}/claude-usage-cache.lock"
 CACHE_TTL=60 # seconds

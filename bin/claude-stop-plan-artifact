@@ -20,6 +20,15 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+if (($#)) && [[ $# -ne 2 || "$1" != --record ]]; then
+  echo "claude-stop-plan-artifact: unrecognized arguments: $*; see --help" >&2
+  exit 2
+fi
+
 # Marks of the plan texts whose pages have been published, from any repo or none (plan mode's plans
 # live outside one), so the record is per user rather than per git directory.
 PUBLISHED="${XDG_STATE_HOME:-$HOME/.local/state}/claude/plan-pages-published"

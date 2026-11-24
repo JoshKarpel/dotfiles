@@ -10,6 +10,15 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+if (($# > 1)) || [[ "${1:-}" == -* ]]; then
+  echo "$(basename "$0"): takes at most one DIRECTORY; see --help" >&2
+  exit 2
+fi
+
 # CLAUDE_HOOK_SELFTEST: set this env var to run the embedded self-tests. This marker
 # line is how `claude-hook-selftests` discovers participating scripts. VSCODE_LINK_HOSTS
 # stands in for /etc/hosts, so the tests run off exe.dev too.

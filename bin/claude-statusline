@@ -2,6 +2,15 @@
 # Claude Code status line script
 # Receives JSON session data on stdin, outputs formatted text lines
 
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"
+  exit 0
+fi
+if (($#)); then
+  echo "$(basename "$0"): takes no arguments; see --help" >&2
+  exit 2
+fi
+
 data=$(cat)
 
 model=$(echo "$data" | jq -r '.model.display_name // "unknown"')
