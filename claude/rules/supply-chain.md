@@ -81,6 +81,7 @@ Use a relative duration (a sliding "last N days" window):
 for major version bumps.
 Configure it with each ecosystem's own knob;
 what the knob filters decides how you take a fresh release anyway.
+Exempt my own packages, whose releases I trust the day they ship.
 
 Before scripting a cooldown yourself (a wrapper that filters versions
 by publish date, a CI job that rejects fresh releases),
