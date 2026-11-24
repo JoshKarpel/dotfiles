@@ -60,7 +60,9 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   stubs="$workdir/stubs"
   mkdir -p "$stubs"
   printf '#!/bin/sh\n[ -n "${STUB_LAND_STATE:-}" ] || exit 1\nprintf "%%s\\n" "$STUB_LAND_STATE"\n' >"$stubs/git-land"
-  chmod +x "$stubs/git-land"
+  # Whether GitHub takes commits on the default branch: STUB_DIRECT (0 = it does).
+  printf '#!/bin/sh\nexit "${STUB_DIRECT:-1}"\n' >"$stubs/is-claude-commit-branch"
+  chmod +x "$stubs/git-land" "$stubs/is-claude-commit-branch"
   land() {
     OUT=$(cd "$repo" && STUB_LAND_STATE="$1" PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1)
   }
@@ -79,6 +81,10 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   check_contains "a PR that failed to open" "the PR failed to open"
   land $'path=/g/land/b/pr.md\ndraft=yes\nlanded=yes\nstale=no\ndraft_changed=no\nunlanded=2\npr_failed=no\ndefault=yes'
   check_not_contains "the default branch" "Landing"
+  STUB_DIRECT=0 land $'path=/g/land/b/pr.md\ndraft=no\nlanded=no\nstale=no\ndraft_changed=no\nunlanded=2\npr_failed=no\ndefault=yes'
+  check_contains "a direct default branch" "without a PR, so commit on it"
+  check_contains "a direct default branch's count" "Unlanded commits (origin lacks them): 2"
+  check_not_contains "a direct default branch" "PR draft: "
 
   call "$repo"
   check_contains "on the default branch" "Current git status:"
@@ -119,10 +125,22 @@ $STATUS
 EOF
 
 # Where this branch's landing stands, from `git-land --state`, which owns what each field means.
-# Local only: no network call at session start. Not on the default branch, whose unlanded commits
-# are Josh's, so reporting them would invite a land the stop checks exist to prevent.
-if LAND_STATE=$(git-land --state 2>/dev/null) && grep -qx 'default=no' <<<"$LAND_STATE"; then
-  land_field() { sed -n "s/^$1=//p" <<<"$LAND_STATE"; }
+# Not on the default branch, whose unlanded commits are Josh's, so reporting them would invite a
+# land the stop checks exist to prevent. The exception is a default branch GitHub takes commits on
+# without a PR, which only `is-claude-commit-branch` can say (by asking GitHub, so a session started
+# on a default branch pays for one call): there the instructions differ from the global CLAUDE.md's
+# PR flow, and this is where a session learns them.
+LAND_STATE=$(git-land --state 2>/dev/null) || LAND_STATE=""
+land_field() { sed -n "s/^$1=//p" <<<"$LAND_STATE"; }
+if grep -qx 'default=yes' <<<"$LAND_STATE" && is-claude-commit-branch >/dev/null; then
+  cat <<EOF
+
+Landing (\`git land\`):
+
+- This is the default branch, and GitHub takes commits on it without a PR, so commit on it as on any other branch and land each turn's commits with \`git land\`, which pushes and opens no PR. There is no PR draft to write and no PR checks to wait on.
+- Unlanded commits (origin lacks them): $(land_field unlanded)
+EOF
+elif grep -qx 'default=no' <<<"$LAND_STATE"; then
   if [[ "$(land_field draft)" == yes ]]; then
     DRAFT="written"
   else

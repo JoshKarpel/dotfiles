@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
 # Exit 0 when Claude may commit on the current branch, else print why not and exit 1.
 #
-# The one predicate `claude-git-commit-check` (before a commit) and `claude-stop-commit` (before
-# asking for one) share, so they can't disagree about where a commit is allowed. Claude commits on
-# any branch but the repo's default, which is read from `refs/remotes/origin/HEAD`: local, so no
-# network call. A repo with no `origin` has nowhere to push, so every branch is allowed there. A
-# repo with an `origin` but no `origin/HEAD` can't say which branch is the default, so it is refused
-# rather than guessed, with the command that sets it.
+# The one predicate `claude-git-commit-check` (before a commit), `claude-stop-commit` (before asking
+# for one), and the checks that ask for a land share, so they can't disagree about which branches
+# hold Claude's work. Claude commits on any branch but the repo's default, which is read from
+# `refs/remotes/origin/HEAD`: local, so no network call. A repo with no `origin` has nowhere to push,
+# so every branch is allowed there. A repo with an `origin` but no `origin/HEAD` can't say which
+# branch is the default, so it is refused rather than guessed, with the command that sets it.
+#
+# The default branch is allowed too where GitHub puts no PR rule on it: no ruleset gives it a
+# `pull_request` rule, and classic branch protection is off. An unprotected default branch is
+# deliberate (a spike, a talk, a record of changes that deploys nothing that matters), so there
+# Claude commits on it and pushes, with no PR. Only the default branch asks GitHub, two reads of
+# about 0.3s each, and where GitHub can't be asked the branch is refused. Callers that can rule a
+# land out locally do that first, so a turn with nothing to land costs no network call.
+# Nothing here enforces the rule: a stale answer, or a rule added since, meets GitHub refusing the
+# push.
 
 set -euo pipefail
 
@@ -42,6 +51,7 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   git clone -q "$workdir/upstream" "$workdir/clone"
 
   t "outside any repo is refused" "$workdir" 1 "not in a git repository"
+  # A local origin is no GitHub repo, so `gh` can't answer and the default branch is refused.
   t "the default branch is refused" "$workdir/clone" 1 "default branch trunk"
   git -C "$workdir/clone" checkout -q -b feature
   t "another branch is allowed" "$workdir/clone" 0 ""
@@ -54,6 +64,48 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   git init -q -b trunk "$workdir/scratch"
   git -C "$workdir/scratch" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m init
   t "no origin allows even the would-be default" "$workdir/scratch" 0 ""
+
+  # --- the default branch with no PR rule: GitHub's answer, stubbed ---
+  # The stub records each call and answers the two protection reads from GH_RULES and GH_CLASSIC.
+  stubs="$workdir/stubs"
+  mkdir -p "$stubs"
+  printf '%s\n' '#!/bin/sh' \
+    'echo "$GH_REPO $*" >>"$STUB_CALLS"' \
+    '[ "$1" = api ] && [ -z "$GH_API_EXIT" ] || exit 1' \
+    'case "$2" in' \
+    '  */rules/branches/*) printf "%s" "${GH_RULES:-[]}" ;;' \
+    '  */branches/*) printf "{\"protected\":true,\"protection\":{\"enabled\":%s}}" "${GH_CLASSIC:-false}" ;;' \
+    '  *) exit 1 ;;' \
+    'esac' >"$stubs/gh"
+  chmod +x "$stubs/gh"
+  export STUB_CALLS="$workdir/calls"
+  : >"$STUB_CALLS"
+  cache="$workdir/clone/.git/claude-direct-default"
+  # Each case starts uncached, except where it says it reads the cache.
+  gh_t() { rm -f "$cache"; PATH="$stubs:$PATH" t "$@"; }
+  git -C "$workdir/clone" remote set-head origin --auto >/dev/null
+  git -C "$workdir/clone" checkout -q trunk
+  GH_RULES='[{"type":"deletion"},{"type":"pull_request"}]' gh_t "a PR rule refuses the default" "$workdir/clone" 1 "pull requests"
+  grep -qF "$workdir/upstream api repos/{owner}/{repo}/rules/branches/trunk" "$STUB_CALLS" ||
+  { printf 'FAIL GitHub is asked about origin and its default :: %s\n' "$(cat "$STUB_CALLS")"; fails=1; }
+  GH_RULES='[{"type":"deletion"},{"type":"non_fast_forward"}]' gh_t "rules with no PR rule allow the default" "$workdir/clone" 0 ""
+  GH_CLASSIC=true gh_t "classic protection refuses the default" "$workdir/clone" 1 "pull requests"
+  GH_API_EXIT=1 gh_t "GitHub unreachable refuses the default" "$workdir/clone" 1 "pull requests"
+  [[ ! -e "$cache" ]] || { printf 'FAIL an unanswered read is cached :: %s\n' "$(cat "$cache")"; fails=1; }
+
+  # --- the minute-long cache ---
+  gh_t "an allowance to cache" "$workdir/clone" 0 ""
+  : >"$STUB_CALLS"
+  GH_API_EXIT=1 PATH="$stubs:$PATH" t "a fresh cache answers without asking" "$workdir/clone" 0 ""
+  [[ ! -s "$STUB_CALLS" ]] || { printf 'FAIL a fresh cache asked GitHub :: %s\n' "$(cat "$STUB_CALLS")"; fails=1; }
+  touch -t 200001010000 "$cache"
+  GH_API_EXIT=1 PATH="$stubs:$PATH" t "an expired cache asks again" "$workdir/clone" 1 "pull requests"
+  printf 'main yes\n' >"$cache"
+  GH_API_EXIT=1 PATH="$stubs:$PATH" t "a cache for another default asks again" "$workdir/clone" 1 "pull requests"
+  git -C "$workdir/clone" checkout -q feature
+  : >"$STUB_CALLS"
+  GH_API_EXIT=1 gh_t "another branch never asks GitHub" "$workdir/clone" 0 ""
+  [[ ! -s "$STUB_CALLS" ]] || { printf 'FAIL another branch asked GitHub :: %s\n' "$(cat "$STUB_CALLS")"; fails=1; }
 
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
@@ -79,8 +131,33 @@ if ! DEFAULT=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD); then
 fi
 DEFAULT=${DEFAULT#origin/}
 
-if [[ "$BRANCH" == "$DEFAULT" ]]; then
-  echo "on the default branch $DEFAULT: Claude commits on a worktree branch, never the default"
+# Whether GitHub lets commits reach <default> without a PR. `branches/<b>`'s `protected` is true for
+# any ruleset, a deletion rule included, so the PR rule is read from the rules that apply to the
+# branch. Classic protection's details need admin to read, so any of it counts as a PR rule.
+# `GH_REPO` takes origin's URL as is, so `gh` reads the host, owner, and repo from it.
+#
+# The answer is cached for a minute in the git common directory, as `<branch> yes|no`, because one
+# stop sequence asks several times; GitHub's answer is never older than that. A failed read caches
+# nothing.
+takes_direct_commits() {
+  local default="$1" cache line rules classic answer=no
+  cache="$(git rev-parse --path-format=absolute --git-common-dir)/claude-direct-default"
+  if [[ -n "$(find "$cache" -mmin -1 2>/dev/null)" ]] && line=$(cat "$cache") && [[ "$line" == "$default "* ]]; then
+    [[ "$line" == "$default yes" ]]
+    return
+  fi
+  local -x GH_REPO
+  GH_REPO=$(git remote get-url origin)
+  rules=$(gh api "repos/{owner}/{repo}/rules/branches/$default" 2>/dev/null |
+  jq '[.[] | select(.type == "pull_request")] | length') || return 1
+  classic=$(gh api "repos/{owner}/{repo}/branches/$default" 2>/dev/null | jq '.protection.enabled') || return 1
+  [[ "$rules" == 0 && "$classic" == false ]] && answer=yes
+  printf '%s %s\n' "$default" "$answer" >"$cache"
+  [[ "$answer" == yes ]]
+}
+
+if [[ "$BRANCH" == "$DEFAULT" ]] && ! takes_direct_commits "$DEFAULT"; then
+  echo "on the default branch $DEFAULT, which takes changes through pull requests (or GitHub couldn't say whether it does): Claude commits on a worktree branch"
   exit 1
 fi
 exit 0

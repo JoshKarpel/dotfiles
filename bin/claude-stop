@@ -74,6 +74,11 @@ EOF
 [ -n "${STUB_LAND_STATE:-}" ] || exit 1
 printf '%s\n' "$STUB_LAND_STATE"
 EOF
+  # Whether GitHub takes commits on the default branch: STUB_DIRECT (0 = it does).
+  cat >"$stubs/is-claude-commit-branch" <<'EOF'
+#!/bin/sh
+exit "${STUB_DIRECT:-1}"
+EOF
   # The small model that reads the reply: records the call, answers STUB_CLAUDE_OUT.
   cat >"$stubs/claude" <<'EOF'
 #!/bin/sh
@@ -222,6 +227,14 @@ EOF
     "{$P,\"last_assistant_message\":\"Which one?\"}" \
     0 "" "$ALL,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES \
     STUB_LAND_STATE=$'landed=yes\nunlanded=1\npr_failed=no\ndefault=yes'
+  t "a direct default branch never landed, with unlanded commits, could block" \
+    "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "gate,sound,tab-waiting" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES STUB_DIRECT=0 \
+    STUB_LAND_STATE=$'landed=no\nunlanded=1\npr_failed=no\ndefault=yes'
+  t "a direct default branch with nothing unlanded needs no gate" \
+    "{$P,\"last_assistant_message\":\"Which one?\"}" \
+    0 "" "$ALL,sound,tab-finished" STUB_CHANGED=1 STUB_CLAUDE_OUT=YES STUB_DIRECT=0 \
+    STUB_LAND_STATE=$'landed=yes\nunlanded=0\npr_failed=no\ndefault=yes'
 
   if [[ "$fails" == 0 ]]; then
     echo "$(basename "$0"): all self-tests passed"
@@ -298,7 +311,9 @@ fi
 # the land check hasn't asked yet and either the branch is landed with unlanded commits or its PR
 # failed to open. A branch that has never been landed only earns a reminder, which needs no gate. Without the "hasn't asked yet" half, every
 # reply to a check in a turn that changed the repo would cost a model call, the report included.
-# All of it is local, so a discussion turn costs no model call.
+# On a default branch GitHub takes commits on without a PR, any unlanded commit could block. All of
+# it is local but that last question, which asks GitHub only once there are unlanded commits on the
+# default branch, so a discussion turn costs no model call.
 could_block() {
   git rev-parse --git-dir >/dev/null 2>&1 || return 1
   if claude-prompt-snapshot changed "$PROMPT_ID" >/dev/null; then
@@ -309,6 +324,10 @@ could_block() {
   claude-prompt-snapshot asked "$PROMPT_ID" land && return 1
   local state
   state=$(git-land --state 2>/dev/null) || return 1
+  if grep -qx 'default=yes' <<<"$state"; then
+    ! grep -qx 'unlanded=0' <<<"$state" && is-claude-commit-branch >/dev/null
+    return
+  fi
   grep -qx 'default=no' <<<"$state" || return 1
   grep -qx 'pr_failed=yes' <<<"$state" && return 0
   grep -qx 'landed=yes' <<<"$state" && ! grep -qx 'unlanded=0' <<<"$state"

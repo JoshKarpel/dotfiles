@@ -2,17 +2,19 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""PreToolUse hook: keep Claude's commits off the default branch, and keep pre-commit running.
+"""PreToolUse hook: keep Claude's commits off a PR-gated default branch, and keep pre-commit running.
 
 Claude commits on worktree branches without being asked, and `git land` pushes whatever
 branch it's on, so a commit on the default branch is one land away from skipping the pull
-request wherever a repo has no PR rule. This blocks, before the Bash call runs:
+request. Where GitHub puts no PR rule on the default branch, skipping it is the point, and
+`is-claude-commit-branch` allows the default branch there. This blocks, before the Bash
+call runs:
 
 - a `git commit` that skips the hooks (`--no-verify`, `-n`, or a short-flag cluster with
   `n` in it, such as `-anm`), and a `merge`, `pull`, or `am` with `--no-verify`;
 - a `commit`, `cherry-pick`, `revert`, `am`, or `rebase` on a branch
-  `is-claude-commit-branch` refuses (the default branch, a detached `HEAD`, or an `origin`
-  with no `HEAD`), except `--abort` and `--quit`, which create nothing;
+  `is-claude-commit-branch` refuses (a default branch with a PR rule, a detached `HEAD`, or
+  an `origin` with no `HEAD`), except `--abort` and `--quit`, which create nothing;
 - a `merge` or `pull` on such a branch, unless it only fast-forwards the branch to its own
   upstream: `git pull --ff-only`, or a bare `git pull` where `pull.ff` is `only`, naming
   no ref (a lone remote name counts as none), and `git merge --ff-only` naming nothing,
@@ -310,7 +312,7 @@ def read_state(cwd: str) -> BranchState:
     )
 
 
-DEFAULT_REASON = "on the default branch master: Claude commits on a worktree branch, never the default"
+DEFAULT_REASON = "on the default branch master, which takes changes through pull requests: Claude commits on a worktree branch"
 FEATURE = BranchState(None, "feature", True, frozenset({"origin", "upstream"}))
 DEFAULT = BranchState(DEFAULT_REASON, "master", True, frozenset({"origin", "upstream"}))
 DEFAULT_NO_PULL_FF = BranchState(DEFAULT_REASON, "master", False, frozenset({"origin"}))

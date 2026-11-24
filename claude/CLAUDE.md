@@ -21,7 +21,10 @@ This is a durable authorization: you needn't ask before any of it, in any sessio
 
 - Commit on any branch but the default without waiting to be asked, once pre-commit
   passes. The `claude-git-commit-check` hook refuses a commit on the default branch or a
-  detached `HEAD`, and `--no-verify`.
+  detached `HEAD`, and `--no-verify`. A default branch GitHub puts no PR rule on is
+  unprotected on purpose (a spike, a talk, a record of changes), so there you commit on
+  it and push each turn's commits, with no PR; the session-start git status says when
+  that's the case.
 - Commit at the end of each turn that changed files, unless the turn ends on a question
   or an offer to me. The `claude-stop-commit` check asks for it once pre-commit has
   passed; write a message describing the step.
