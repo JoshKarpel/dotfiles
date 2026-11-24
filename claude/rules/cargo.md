@@ -11,20 +11,19 @@ paths:
 
 # Cargo Project Configuration
 
-Conventions for a Rust project's configuration files: edition, toolchain
-pinning, dependencies, formatting, and linting.
+Conventions for a Rust project's configuration files: edition,
+toolchain pinning, dependencies, formatting, and linting.
 
 ## Edition
 
-Use the latest stable edition in `Cargo.toml` for new projects; don't change
-the edition of an existing project as a side effect of other work.
+Use the latest stable edition in `Cargo.toml` for new projects;
+don't change the edition of an existing project as a side effect of other work.
 
 ## Toolchain
 
-Which compiler builds the project, as distinct from the tools it invokes. Pin
-the channel and version at the repo root in
-`rust-toolchain.toml`, so
-contributors and CI share one compiler:
+Which compiler builds the project, as distinct from the tools it invokes.
+Pin the channel and version at the repo root in `rust-toolchain.toml`,
+so contributors and CI share one compiler:
 
 ```toml
 [toolchain]
@@ -32,42 +31,47 @@ channel = "1.96.0"
 components = ["clippy", "rustfmt"]
 ```
 
-Pin to stable. Where nightly is genuinely needed, reach for it per invocation with
-`cargo +nightly <command>`, which overrides the pinned channel, rather than putting
-the whole project on nightly. Install it once with
-`rustup toolchain install nightly --component rustfmt`.
+Pin to stable.
+Where nightly is genuinely needed, reach for it per invocation
+with `cargo +nightly <command>`, which overrides the pinned channel,
+rather than putting the whole project on nightly.
+Install it once with `rustup toolchain install nightly --component rustfmt`.
 
 Two cases commonly need it:
 
 - Unstable `rustfmt.toml` options, so formatting runs as `cargo +nightly fmt`.
-- `#[bench]`/`test::Bencher`. Prefer staying on stable and reaching for
-  hyperfine or `criterion`/`divan` instead.
+- `#[bench]`/`test::Bencher`.
+  Prefer staying on stable and reaching for hyperfine
+  or `criterion`/`divan` instead.
 
 ## Dependencies
 
-Preview how a dependency resolves before committing to it, then add it with an
-explicit pinned version:
+Preview how a dependency resolves before committing to it,
+then add it with an explicit pinned version:
 
 ```bash
 cargo add <crate> --dry-run
 cargo add <crate>@<version>
 ```
 
-`Cargo.lock` is committed, so keep it in step with anything edited in
-`Cargo.toml` by hand. After bumping the package's own version,
-`cargo update -p <package> --offline` refreshes just that entry without touching
-dependencies or reaching the network.
+`Cargo.lock` is committed,
+so keep it in step with anything edited in `Cargo.toml` by hand.
+After bumping the package's own version,
+`cargo update -p <package> --offline` refreshes just that entry
+without touching dependencies or reaching the network.
 
 ## Cooldown
 
 Stable cargo has no cooldown as of 1.100: recheck on each toolchain upgrade,
-and tell me when it gains one. Nightly has `cargo generate-lockfile
--Zunstable-options --publish-time <yyyy-mm-ddThh:mm:ssZ>`, which resolves as of
-an absolute timestamp, not a relative window, and only regenerates the whole
-lockfile: `cargo update` and `cargo add` don't take it. Follow
-[rust-lang/cargo#5221](https://github.com/rust-lang/cargo/issues/5221) for a
-stable form, and check `cargo help generate-lockfile` on the toolchain in use
-before reaching for anything hand-rolled.
+and tell me when it gains one.
+Nightly has
+`cargo generate-lockfile -Zunstable-options --publish-time <yyyy-mm-ddThh:mm:ssZ>`,
+which resolves as of an absolute timestamp,
+not a relative window, and only regenerates the whole lockfile:
+`cargo update` and `cargo add` don't take it.
+Follow [rust-lang/cargo#5221](https://github.com/rust-lang/cargo/issues/5221)
+for a stable form, and check `cargo help generate-lockfile` on the toolchain
+in use before reaching for anything hand-rolled.
 
 ## Formatting
 
@@ -84,17 +88,19 @@ combine_control_expr = false
 reorder_impl_items = true
 ```
 
-- `imports_granularity = "Item"`: one `use` per imported item, so adding or
-  removing an import touches a single line rather than reflowing a combined
-  `use x::{a, b, c}`. Matches `isort.force-single-line` on the Python side.
-- `group_imports = "StdExternalCrate"`: three import groups (std, external,
-  crate-local).
+- `imports_granularity = "Item"`: one `use` per imported item,
+  so adding or removing an import touches a single line rather
+  than reflowing a combined `use x::{a, b, c}`.
+  Matches `isort.force-single-line` on the Python side.
+- `group_imports = "StdExternalCrate"`:
+  three import groups (std, external, crate-local).
 - `combine_control_expr = false`: keeps `} else {` on separate lines.
 - `reorder_impl_items = true`: sorts items inside `impl` blocks.
 
-Every option above is unstable, so run `cargo +nightly fmt`. Stable rustfmt does
-not fail on them: it prints `can't set ...` warnings and formats without them, so
-formatting on stable quietly produces a different result than CI does.
+Every option above is unstable, so run `cargo +nightly fmt`.
+Stable rustfmt does not fail on them:
+it prints `can't set ...` warnings and formats without them,
+so formatting on stable quietly produces a different result than CI does.
 
 ## Linting
 

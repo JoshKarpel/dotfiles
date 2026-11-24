@@ -2,69 +2,78 @@
 
 ## Source Hierarchy
 
-Prefer sources higher on this list, and drop down only when the step above
-genuinely isn't available.
-They all propagate a rotated value without a restart; what each step down
-trades away is the *absence* of long-lived secret material to store, leak, and
-manage, along with some blast-radius control and auditability.
+Prefer sources higher on this list,
+and drop down only when the step above genuinely isn't available.
+They all propagate a rotated value without a restart;
+what each step down trades away is the *absence*
+of long-lived secret material to store, leak, and manage,
+along with some blast-radius control and auditability.
 
-1. **Workload identity (IAM).** Best: the workload authenticates *as itself*
-   and the cloud issues short-lived, auto-rotated credentials, so there is no
-   long-lived secret to store, leak, or rotate.
-   Use your cloud provider's mechanism for mapping a pod's service account to
-   a cloud identity.
-   Workload identity federation (WIF) extends this across clouds and to
-   external OIDC providers: a workload in one cloud (or a CI runner, or
-   on-prem) exchanges its own identity token for short-lived credentials in
-   another, so cross-cloud access still needs no stored key.
+1. **Workload identity (IAM).**
+   Best: the workload authenticates *as itself*
+   and the cloud issues short-lived, auto-rotated credentials,
+   so there is no long-lived secret to store, leak, or rotate.
+   Use your cloud provider's mechanism for mapping a pod's service account
+   to a cloud identity.
+   Workload identity federation (WIF)
+   extends this across clouds and to external OIDC providers:
+   a workload in one cloud (or a CI runner, or on-prem)
+   exchanges its own identity token for short-lived credentials in another,
+   so cross-cloud access still needs no stored key.
    This covers most cloud-service access (databases, object storage, queues,
-   other APIs that support IAM auth); reach for a stored secret only for third
-   parties that can't do identity-based auth.
+   other APIs that support IAM auth); reach for a stored secret only
+   for third parties that can't do identity-based auth.
 
-2. **External secrets manager, synced at runtime.** When a static secret is
-   unavoidable, keep it in a dedicated manager (AWS Secrets Manager, GCP Secret
-   Manager, Vault) and have the platform pull it in at runtime.
-   The secret lives in one auditable, rotatable place; the workload gets a
-   synced or freshly-fetched copy rather than the source of truth.
+2. **External secrets manager, synced at runtime.**
+   When a static secret is unavoidable, keep it
+   in a dedicated manager (AWS Secrets Manager, GCP Secret Manager, Vault)
+   and have the platform pull it in at runtime.
+   The secret lives in one auditable, rotatable place;
+   the workload gets a synced or freshly-fetched copy rather than the source
+   of truth.
 
-3. **A platform-mounted secret file.** Read it from disk at the point of use.
-   A platform that refreshes the mount delivers a rotated value without a
-   restart, and file contents don't leak the way the environment does.
+3. **A platform-mounted secret file.**
+   Read it from disk at the point of use.
+   A platform that refreshes the mount delivers a rotated value
+   without a restart, and file contents don't leak the way the environment does.
 
-**Never mount secrets as env vars.** Env vars are fixed at process start, so a
-rotated secret never reaches a running process without a restart, defeating
-rotation entirely.
-They also leak readily: inherited by every child process, surfaced in crash
-dumps and error trackers, exposed in `/proc/<pid>/environ`, and easy to log by
-accident.
+**Never mount secrets as env vars.**
+Env vars are fixed at process start,
+so a rotated secret never reaches a running process without a restart,
+defeating rotation entirely.
+They also leak readily: inherited by every child process,
+surfaced in crash dumps and error trackers, exposed in `/proc/<pid>/environ`,
+and easy to log by accident.
 Mount as a file and read it off disk instead.
 
-Likewise never hardcode secrets in image layers, source code, command-line args
-(visible in `ps` and process listings), or plain `ConfigMap`s.
-A value baked into an image is permanent: it ships everywhere the image does
-and can't be rotated without a rebuild.
+Likewise never hardcode secrets in image layers, source code,
+command-line args (visible in `ps` and process listings), or plain `ConfigMap`s.
+A value baked into an image is permanent:
+it ships everywhere the image does and can't be rotated without a rebuild.
 
 ## Handling Secrets Once Loaded
 
-- **Wrap them in a redacting type** (Pydantic's `SecretStr` in Python) rather
-  than carrying raw secret strings around.
+- **Wrap them in a redacting type** (Pydantic's `SecretStr` in Python)
+  rather than carrying raw secret strings around.
 - **Never log secrets**, and be wary of logging whole objects, request bodies,
   or config dumps that might contain them.
-- **Don't pin the value at startup.** A secret loaded once and held for the
-  process lifetime goes stale when it rotates.
-  Watch the mounted file and refresh an in-process holder, rather than
-  re-reading it on every access; re-fetching on an auth failure is a
-  reasonable extra safety net for credentials.
+- **Don't pin the value at startup.**
+  A secret loaded once and held for the process lifetime goes stale
+  when it rotates.
+  Watch the mounted file and refresh an in-process holder,
+  rather than re-reading it on every access; re-fetching
+  on an auth failure is a reasonable extra safety net for credentials.
   Don't copy the secret into wider-scoped variables or telemetry.
 
 ## Scope and Lifecycle
 
-- **Least privilege.** Scope each credential to exactly what one workload
-  needs.
-  Per-workload identities and per-workload secrets keep a leak from becoming a
-  cluster-wide compromise.
-- **Keep secrets out of config interfaces.** Helm values, XRD specs, and
-  similar should reference a `Secret` by name, never carry the value itself.
+- **Least privilege.**
+  Scope each credential to exactly what one workload needs.
+  Per-workload identities and per-workload secrets keep a leak
+  from becoming a cluster-wide compromise.
+- **Keep secrets out of config interfaces.**
+  Helm values, XRD specs, and similar should reference a `Secret` by name,
+  never carry the value itself.
 
 ## References
 

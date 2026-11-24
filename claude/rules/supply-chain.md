@@ -4,39 +4,43 @@
 
 Every dependency is attack surface and a maintenance liability.
 Before adding one, weigh it against the stdlib or a few lines of your own code.
-Prefer well-maintained, widely-used packages with a real release history over
-a fresh or single-maintainer package that happens to fit.
+Prefer well-maintained, widely-used packages with a real release history
+over a fresh or single-maintainer package that happens to fit.
 A transitive dependency you never chose is still yours to trust.
 
-"A few lines of your own code" stops being cheaper in two cases, so take the
-dependency there:
+"A few lines of your own code" stops being cheaper in two cases,
+so take the dependency there:
 
-- **The code tracks an external standard.** Unicode widths and grapheme rules,
-  time zones, MIME types, and public suffixes change on someone else's release
-  schedule. A hand-rolled table is right on the day it's written and silently
-  wrong after the next revision; a maintained package is updated for you.
-- **Every project would write the same few lines.** A helper that each repo
-  would otherwise reimplement (a coverage plugin, a test fixture library) is
-  one dependency to vet once, against N private copies that drift apart.
+- **The code tracks an external standard.**
+  Unicode widths and grapheme rules, time zones, MIME types,
+  and public suffixes change on someone else's release schedule.
+  A hand-rolled table is right on the day it's written and silently wrong
+  after the next revision; a maintained package is updated for you.
+- **Every project would write the same few lines.**
+  A helper that each repo would otherwise reimplement (a coverage plugin,
+  a test fixture library) is one dependency to vet once,
+  against N private copies that drift apart.
 
 The case is strongest for problems that are someone else's whole product:
-durable workflow execution, saga compensation, a policy engine, a query or
-templating language.
+durable workflow execution, saga compensation, a policy engine,
+a query or templating language.
 Your few lines grow into a system you own forever,
 where a battle-tested implementation of the hard part is cheaper.
 Adopt these deliberately, ideally one new foundational technology per project.
 Watch for configuration that keeps gaining conditionals and loops:
-it is becoming a programming language, and a home-grown one is the most
-expensive kind.
+it is becoming a programming language,
+and a home-grown one is the most expensive kind.
 
 ## One Installer per Tool
 
-Every repo we control has a `mise.toml` alongside the package manager of each
-language it's written in, and every development tool comes from exactly one of
-them. A tool that a primary language's package manager can hold as a project
-dev dependency goes there: ruff, `pre-commit-hooks`, and zizmor in a Python
-repo's uv dev group. Every other tool goes in `mise.toml`:
-the same hooks in a Rust or shell repo, or a Go linter in a Python repo.
+Every repo we control has a `mise.toml` alongside the package manager
+of each language it's written in,
+and every development tool comes from exactly one of them.
+A tool that a primary language's package manager can hold
+as a project dev dependency goes there: ruff, `pre-commit-hooks`,
+and zizmor in a Python repo's uv dev group.
+Every other tool goes in `mise.toml`: the same hooks in a Rust or shell repo,
+or a Go linter in a Python repo.
 
 Nothing else installs a tool, pre-commit's hook environments included.
 Each tool then has one version, in one lockfile, behind one cooldown,
@@ -45,41 +49,45 @@ and the editor, task runner, hooks, and CI all run that version.
 ## Floors for Libraries, Locks for Applications
 
 Set a lower bound on each dependency, for the feature or fix you actually need,
-and no upper bound. A cap is a claim about code that doesn't exist yet, and the
-one thing you know about the next release is that you haven't tested it.
+and no upper bound.
+A cap is a claim about code that doesn't exist yet,
+and the one thing you know about the next release is that you haven't tested it.
 
 Reproducibility comes from the lockfile, not from caps in package metadata.
 A published library's ranges are the *solvable space* it offers consumers;
 an application's committed lockfile is the exact resolution it deploys.
-Caps narrow the space for everyone downstream to buy a guarantee the lockfile
-already gives you.
+Caps narrow the space for everyone downstream
+to buy a guarantee the lockfile already gives you.
 
 Cap only what you can point at: exclude a known-broken release (`!=1.4.2`),
 or pin the single framework you extend (a pytest plugin, a Sphinx extension).
 Write both as temporary, and remove them when the reason expires.
 
 How much a cap costs depends on the resolver.
-Where one version of a package serves the whole graph (Python, and any flat
-resolver), a cap in a transitive dependency is unfixable from downstream:
-consumers get a silently older release, or an unsolvable graph,
+Where one version of a package serves the whole graph (Python,
+and any flat resolver), a cap in a transitive dependency is unfixable
+from downstream: consumers get a silently older release, or an unsolvable graph,
 and no amount of local pinning overrides it.
-Where the graph holds several majors at once (Cargo, npm), a cap is local to
-the dependency that set it, so `^`-style bounds are idiomatic there.
+Where the graph holds several majors at once (Cargo, npm), a cap is local
+to the dependency that set it, so `^`-style bounds are idiomatic there.
 Don't carry a habit from one model into the other.
 
 ## Cooldowns
 
-Delay adopting a release until it has aged, as a defense against compromised or
-malicious publishes. Use a relative duration (a sliding "last N days" window):
-7 days is a reasonable default, with a longer window (e.g. 30 days) for major
-version bumps. Configure it with each ecosystem's own knob;
+Delay adopting a release until it has aged,
+as a defense against compromised or malicious publishes.
+Use a relative duration (a sliding "last N days" window):
+7 days is a reasonable default, with a longer window (e.g. 30 days)
+for major version bumps.
+Configure it with each ecosystem's own knob;
 what the knob filters decides how you take a fresh release anyway.
 
-Before scripting a cooldown yourself (a wrapper that filters versions by
-publish date, a CI job that rejects fresh releases), look for the tool's own
-mechanism: its `--help` on the installed version, its docs, and its issue
-tracker. Cooldown support is arriving across package managers release by
-release, sometimes behind an unstable flag first, and a hand-rolled filter is
+Before scripting a cooldown yourself (a wrapper that filters versions
+by publish date, a CI job that rejects fresh releases),
+look for the tool's own mechanism: its `--help` on the installed version,
+its docs, and its issue tracker.
+Cooldown support is arriving across package managers release by release,
+sometimes behind an unstable flag first, and a hand-rolled filter is
 a second resolver to maintain that goes stale the day the built-in one ships.
 
 ## References

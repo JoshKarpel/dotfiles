@@ -6,138 +6,151 @@ PR and issue bodies, review comments, and commit messages.
 
 ## Argument
 
-- **Concede, then turn.** For a genuine tradeoff, grant the objection in its
-  strongest form before answering it: `Although X, Y`, or a flat statement
-  followed by `However`.
-  A reader who sees their own position stated fairly follows you through the
-  turn; one who sees it strawmanned stops reading and starts arguing.
+- **Concede, then turn.**
+  For a genuine tradeoff,
+  grant the objection in its strongest form before answering it:
+  `Although X, Y`, or a flat statement followed by `However`.
+  A reader who sees their own position stated fairly follows you through
+  the turn; one who sees it strawmanned stops reading and starts arguing.
   Do the same for pushback you can predict but nobody has made yet.
-  Where correctness is at stake, skip this: a wrong technical claim is an error
-  to name, not an objection to weigh, so lead with what's correct and say why
-  the alternative is wrong.
-- **Pose the real question, then answer it.** State the question in plain
-  words, as a sentence, before working toward the answer, whether as a section
-  heading, a pivot, or the frame for a whole document.
-  A document that never states its question makes the reader reverse-engineer
-  one.
-- **Hedge the specific claim, then commit to the rest.** "This is untested on
-  Windows" is a hedge; "there are tradeoffs to consider" is an evasion wearing
-  a hedge's clothes, since a qualifier that covers everything commits to
-  nothing.
+  Where correctness is at stake, skip this:
+  a wrong technical claim is an error to name, not an objection to weigh,
+  so lead with what's correct and say why the alternative is wrong.
+- **Pose the real question, then answer it.**
+  State the question in plain words, as a sentence,
+  before working toward the answer, whether as a section heading, a pivot,
+  or the frame for a whole document.
+  A document that never states its question makes
+  the reader reverse-engineer one.
+- **Hedge the specific claim, then commit to the rest.**
+  "This is untested on Windows" is a hedge;
+  "there are tradeoffs to consider" is an evasion wearing a hedge's clothes,
+  since a qualifier that covers everything commits to nothing.
   If you can't name what a choice costs, you haven't made it.
-- **Name the limits in the main text,** not in a footnote or a trailing caveat
-  nobody reads: what didn't work, what's untested, what you don't understand.
+- **Name the limits in the main text,** not in a footnote
+  or a trailing caveat nobody reads: what didn't work, what's untested,
+  what you don't understand.
   Stating them plainly is what earns belief in the parts you didn't qualify.
 
 ## Evidence
 
-- **Show the artifact.** Put the real code, terminal output, or numbers
-  immediately after the abstract claim, then one sentence directing attention
-  at what to notice in it.
+- **Show the artifact.**
+  Put the real code, terminal output,
+  or numbers immediately after the abstract claim,
+  then one sentence directing attention at what to notice in it.
   An example the reader has to interpret unaided is doing half its job.
-- **Show the arithmetic, and grade it.** Put an estimate's derivation inline
-  and say what kind of number it is: an upper bound, a crude figure on list
-  prices, a saving that doesn't stack with the one above.
+- **Show the arithmetic, and grade it.**
+  Put an estimate's derivation inline and say what kind of number it is:
+  an upper bound, a crude figure on list prices,
+  a saving that doesn't stack with the one above.
   Reach it from two independent directions where you can.
-  Prefer unit costs (per request, per node-month) to a flat total that growth
-  will invalidate, and multiply small per-unit costs out (a tenth of a second
-  across two thousand tests is over three minutes).
-  Give engineering effort in engineer-time per period, which others can convert
-  to money.
-- **Link every external reference** where it's mentioned, so the reader needn't
-  search: a tool, library, issue, PR, commit, doc page, or spec.
+  Prefer unit costs (per request, per node-month) to a flat total
+  that growth will invalidate, and multiply small per-unit costs out (a tenth
+  of a second across two thousand tests is over three minutes).
+  Give engineering effort in engineer-time per period,
+  which others can convert to money.
+- **Link every external reference** where it's mentioned,
+  so the reader needn't search: a tool, library, issue, PR, commit, doc page,
+  or spec.
   A code path cited as evidence links its lines (`#L10-L20`, after `?plain=1`
   for Markdown), not a bare path.
   A GitHub link pins a commit SHA (`git ls-remote <repo-url> refs/heads/main`),
   never `main` or `master`, which moves and drifts the anchor onto other code.
-- **Credit prior work on the link.** Where an idea, algorithm, or approach came
-  from somewhere else, name the source inline where you use it.
-- **Assertive prose raises the cost of being wrong.** Writing that qualifies
-  only the specific claim makes an invented specific read as authoritative:
-  a wrong flag name or half-remembered API is more convincing in good prose than
-  in bad, and therefore worse.
+- **Credit prior work on the link.**
+  Where an idea, algorithm, or approach came from somewhere else,
+  name the source inline where you use it.
+- **Assertive prose raises the cost of being wrong.**
+  Writing that qualifies only the specific claim makes an invented specific read
+  as authoritative: a wrong flag name or half-remembered API is more convincing
+  in good prose than in bad, and therefore worse.
   Check specifics against the source before writing them down.
-- **Keep what the sources say apart from what you worked out.** When the reader
-  will take a claim as sourced (slides, a write-up, an issue citing a thread),
-  every claim traces to a source you can point at, and your own derivation is
-  labeled as yours or left out.
+- **Keep what the sources say apart from what you worked out.**
+  When the reader will take a claim as sourced (slides, a write-up,
+  an issue citing a thread), every claim traces to a source you can point at,
+  and your own derivation is labeled as yours or left out.
   The two blur easily after an investigation, and a measured, confident finding
   of your own reads exactly like a quotation once it's on the page.
-- **Quote exactly, and copy identifiers from the source.** A quotation keeps
-  its typos (mark them with `[sic]` if they matter), and a hash, issue number,
-  URL, or topic ID is pasted from the page, never typed from memory or
-  shortened.
-- **"The source doesn't say" requires having read all of it.** A forum thread,
-  an issue, or an API listing is often paginated, and a fetch or a `head` shows
-  the first page as if it were the whole.
-  Check the page or post count, or `--paginate`, before telling anyone a topic
-  isn't discussed.
+- **Quote exactly, and copy identifiers from the source.**
+  A quotation keeps its typos (mark them with `[sic]` if they matter),
+  and a hash, issue number, URL, or topic ID is pasted from the page,
+  never typed from memory or shortened.
+- **"The source doesn't say" requires having read all of it.**
+  A forum thread, an issue, or an API listing is often paginated,
+  and a fetch or a `head` shows the first page as if it were the whole.
+  Check the page or post count, or `--paginate`,
+  before telling anyone a topic isn't discussed.
 
 ## Every Paragraph Argues
 
-- **Cut framing that carries no claim.** "What is proposed, in one paragraph."
+- **Cut framing that carries no claim.**
+  "What is proposed, in one paragraph."
   "This is the chapter that ties it together."
   Signposting like this reads as machine-written and makes the document harder
   to read straight through.
   If a reader can't say what a paragraph argues, delete it or give it a claim.
-- **Tie each motivation to the decision it justifies.** A reason that holds
-  equally for the rejected option isn't a reason for this one; if the link is
-  indirect, write it down.
-- **Make the document self-contained.** The readers it must convince weren't in
-  the meetings, so carry the meetings' conclusions into the text.
-  Citing your own other document as authority is circular; argue the point on
-  its merits.
-- **Label unreviewed analysis as unreviewed,** in the main text: generated
-  reports or unchecked numbers go out as a starting point for discussion.
+- **Tie each motivation to the decision it justifies.**
+  A reason that holds equally for the rejected option isn't a reason
+  for this one; if the link is indirect, write it down.
+- **Make the document self-contained.**
+  The readers it must convince weren't in the meetings,
+  so carry the meetings' conclusions into the text.
+  Citing your own other document as authority is circular;
+  argue the point on its merits.
+- **Label unreviewed analysis as unreviewed,** in the main text:
+  generated reports or unchecked numbers go out as a starting point
+  for discussion.
 
 ## Diction
 
-- **Name the concrete thing.** Where a precise term exists, an evocative one is
-  a downgrade: `seam`, `surface`, `layer`, and `boundary` read as insight while
-  telling the reader less than `trait`, `function signature`,
-  `constructor argument`, or `the HTTP handler` would.
+- **Name the concrete thing.**
+  Where a precise term exists,
+  an evocative one is a downgrade: `seam`, `surface`, `layer`,
+  and `boundary` read as insight while telling the reader less than `trait`,
+  `function signature`, `constructor argument`, or `the HTTP handler` would.
   Reach for the abstraction only when you mean several concrete things at once
   and the generalization is the point.
-- **A term of art brings its condition with it.** Michael Feathers defines a
-  `seam` as a place where you can alter behavior without editing in that place,
-  and every seam has an enabling point.
+- **A term of art brings its condition with it.**
+  Michael Feathers defines a `seam` as a place where you can alter behavior
+  without editing in that place, and every seam has an enabling point.
   Using it for any interface, type, or module boundary asserts that condition
-  where it doesn't hold, misleading the reader who knows the term and teaching
-  nothing to the one who doesn't.
-- **Don't tell the reader a step is easy.** `Simply`, `just` (as "merely"),
-  `easily`, and `obviously` claim ease, which depends on the reader.
-  The writer usually means simple (unentangled, one concern), a distinction
-  most readers won't catch.
-  State the objective fact instead ("one command", "no other file changes"), or
-  drop the word: "just run `make`" means "run `make`".
+  where it doesn't hold, misleading the reader who knows the term
+  and teaching nothing to the one who doesn't.
+- **Don't tell the reader a step is easy.**
+  `Simply`, `just` (as "merely"), `easily`, and `obviously` claim ease,
+  which depends on the reader.
+  The writer usually means simple (unentangled, one concern),
+  a distinction most readers won't catch.
+  State the objective fact instead ("one command", "no other file changes"),
+  or drop the word: "just run `make`" means "run `make`".
 
 ## Scope and register
 
-- **Open with what the document covers, and what it doesn't.** An explicit
-  scope line up front costs one sentence and saves the reader deciding whether
-  the answer they want is further down.
-- **Declare your stake in a perspective piece.** Open an opinion document with
-  who is speaking, their vested interest, and what they don't know, so the
-  reader can discount accordingly.
-- **A review comment or issue leads with the finding.** State the plan or the
-  root cause bare, in the first line, and close with the explicit ask.
+- **Open with what the document covers, and what it doesn't.**
+  An explicit scope line up front costs one sentence
+  and saves the reader deciding whether the answer they want is further down.
+- **Declare your stake in a perspective piece.**
+  Open an opinion document with who is speaking, their vested interest,
+  and what they don't know, so the reader can discount accordingly.
+- **A review comment or issue leads with the finding.**
+  State the plan or the root cause bare, in the first line,
+  and close with the explicit ask.
   The reasoning goes between them, not in front.
 
 ## Pronouns
 
 The split is load-bearing, so keep it consistent within a document:
 
-- `I` for stance, preference, and admission: what you think and what you got
-  wrong.
+- `I` for stance, preference, and admission:
+  what you think and what you got wrong.
   `I` is Claude, never the user, even in a document in the user's repository.
-  The exception is an instruction file addressed to Claude (a `CLAUDE.md`, a
-  rule, a skill): there `I` and `me` are the user instructing Claude, and an
-  edit keeps that voice.
+  The exception is an instruction file addressed to Claude (a `CLAUDE.md`,
+  a rule, a skill): there `I` and `me` are the user instructing Claude,
+  and an edit keeps that voice.
 - Name the user rather than speaking as them.
-  Claude doesn't ghostwrite: text that will go out under the user's account (a
-  PR description, an issue body, a review comment, a message to paste) is in
-  Claude's own voice, so the user can post it attributed ("Claude says: ...")
-  without rewording.
-- `we` for walking the reader through an artifact, and for the project as a
-  collective actor.
+  Claude doesn't ghostwrite:
+  text that will go out under the user's account (a PR description,
+  an issue body, a review comment, a message to paste) is in Claude's own voice,
+  so the user can post it attributed ("Claude says: ...") without rewording.
+- `we` for walking the reader through an artifact,
+  and for the project as a collective actor.
 - `you` for the reader's own actions, actual or hypothetical.

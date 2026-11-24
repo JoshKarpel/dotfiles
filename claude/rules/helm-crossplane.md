@@ -18,10 +18,11 @@ paths:
 
 ## Shared Patterns
 
-This guide covers both Helm and Crossplane. They share the same underlying
-patterns: a caller-facing interface (values or XRD spec), a rendering layer
-(templates or composition resources), and reusable building blocks (named
-templates). The same design principles apply to both.
+This guide covers both Helm and Crossplane.
+They share the same underlying patterns: a caller-facing interface (values
+or XRD spec), a rendering layer (templates or composition resources),
+and reusable building blocks (named templates).
+The same design principles apply to both.
 
 | Concept | Helm | Crossplane |
 |---------|------|------------|
@@ -32,54 +33,60 @@ templates). The same design principles apply to both.
 
 ## What to Expose as Configuration
 
-Prefer lightweight, opinionated charts and compositions with sensible defaults
-baked in. Expose only what callers genuinely need to change, and wait for
-proven need before adding a new values key or XRD spec field.
+Prefer lightweight,
+opinionated charts and compositions with sensible defaults baked in.
+Expose only what callers genuinely need to change,
+and wait for proven need before adding a new values key or XRD spec field.
 
 Good candidates:
 - Things that vary by environment or deployment (image tags, replica counts,
   resource limits, ingress hostnames)
-- Env vars: these are a natural open extension point for container
-  configuration, so expose them broadly (see the map pattern below)
-- Feature flags for optional components that some deployments will need and
-  others won't
+- Env vars:
+  these are a natural open extension point for container configuration,
+  so expose them broadly (see the map pattern below)
+- Feature flags for optional components that some deployments will need
+  and others won't
 
-Secrets and credentials should not flow through values or XRD spec fields at
-all: reference Kubernetes `Secret` objects by name, or use workload identity
-(e.g. IAM). At most, a values key or spec field might name which `Secret` to
-reference, not hold the secret value itself.
+Secrets and credentials should not flow through values
+or XRD spec fields at all: reference Kubernetes `Secret` objects by name,
+or use workload identity (e.g. IAM).
+At most, a values key or spec field might name which `Secret` to reference,
+not hold the secret value itself.
 
-Poor candidates: internal wiring that callers have no reason to change (label
-selectors, internal service names, fixed mount paths), or fine-grained knobs
-added speculatively before anyone has asked for them. A chart or composition
-that exposes everything is harder to use and harder to maintain than one with
-a narrow, stable interface.
+Poor candidates: internal wiring that callers have no reason
+to change (label selectors, internal service names, fixed mount paths),
+or fine-grained knobs added speculatively before anyone has asked for them.
+A chart or composition that exposes everything is harder to use and harder
+to maintain than one with a narrow, stable interface.
 
 ## Mount ConfigMaps and Secrets as Directories
 
-Consume `ConfigMap`s and `Secret`s as whole-volume directory mounts, not as
-env vars and not as individual files via `subPath`. Only directory mounts pick
-up changes to the source object.
+Consume `ConfigMap`s and `Secret`s as whole-volume directory mounts,
+not as env vars and not as individual files via `subPath`.
+Only directory mounts pick up changes to the source object.
 
-When a `ConfigMap` or `Secret` is mounted as a directory volume, the kubelet
-refreshes the projected files in place after the source object changes
-(eventually consistent, on the order of the kubelet sync period plus cache
-delay). Both env vars (`valueFrom.configMapKeyRef` / `secretKeyRef` and
-`envFrom`) and `subPath` file mounts are resolved once at pod creation and never
-updated, so a change to the source requires a pod restart to take effect.
+When a `ConfigMap` or `Secret` is mounted as a directory volume,
+the kubelet refreshes the projected files in place
+after the source object changes (eventually consistent, on the order
+of the kubelet sync period plus cache delay).
+Both env vars (`valueFrom.configMapKeyRef` / `secretKeyRef` and `envFrom`)
+and `subPath` file mounts are resolved once at pod creation and never updated,
+so a change to the source requires a pod restart to take effect.
 `subPath` specifically opts out of the live-update behavior even though it looks
 like a file mount.
 
-For Kubernetes projected `ConfigMap`/`Secret` volumes, watch the mount directory:
-the kubelet swaps an atomic `..data` symlink rather than rewriting the file in
-place, so a naive watch on the file alone can miss updates.
+For Kubernetes projected `ConfigMap`/`Secret` volumes,
+watch the mount directory: the kubelet swaps an atomic `..data` symlink
+rather than rewriting the file in place,
+so a naive watch on the file alone can miss updates.
 
-This makes directory mounts the only consumption method that supports rotating
-a `Secret` or refreshing a `ConfigMap` without a restart. The mount only updates
-the files, though: picking up the new value is the app's responsibility, so it
-must watch the mount and refresh rather than holding the value it read at
-startup. See the configuration style guide (and the secrets style guide for
-credentials specifically).
+This makes directory mounts the only consumption method
+that supports rotating a `Secret` or refreshing a `ConfigMap` without a restart.
+The mount only updates the files, though:
+picking up the new value is the app's responsibility, so it must watch the mount
+and refresh rather than holding the value it read at startup.
+See the configuration style guide (and the secrets style guide
+for credentials specifically).
 
 ```yaml
 # template / composition: mount the whole Secret as a directory
@@ -94,56 +101,61 @@ volumeMounts:
     # no subPath: the directory updates when my-secret changes
 ```
 
-For a credential that has to be a static secret, keep the source of truth in an
-external manager and sync it into the cluster with the
-[Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/) or
-[External Secrets Operator](https://external-secrets.io/), then mount the result
-as above.
+For a credential that has to be a static secret, keep the source
+of truth in an external manager and sync it into the cluster with
+the [Secrets Store CSI Driver](https://secrets-store-csi-driver.sigs.k8s.io/)
+or [External Secrets Operator](https://external-secrets.io/),
+then mount the result as above.
 
 ## Roll Pods When Restart-Applied Config Changes
 
 Config that applies on restart has to change the pod template when it changes,
-or pods keep the old value until something unrelated restarts them. Prefer
-putting such values directly in the pod spec as env vars: changing one changes
-the template, so Kubernetes rolls the deployment with no extra tooling. (Secrets
-are the exception: never env vars; see the secrets style guide.) When values
-must live in a `ConfigMap`, editing it in place changes nothing in the pod
-spec, so tie it to the template another way: hash the config into a checksum
-annotation, or reference a versioned `ConfigMap` name.
+or pods keep the old value until something unrelated restarts them.
+Prefer putting such values directly in the pod spec as env vars:
+changing one changes the template,
+so Kubernetes rolls the deployment with no extra tooling.
+(Secrets are the exception: never env vars; see the secrets style guide.)
+When values must live in a `ConfigMap`, editing it in place changes nothing
+in the pod spec, so tie it to the template another way: hash the config
+into a checksum annotation, or reference a versioned `ConfigMap` name.
 
 ## Use Helm Built-in Objects
 
-Prefer [Helm's built-in objects](https://helm.sh/docs/chart_template_guide/builtin_objects)
+Prefer
+[Helm's built-in objects](https://helm.sh/docs/chart_template_guide/builtin_objects)
 over hardcoded values or custom values keys for things that Helm already knows:
 
-- **Resource names and prefixes**: use `.Release.Name` (or
-  `{{ .Release.Name }}-mycomponent`) so that multiple installs of the same
-  chart in the same cluster don't collide.
-- **Namespace**: use `.Release.Namespace` rather than hardcoding or requiring
-  a values key.
-- **Image tag**: use `.Chart.AppVersion` as the default image tag. It's set
-  in `Chart.yaml`, overridable at package time, and signals which app version
-  the chart ships.
-- **Chart metadata**: `.Chart.Name`, `.Chart.Version` are useful in labels
-  and annotations for traceability.
+- **Resource names and prefixes**:
+  use `.Release.Name` (or `{{ .Release.Name }}-mycomponent`)
+  so that multiple installs of the same chart in the same cluster don't collide.
+- **Namespace**: use `.Release.Namespace` rather than hardcoding
+  or requiring a values key.
+- **Image tag**: use `.Chart.AppVersion` as the default image tag.
+  It's set in `Chart.yaml`, overridable at package time,
+  and signals which app version the chart ships.
+- **Chart metadata**: `.Chart.Name`,
+  `.Chart.Version` are useful in labels and annotations for traceability.
 
-Release objects (`.Release.Name`, `.Release.Namespace`) are set at deploy
-time: by the release name and `--namespace` flag in `helm install`, or by the
-application name and destination namespace in ArgoCD. Chart objects
-(`.Chart.AppVersion`, `.Chart.Name`, `.Chart.Version`) come from `Chart.yaml`
-and are fixed at packaging time. Neither requires a values key. Baking them in
-keeps the chart's interface smaller and makes releases self-describing.
+Release objects (`.Release.Name`, `.Release.Namespace`) are set at deploy time:
+by the release name and `--namespace` flag in `helm install`,
+or by the application name and destination namespace in ArgoCD.
+Chart objects (`.Chart.AppVersion`, `.Chart.Name`, `.Chart.Version`)
+come from `Chart.yaml` and are fixed at packaging time.
+Neither requires a values key.
+Baking them in keeps the chart's interface smaller
+and makes releases self-describing.
 
 ## Use Maps, Not Lists, for Mergeable Values
 
-Both Helm and Crossplane merge maps but replace lists. If a Kubernetes object
-field is a list and you represent it as a YAML list in `values.yaml` or an
-XRD spec array field, any override or higher-level composition that sets that
-key replaces the entire list rather than adding to it.
+Both Helm and Crossplane merge maps but replace lists.
+If a Kubernetes object field is a list and you represent it
+as a YAML list in `values.yaml` or an XRD spec array field,
+any override or higher-level composition that sets
+that key replaces the entire list rather than adding to it.
 
-Represent list-typed fields as maps instead, and convert to a list in the
-template or composition patch. This way overrides merge with defaults rather
-than clobber them.
+Represent list-typed fields as maps instead,
+and convert to a list in the template or composition patch.
+This way overrides merge with defaults rather than clobber them.
 
 For a simple list of strings (e.g. `hostAliases` IPs, label selectors):
 
@@ -165,8 +177,9 @@ args:
 ```
 
 For a list of objects, key by a stable identifier (usually the `name` field).
-Split by shape rather than combining everything into one map: simpler values
-stay simple. For non-secret env vars, a single map suffices:
+Split by shape rather than combining everything into one map:
+simpler values stay simple.
+For non-secret env vars, a single map suffices:
 
 ```yaml
 # values.yaml / XRD spec
@@ -184,9 +197,9 @@ env:
   {{- end }}
 ```
 
-Secrets are not env vars: consume them as mounted directory volumes instead
-(see the section above). Key a map by volume name so callers can add `Secret`s
-additively:
+Secrets are not env vars:
+consume them as mounted directory volumes instead (see the section above).
+Key a map by volume name so callers can add `Secret`s additively:
 
 ```yaml
 # values.yaml / XRD spec
@@ -212,14 +225,15 @@ volumeMounts:
   {{- end }}
 ```
 
-For other list-of-objects fields (`volumes`, `containers`, etc.), key by a
-stable identifier and use `string: object` maps with the same merge-friendly
-pattern.
+For other list-of-objects fields (`volumes`, `containers`, etc.),
+key by a stable identifier and use `string: object` maps
+with the same merge-friendly pattern.
 
 To allow disabling an entry without removing it from the values file or spec,
-add an `enabled` field and check it in the template. Volumes are a good
-example: a base chart or composition might define several optional volumes; an
-override can turn one off without replacing the whole list:
+add an `enabled` field and check it in the template.
+Volumes are a good example:
+a base chart or composition might define several optional volumes;
+an override can turn one off without replacing the whole list:
 
 ```yaml
 # values.yaml / XRD spec
@@ -247,36 +261,39 @@ volumes:
 The `ne $vol.enabled false` check means omitting `enabled` defaults to true,
 so entries don't need the field unless they need to be disabled.
 
-Apply this pattern to any list field where you actually expect callers to
-additively configure it across override files or layered compositions: `env`,
-`envFrom`, `volumes`, `volumeMounts`, `containers`, `initContainers`, and
-similar. If a field is unlikely to need additive overrides in practice, a
-plain list is fine.
+Apply this pattern to any list field where you actually expect callers
+to additively configure it across override files or layered compositions:
+`env`, `envFrom`, `volumes`, `volumeMounts`, `containers`, `initContainers`,
+and similar.
+If a field is unlikely to need additive overrides in practice,
+a plain list is fine.
 
 ## Named Templates and Reusable Building Blocks
 
 Factor out repeated blocks to reduce duplication and to break large manifests
 into readable pieces.
 
-In Helm, use [named templates](https://helm.sh/docs/chart_template_guide/named_templates)
-defined in `_helpers.tpl`. In Crossplane, use
+In Helm,
+use [named templates](https://helm.sh/docs/chart_template_guide/named_templates)
+defined in `_helpers.tpl`.
+In Crossplane, use
 [`function-go-templating`](https://github.com/crossplane-contrib/function-go-templating)
-to get Helm-like Go template behavior directly in compositions: the same
-`range`, `if`, `define`/`include`, and `tpl` patterns all work. This makes the
-map-based patterns in this guide directly applicable to Crossplane compositions
-without translation.
+to get Helm-like Go template behavior directly in compositions:
+the same `range`, `if`, `define`/`include`, and `tpl` patterns all work.
+This makes the map-based patterns in this guide directly applicable
+to Crossplane compositions without translation.
 
 Common uses:
 
-- **Shared labels and annotations**: define `myapp.labels` and
-  `myapp.selectorLabels` once and include them in every resource.
-- **Env vars, volumes, volumeMounts**: when the same set appears in multiple
-  containers or workloads, extract it to a named template rather than
-  duplicating the range logic.
+- **Shared labels and annotations**: define `myapp.labels`
+  and `myapp.selectorLabels` once and include them in every resource.
+- **Env vars, volumes, volumeMounts**:
+  when the same set appears in multiple containers or workloads,
+  extract it to a named template rather than duplicating the range logic.
 - **Compacting large objects**: a `Deployment` with many containers, volumes,
-  and init containers can become unreadable. Named templates (Helm) or
-  separate composed resources (Crossplane) let you move sections out of the
-  main manifest without losing anything.
+  and init containers can become unreadable.
+  Named templates (Helm) or separate composed resources (Crossplane)
+  let you move sections out of the main manifest without losing anything.
 
 ```yaml
 {{/* _helpers.tpl */}}
@@ -293,27 +310,31 @@ metadata:
     {{- include "myapp.labels" . | nindent 4 }}
 ```
 
-Named templates don't need to map 1:1 to files or resources. Use them freely
-to keep individual template files short and scannable.
+Named templates don't need to map 1:1 to files or resources.
+Use them freely to keep individual template files short and scannable.
 
 ## Never Use `lookup` (Helm)
 
 Do not use the [`lookup` function](https://helm.sh/docs/chart_template_guide/function_list#lookup).
 
-`lookup` makes live API calls to the Kubernetes cluster during template
-rendering. This causes several problems:
+`lookup` makes live API calls
+to the Kubernetes cluster during template rendering.
+This causes several problems:
 
-- `helm template` (no cluster) returns `nil` for every lookup silently, so
-  templates that appear to work locally can produce wrong output or crash in CI.
-- Templates become non-deterministic: the same chart renders differently
-  depending on what already exists in the cluster.
-- Most CI environments lack cluster access at template-generation time, so any
-  chart using `lookup` requires special setup or produces broken output.
-- It's easy to write a template that works on first install (nothing exists
-  yet, lookup returns nil, default kicks in) but silently breaks on upgrade
-  (the resource now exists, lookup returns stale data).
+- `helm template` (no cluster) returns `nil` for every lookup silently,
+  so templates that appear to work locally can produce wrong output or crash
+  in CI.
+- Templates become non-deterministic:
+  the same chart renders differently depending on what already exists
+  in the cluster.
+- Most CI environments lack cluster access at template-generation time,
+  so any chart using `lookup` requires special setup or produces broken output.
+- It's easy to write a template that works on first install (nothing exists yet,
+  lookup returns nil, default kicks in) but silently breaks
+  on upgrade (the resource now exists, lookup returns stale data).
 
-Pass values explicitly instead. If a template needs data from cluster state,
+Pass values explicitly instead.
+If a template needs data from cluster state,
 require it as a `values.yaml` entry and let the operator supply it.
 
 ## References
