@@ -464,10 +464,53 @@ A run that lands mid-turn, while the tree is clean and the branch isn't ahead
 of its upstream, counts as the turn changing `HEAD`, which costs at most one
 extra report.
 
-Cost: spikes that took direct pushes to their default branch now get Claude's
-work as a PR from a branch. Josh can still commit on a default branch himself,
-and `git land` pushes it. A per-repo opt-in for Claude committing on the default
-branch is a knob to add if the PR per change turns out to be friction.
+A default branch GitHub puts no PR rule on is the exception: spikes, talks, and
+records of changes are unprotected so that pushes land directly, and a PR per
+change there is friction with nothing behind it. `is-claude-commit-branch`
+allows such a branch, asking GitHub whether any ruleset gives it a
+`pull_request` rule or classic protection is on, and refusing where GitHub can't
+be asked. The answer is cached for a minute, since one stop sequence asks several
+times. GitHub's own rule is what holds the line: a stale answer meets a refused
+push.
+
+#### Each branch, case by case
+
+What happens to Claude's work turns on two questions: is this the default
+branch, and does GitHub put a PR rule on the default branch? A branch other than
+the default goes through a PR whatever the rule says, so the four cases
+collapse into three columns.
+
+| | Default branch, PR rule | Default branch, no PR rule | Any other branch | Where it lives |
+|---|---|---|---|---|
+| A commit | Refused, except a fast-forward to its own upstream | Allowed | Allowed | `claude-git-commit-check` (`PreToolUse`), deciding with `is-claude-commit-branch` |
+| A commit at turn end | Never asked for | Asked for once pre-commit passes | Asked for once pre-commit passes | `claude-stop-commit`, same predicate |
+| The first land | Never asked for | Asked for, as a push of every unlanded commit | A reminder with the report: land once the change is worth showing | `claude-stop-land` for the push, `claude-stop-summary` for the reminder |
+| Later lands | Never asked for | Asked for whenever commits are unlanded | Asked for whenever commits are unlanded | `claude-stop-land`, riding on the report's request when that's still to come |
+| Session start | Git status only | Git status, plus that the branch lands by pushing, with no draft and no PR checks | Git status, the draft path, the land state, the commits ahead | `claude-git-status` |
+| What `git land` does | Pushes, and GitHub refuses it | Pushes and opens no PR, after the gitleaks and workflow-file checks | Pushes and opens or updates the draft PR, after the same checks | `git-land` |
+| Waiting on checks | Nothing to wait on | Says there are no PR checks to wait on | Waits on the PR's checks | `claude-wait-checks` |
+| What holds the line | GitHub's PR rule and required checks | Nothing past the push, deliberately | GitHub's PR rule at merge, which only Josh does | GitHub |
+| Written guidance | "Commit on any branch but the default" | One sentence pointing at the session-start status | The rest of "Committing and Landing" | the global `CLAUDE.md` |
+
+The edges, where one of those questions has no clean answer:
+
+- **No `origin/HEAD`**: the default branch is unknown, so every branch is
+  refused with the command that sets it, and the stop checks stay silent.
+- **No `origin`**: nowhere to push, so every branch takes commits and nothing
+  is ever asked to land.
+- **A detached `HEAD`**: refused, since there is no branch to land.
+- **GitHub can't be asked**: the default branch counts as having a PR rule, and
+  nothing is cached. Other branches never ask.
+- **A fork**: nothing treats it specially, so a fork whose default branch has no
+  PR rule takes Claude's commits there, and `git land` pushes them and says Josh
+  opens any upstream PR himself.
+- **Josh's own commits on a default branch with no PR rule**: a land pushes
+  everything `origin` lacks, so the next land Claude makes there pushes them
+  too.
+- **A worktree branch in a repo with no PR rule**: it goes through a PR like any
+  other branch. Committing directly takes a session on the default branch.
+- **CI on a direct push**: nothing waits on the runs a push to the default
+  branch starts, so a failure there goes unnoticed until someone looks.
 
 ### 2. `git land`: one command that lands a branch
 
@@ -735,9 +778,10 @@ time, so hooks compute it rather than anyone writing it down:
   commits it has (decision 2).
 - **Every hook reads the default branch from `--state`**, which reports
   `default=yes`, `no`, or `unknown` (where `origin` has no `HEAD`) from
-  `refs/remotes/origin/HEAD`, and acts only on `no`.
-  Josh's own commits on the default branch are therefore never offered to land,
-  and the predicate lives in one place rather than in each consumer.
+  `refs/remotes/origin/HEAD`, and acts on `no`, or on `yes` where
+  `is-claude-commit-branch` allows the default branch (decision 1).
+  Josh's own commits on any other default branch are therefore never offered to
+  land, and each predicate lives in one place rather than in each consumer.
 - **At session start**, `claude-gh-status` already reports an open PR. For a
   branch land opened, it adds that Claude's part of the body is the text between
   the land markers, carried from the draft on the next land.

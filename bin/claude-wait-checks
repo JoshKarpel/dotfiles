@@ -148,6 +148,10 @@ EOF
   short=$(git -C "$repo" rev-parse --short HEAD)
   t 0 "passed on PR #7 at $short" GH_PR_JSON="$open" GH_CHECKS_JSON="[$(check ci pass SUCCESS)]"
   t 6 "No pull request"
+  # The default branch lands without a PR, so pointing at `git land` would send Claude in a circle.
+  git -C "$repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/work
+  t 6 "the default branch, which lands without one"
+  git -C "$repo" symbolic-ref --delete refs/remotes/origin/HEAD
 
   # Signals. Times in 2020 are long past, so anything measured against now is far over its threshold.
   T=2026-01-01T00:00 old=2020-01-01T00:00:00Z
@@ -373,6 +377,10 @@ while true; do
 
   if ! pr=$(gh pr view --json number,url,state,mergeable,headRefOid,baseRefName 2>&1); then
     if [[ "$pr" == *"no pull requests found"* ]]; then
+      if [[ "$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)" == "origin/$(git symbolic-ref --quiet --short HEAD)" ]]; then
+        echo "No pull request: this is the default branch, which lands without one, so there are no PR checks to wait on."
+        exit 6
+      fi
       echo "No pull request for this branch, so there are no checks to wait on. \`git land\` opens one."
       exit 6
     fi
