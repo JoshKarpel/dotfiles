@@ -312,7 +312,7 @@ def read_state(cwd: str) -> BranchState:
     )
 
 
-DEFAULT_REASON = "on the default branch main, which takes changes through pull requests: Claude commits on a worktree branch"
+DEFAULT_REASON = "on the default branch main, which takes changes through pull requests, so Claude doesn't commit here, and the branch for this work is Josh's to start"
 FEATURE = BranchState(None, "feature", True, frozenset({"origin", "upstream"}))
 DEFAULT = BranchState(DEFAULT_REASON, "main", True, frozenset({"origin", "upstream"}))
 DEFAULT_NO_PULL_FF = BranchState(DEFAULT_REASON, "main", False, frozenset({"origin"}))

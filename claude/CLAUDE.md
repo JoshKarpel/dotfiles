@@ -19,6 +19,12 @@
 
 This is a durable authorization: you needn't ask before any of it, in any session.
 
+- Branching is mine. Work I ask for goes on the branch the session is on, including work
+  unrelated to its PR and the next step after a PR that looks done: don't start a branch
+  or worktree for it, and don't offer to. How work splits into PRs is my call, and when
+  I want another branch I set it up myself. A throwaway ref isn't a branch here: a
+  detached worktree in the scratchpad for a baseline run, or a backup ref before a
+  rewrite I asked for.
 - Commit on any branch but the default without waiting to be asked, once pre-commit
   passes. The `claude-git-commit-check` hook refuses a commit on the default branch or a
   detached `HEAD`, and `--no-verify`. A default branch GitHub puts no PR rule on is

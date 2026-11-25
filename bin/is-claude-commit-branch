@@ -119,7 +119,7 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 if ! BRANCH=$(git symbolic-ref --quiet --short HEAD); then
-  echo "HEAD is detached, so there is no branch to land; create one with \`git switch -c <name>\`"
+  echo "HEAD is detached, so there is no branch to land on, and which branch this work goes on is Josh's to decide"
   exit 1
 fi
 
@@ -157,7 +157,7 @@ takes_direct_commits() {
 }
 
 if [[ "$BRANCH" == "$DEFAULT" ]] && ! takes_direct_commits "$DEFAULT"; then
-  echo "on the default branch $DEFAULT, which takes changes through pull requests (or GitHub couldn't say whether it does): Claude commits on a worktree branch"
+  echo "on the default branch $DEFAULT, which takes changes through pull requests (or GitHub couldn't say whether it does), so Claude doesn't commit here, and the branch for this work is Josh's to start"
   exit 1
 fi
 exit 0
