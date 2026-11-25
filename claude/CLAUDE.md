@@ -19,43 +19,26 @@
 
 This is a durable authorization: you needn't ask before any of it, in any session.
 
+- Branching is mine. Work I ask for goes on the branch the session is on, including work
+  unrelated to its PR and the next step after a PR that looks done: don't start a branch
+  or worktree for it, and don't offer to. How work splits into PRs is my call, and when
+  I want another branch I set it up myself. A throwaway ref isn't a branch here: a
+  detached worktree in the scratchpad for a baseline run, or a backup ref before a
+  rewrite I asked for.
 - Commit on any branch but the default without waiting to be asked, once pre-commit
   passes. The `claude-git-commit-check` hook refuses a commit on the default branch or a
-  detached `HEAD`, and `--no-verify`.
+  detached `HEAD`, and `--no-verify`. A default branch GitHub puts no PR rule on is
+  unprotected on purpose (a spike, a talk, a record of changes), so there you commit on
+  it too.
 - Commit at the end of each turn that changed files, unless the turn ends on a question
   or an offer to me. The `claude-stop-commit` check asks for it once pre-commit has
   passed; write a message describing the step.
 - Bring a branch up to date by merging the base branch in, never by rebasing, and don't
   amend a pushed commit, unless I ask for it explicitly. `git land` never force-pushes,
   so pushing a rewritten branch is mine.
-- Once the change is worth showing (a coherent first version whose checks pass locally),
-  write the PR draft to the path `git land --path` prints, and run `git land`. The draft
-  is shaped like a commit message: the title, a blank line, then the body. Put what you
-  wrote (the problem, the change, how it was checked) inside a `<details>` fold whose
-  `<summary>` names your model, such as `<summary>Claude Opus 5.5</summary>`, without the
-  effort level: you can't see it, so a stated one is a guess. After that, land again at
-  the end of each turn that committed, so the PR and its CI stay current.
-- When the work resolves GitHub issues, link each from the draft with a closing keyword
-  on a line of its own above the fold (`Closes #12`), so the PR appears in the issue's
-  Development sidebar and merging closes it
-  ([linking a pull request to an issue](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue)).
-  Use the issues I named when starting the session; otherwise search the repo's open
-  issues, link those that clearly describe this work, and name the near misses in the
-  report. Work that only advances an issue mentions it without a keyword
-  (`Part of #12`), since a keyword closes the issue on merge. Link only issues the repo's
-  readers can see (the public-record rule).
-- Rewrite the draft whenever what the PR is has changed: it is the only way to change
-  your part of the PR description, and the next land carries it.
-- After landing, wait for the PR's checks with `claude-wait-checks` in the background,
-  which re-invokes you when it exits, and do what its last lines say. It gives up after
-  15 minutes so no wait outlives the prompt cache, and exits as soon as waiting can't
-  help, most often for a PR with merge conflicts, whose `pull_request` checks GitHub
-  never runs. Whatever it lists under "Worth a look" (a run slower than the default
-  branch's, a stuck step, a failure the default branch shares) is a possible problem to
-  weigh before acting on the verdict, a pass included; it lists nothing when things look
-  normal. Don't wait with a bare `gh pr checks --watch` or a `sleep` loop around one: the
-  watch has no deadline, and its "no checks reported" means the same for a conflicted PR
-  as for a push GitHub hasn't registered yet.
+- Land as the session-start git status's "Landing" section says this branch does (a PR
+  from a draft, or a push of an unprotected default branch), since it carries that
+  branch's workflow. A branch it gives no such section doesn't land.
 - Push only through `git land`. When it refuses over workflow files, run
   `git land --workflows` straight away rather than asking in text first: that run's
   permission prompt is where I approve it. Never open or edit a pull request directly,

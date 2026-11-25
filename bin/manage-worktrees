@@ -322,8 +322,12 @@ def new(
     worktree that exists opens another tab on it, and one whose directory was
     deleted outside git is pruned and checked out afresh.
 
+    The branch the clone itself has checked out, usually the default branch,
+    opens in the clone, with no worktree, since git refuses a second checkout of
+    it.
+
     The tab is named <repo>:<branch>, and every pane opened in it, floating
-    ones included, starts in the worktree. When the clone has a pre-commit
+    ones included, starts in the worktree (or the clone). When the clone has a pre-commit
     config and its git hook is missing, or pinned to an interpreter that is
     gone, a floating pane in the new tab installs it.
 
@@ -337,9 +341,9 @@ def new(
     # git's own rules for a branch name, which also refuse `..` and a leading `-`,
     # so the name cannot climb out of <repo>.worktrees/ or read as a flag below.
     branch = git(clone, "check-ref-format", "--branch", branch)
-    path = worktrees_root(clone) / branch
+    path = checkout_path(clone, branch, git(clone, "branch", "--show-current") or None)
 
-    if not path.exists():
+    if path != clone and not path.exists():
         # A worktree whose directory was deleted outside git stays registered,
         # and `worktree add` refuses its path, and its branch, until it is pruned.
         # Pruning drops only registrations whose directory is gone and that are not locked.
@@ -377,6 +381,11 @@ def new(
             "--close-on-exit", "--",
             "bash", "-c", "pre-commit-run install || read -rsn1 -p 'pre-commit install failed; press any key to close'",
         )
+
+
+def checkout_path(clone: Path, branch: str, in_clone: str | None) -> Path:
+    """Where `new` opens BRANCH: the clone when BRANCH is IN_CLONE, the branch the clone has checked out, else its worktree."""
+    return clone if branch == in_clone else worktrees_root(clone) / branch
 
 
 def pinned_python(hook: str) -> Path | None:
@@ -509,9 +518,10 @@ def list_tabs(attempts: int = 3) -> list[dict[str, Any]] | None:
 
 @app.callback(invoke_without_command=True)
 def pick(context: typer.Context) -> None:
-    """With no command, pick a clone, then one of its worktrees, a local branch, or a new branch, and open it as `new` does.
+    """With no command, pick a clone, then its own branch, one of its worktrees, a local branch, or a new branch, and open it as `new` does.
 
-    The local branches listed are those checked out nowhere, most recent first; picking one gives it a worktree.
+    The clone's own branch, marked ◆, comes first and opens in the clone, with no worktree. The local
+    branches listed are those checked out nowhere, most recent first; picking one gives it a worktree.
     A repository not cloned yet is `clone`'s job, which ends in this picker at the new clone's branches.
 
     Typing narrows each list to the names containing the text, ignoring case, with one the text names
@@ -588,21 +598,29 @@ def discover_clones(root: Path) -> tuple[Path, ...]:
 
 @dataclass(frozen=True, slots=True)
 class Branches:
-    """The branches of one clone that `new` can open, in the two lists the picker shows."""
+    """The branches of one clone that `new` can open: the one the clone has checked out, then the two lists the picker shows."""
 
+    in_clone: str | None
     worktrees: tuple[str, ...]
     without_worktree: tuple[str, ...]
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        """Every branch `new` can open from these, in the order the picker lists them."""
+        return (*(() if self.in_clone is None else (self.in_clone,)), *self.worktrees, *self.without_worktree)
 
 
 def parse_branches(porcelain: str, heads: str, clone: Path) -> Branches:
     """CLONE's branches, from `git worktree list --porcelain` and its local branch names one per line.
 
+    The first record is always the clone itself, and its branch, if it has one, `new` opens there.
     Only a worktree at <repo>.worktrees/<branch> counts, since `new` would put the branch anywhere
     else and fail. CLONE has to be the path git reports, symlinks resolved, for that to match. A
-    branch checked out anywhere else, the clone itself included, is in neither list, since git
-    refuses a second worktree on it. HEADS keeps its order, which is most recent first.
+    branch checked out anywhere else is in neither list, since git refuses a second worktree on it.
+    HEADS keeps its order, which is most recent first.
     """
     root = worktrees_root(clone)
+    in_clone = None
     worktrees = []
     checked_out = set()
     for record in porcelain.strip().split("\n\n"):
@@ -611,16 +629,19 @@ def parse_branches(porcelain: str, heads: str, clone: Path) -> Branches:
         if not (branch := fields.get("branch", "").removeprefix("refs/heads/")):
             continue
         checked_out.add(branch)
-        if Path(fields["worktree"]) == root / branch:
+        if Path(fields["worktree"]) == clone:
+            in_clone = branch
+        elif Path(fields["worktree"]) == root / branch:
             worktrees.append(branch)
     return Branches(
+        in_clone=in_clone,
         worktrees=tuple(sorted(worktrees)),
         without_worktree=tuple(head for head in heads.splitlines() if head and head not in checked_out),
     )
 
 
 def read_branches(clone: Path) -> Branches:
-    """The branches of CLONE that `new` can open: its worktrees' to reopen, and the local ones checked out nowhere."""
+    """The branches of CLONE that `new` can open: its own, its worktrees' to reopen, and the local ones checked out nowhere."""
     return parse_branches(
         git(clone, "worktree", "list", "--porcelain"),
         # lstrip rather than :short, which disambiguates a branch sharing a tag's name as heads/<name>.
@@ -754,12 +775,13 @@ def clone_rows(sections: tuple[Section, ...], query: str) -> tuple[Row[Path], ..
 
 
 def branch_rows(branches: Branches, query: str) -> tuple[Row[str], ...]:
-    """The branches containing QUERY under the heading of each list that has any, then QUERY as a new branch unless it names one."""
-    rows: list[Row[str]] = []
+    """The branches containing QUERY: the clone's own first, marked, then each list that has any under its heading, then QUERY as a new branch unless it names one."""
+    in_clone = () if branches.in_clone is None else (branches.in_clone,)
+    rows: list[Row[str]] = [Option(f"◆ {branch} (the clone, no worktree)", branch) for branch in substring_matches(query, in_clone)]
     for heading, names in (("worktrees", branches.worktrees), ("branches", branches.without_worktree)):
         if matched := substring_matches(query, names):
             rows += [Heading(heading), *(Option(branch, branch) for branch in matched)]
-    if (name := query.strip()) and name not in branches.worktrees and name not in branches.without_worktree:
+    if (name := query.strip()) and name not in branches.names:
         rows.append(Option(f"+ new branch {name}", name))
     return tuple(rows)
 
@@ -935,7 +957,7 @@ def view(
         case ChoosingClone(search=search):
             return "a clone", search, clone_rows(sections, search.query)
         case ChoosingBranch(clone=clone, search=search):
-            return f"{clone.name}: a worktree, a branch, or type a new one", search, branch_rows(branches[clone], search.query)
+            return f"{clone.name}: the clone, a worktree, a branch, or type a new one", search, branch_rows(branches[clone], search.query)
         case _ as unreachable:
             assert_never(unreachable)
 
@@ -1354,7 +1376,7 @@ def notice_element(notice: Notice) -> Element:
 
 def branches_element(branches: Branches | None) -> Element:
     """The branch field's suggestions, which htmx replaces whole when the repository changes."""
-    names = () if branches is None else (*branches.worktrees, *branches.without_worktree)
+    names = () if branches is None else branches.names
     return datalist(attrs={"id": "branches"}, children=[option(attrs={"value": name}) for name in names])
 
 
@@ -1682,9 +1704,9 @@ def _selftest() -> int:
         Section(root=work, clones=(work / "service",)),
     )
     branches = {
-        projects / "dotfiles": Branches(worktrees=("fix-tabs", "wt"), without_worktree=("spike",)),
-        projects / "ray": Branches(worktrees=(), without_worktree=()),
-        work / "service": Branches(worktrees=("Feature",), without_worktree=()),
+        projects / "dotfiles": Branches(in_clone="master", worktrees=("fix-tabs", "wt"), without_worktree=("spike",)),
+        projects / "ray": Branches(in_clone=None, worktrees=(), without_worktree=()),
+        work / "service": Branches(in_clone=None, worktrees=("Feature",), without_worktree=()),
     }
     porcelain = (
         "worktree /p/dotfiles\nHEAD 1\nbranch refs/heads/master\n\n"
@@ -1734,6 +1756,34 @@ def _selftest() -> int:
             parse_branches(porcelain, "zeta\nmaster\nfeat/x\ny\nalpha\n", projects / "dotfiles").without_worktree
             == ("zeta", "alpha"),
         ),
+        ("the clone's own branch is read from its record", parse_branches(porcelain, "", projects / "dotfiles").in_clone == "master"),
+        (
+            "a detached clone has no branch of its own to open",
+            parse_branches("worktree /p/dotfiles\nHEAD 1\ndetached\n", "master\n", projects / "dotfiles")
+            == Branches(in_clone=None, worktrees=(), without_worktree=("master",)),
+        ),
+        ("the clone's own branch opens in the clone", checkout_path(projects / "dotfiles", "master", "master") == projects / "dotfiles"),
+        (
+            "any other branch opens in its worktree",
+            checkout_path(projects / "dotfiles", "feat/x", "master") == projects / "dotfiles.worktrees" / "feat/x",
+        ),
+        (
+            "a detached clone opens every branch in a worktree",
+            checkout_path(projects / "dotfiles", "master", None) == projects / "dotfiles.worktrees" / "master",
+        ),
+        (
+            "the clone's own branch is listed first, marked, under no heading",
+            branch_rows(Branches("main", ("wt",), ()), "")
+            == (Option("◆ main (the clone, no worktree)", "main"), Heading("worktrees"), Option("wt", "wt")),
+        ),
+        (
+            "a query naming the clone's own branch exactly is not offered as new",
+            branch_rows(Branches("main", (), ()), "main") == (Option("◆ main (the clone, no worktree)", "main"),),
+        ),
+        (
+            "a query the clone's own branch does not contain hides it",
+            branch_rows(Branches("main", (), ("old",)), "old") == (Heading("branches"), Option("old", "old")),
+        ),
         (
             "a heading appears only over a section with matches",
             clone_rows(sections, "SERV") == (Heading("~/w"), Option("service", work / "service")),
@@ -1741,13 +1791,13 @@ def _selftest() -> int:
         ("an empty query lists every section", len(clone_rows(sections, "")) == 5),
         (
             "an empty query lists every worktree and branch, each under its heading, and no new branch",
-            branch_rows(Branches(("wt",), ("old",)), "")
+            branch_rows(Branches(None, ("wt",), ("old",)), "")
             == (Heading("worktrees"), Option("wt", "wt"), Heading("branches"), Option("old", "old")),
         ),
-        ("a blank query offers no new branch", branch_rows(Branches((), ()), "  ") == ()),
+        ("a blank query offers no new branch", branch_rows(Branches(None, (), ()), "  ") == ()),
         (
             "a query naming no branch is offered as a new branch, after the matches",
-            branch_rows(Branches(("fix-tabs", "wt"), ("fixup",)), "fix")
+            branch_rows(Branches(None, ("fix-tabs", "wt"), ("fixup",)), "fix")
             == (
                 Heading("worktrees"),
                 Option("fix-tabs", "fix-tabs"),
@@ -1758,17 +1808,18 @@ def _selftest() -> int:
         ),
         (
             "a query naming a worktree exactly is not offered as new",
-            branch_rows(Branches(("wt",), ()), "wt") == (Heading("worktrees"), Option("wt", "wt")),
+            branch_rows(Branches(None, ("wt",), ()), "wt") == (Heading("worktrees"), Option("wt", "wt")),
         ),
         (
             "a query naming a branch exactly is not offered as new",
-            branch_rows(Branches((), ("old",)), "old") == (Heading("branches"), Option("old", "old")),
+            branch_rows(Branches(None, (), ("old",)), "old") == (Heading("branches"), Option("old", "old")),
         ),
         (
             "Down past the worktrees skips the heading onto a branch",
-            stepped(enter, down, down, enter) == opened(projects / "dotfiles", "spike"),
+            stepped(enter, down, down, down, enter) == opened(projects / "dotfiles", "spike"),
         ),
-        ("Enter twice opens the first clone's first worktree", stepped(enter, enter) == opened(projects / "dotfiles", "fix-tabs")),
+        ("Enter twice opens the first clone's own branch", stepped(enter, enter) == opened(projects / "dotfiles", "master")),
+        ("Down from the clone's own branch skips the heading onto a worktree", stepped(enter, down, enter) == opened(projects / "dotfiles", "fix-tabs")),
         ("Down skips the heading between sections", stepped(down, down, enter, enter) == opened(work / "service", "Feature")),
         ("Up from the first clone wraps to the last", stepped(KeyPressed(key=Key.Up), enter, enter) == opened(work / "service", "Feature")),
         (
@@ -1860,7 +1911,7 @@ def _selftest() -> int:
             box_name="box",
             sections=(Section(root=projects, clones=(projects / "a<b",)),),
             selected=projects / "a<b",
-            branches=Branches(worktrees=("x</datalist>",), without_worktree=()),
+            branches=Branches(in_clone=None, worktrees=("x</datalist>",), without_worktree=()),
             notice=Notice("<oops>", is_error=True),
             sessions=(),
             filled={},
@@ -1963,7 +2014,7 @@ def _selftest() -> int:
         box = Box(
             name="box",
             read_sections=lambda: form_sections,
-            read_branches=lambda clone: branches.get(clone, Branches(worktrees=(), without_worktree=())),
+            read_branches=lambda clone: branches.get(clone, Branches(in_clone=None, worktrees=(), without_worktree=())),
             read_sessions=lambda: sessions,
             run=recording_run,
             changing=asyncio.Lock(),
@@ -2000,8 +2051,8 @@ def _selftest() -> int:
             ("the page loads htmx pinned to its hash", f'integrity="{HTMX_INTEGRITY}"' in home[2]),
             ("the page selects the clone its cookie remembers", '<option value="/p/ray" selected>' in remembered[2]),
             (
-                "a repository's suggestions come back alone, for htmx to swap in",
-                suggestions[2] == '<datalist id="branches"><option value="fix-tabs"></option><option value="wt"></option><option value="spike"></option></datalist>',
+                "a repository's suggestions come back alone, the clone's own branch first, for htmx to swap in",
+                suggestions[2] == '<datalist id="branches"><option value="master"></option><option value="fix-tabs"></option><option value="wt"></option><option value="spike"></option></datalist>',
             ),
             ("a poll that finds the session links it, and stops", "session_new" in polled[2] and "hx-get" not in polled[2]),
             ("a poll that does not, asks again", 'hx-get="/opened?name=r%3Ab&amp;checks=2"' in waiting[2]),

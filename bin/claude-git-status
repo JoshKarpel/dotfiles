@@ -60,7 +60,9 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   stubs="$workdir/stubs"
   mkdir -p "$stubs"
   printf '#!/bin/sh\n[ -n "${STUB_LAND_STATE:-}" ] || exit 1\nprintf "%%s\\n" "$STUB_LAND_STATE"\n' >"$stubs/git-land"
-  chmod +x "$stubs/git-land"
+  # Whether GitHub takes commits on the default branch: STUB_DIRECT (0 = it does).
+  printf '#!/bin/sh\nexit "${STUB_DIRECT:-1}"\n' >"$stubs/is-claude-commit-branch"
+  chmod +x "$stubs/git-land" "$stubs/is-claude-commit-branch"
   land() {
     OUT=$(cd "$repo" && STUB_LAND_STATE="$1" PATH="$stubs:$PATH" CLAUDE_HOOK_SELFTEST= "$SELF" 2>&1)
   }
@@ -70,6 +72,8 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   check_contains "a branch with a draft" "PR draft: /g/land/b/pr.md (written)"
   check_contains "a branch with a draft" "Landed before: no"
   check_contains "a branch with unlanded commits" "Unlanded commits (origin lacks them): 2"
+  check_contains "a PR branch learns the draft's shape" "inside a \`<details>\` fold"
+  check_contains "a PR branch learns to wait on its checks" "claude-wait-checks"
   land $'path=/g/land/b/pr.md\ndraft=yes\nlanded=yes\nstale=no\ndraft_changed=yes\nunlanded=0\npr_failed=no\ndefault=no'
   check_contains "a landed draft that changed" "Landed before: yes, and the draft has changed since"
   land $'path=/g/land/b/pr.md\ndraft=no\nlanded=no\nstale=yes\ndraft_changed=no\nunlanded=1\npr_failed=no\ndefault=no'
@@ -79,6 +83,11 @@ if [[ -n "${CLAUDE_HOOK_SELFTEST:-}" ]]; then
   check_contains "a PR that failed to open" "the PR failed to open"
   land $'path=/g/land/b/pr.md\ndraft=yes\nlanded=yes\nstale=no\ndraft_changed=no\nunlanded=2\npr_failed=no\ndefault=yes'
   check_not_contains "the default branch" "Landing"
+  STUB_DIRECT=0 land $'path=/g/land/b/pr.md\ndraft=no\nlanded=no\nstale=no\ndraft_changed=no\nunlanded=2\npr_failed=no\ndefault=yes'
+  check_contains "a direct default branch" "without a PR, so commit on it"
+  check_contains "a direct default branch's count" "Unlanded commits (origin lacks them): 2"
+  check_not_contains "a direct default branch" "PR draft: "
+  check_not_contains "a direct default branch waits on no PR checks" "claude-wait-checks"
 
   call "$repo"
   check_contains "on the default branch" "Current git status:"
@@ -118,11 +127,24 @@ Current git status:
 $STATUS
 EOF
 
-# Where this branch's landing stands, from `git-land --state`, which owns what each field means.
-# Local only: no network call at session start. Not on the default branch, whose unlanded commits
-# are Josh's, so reporting them would invite a land the stop checks exist to prevent.
-if LAND_STATE=$(git-land --state 2>/dev/null) && grep -qx 'default=no' <<<"$LAND_STATE"; then
-  land_field() { sed -n "s/^$1=//p" <<<"$LAND_STATE"; }
+# Where this branch's landing stands, from `git-land --state`, which owns what each field means,
+# and how it lands. This is where a session learns the landing workflow, rather than the global
+# CLAUDE.md, so each kind of branch gets only its own: a PR branch the draft and the check wait, a
+# default branch GitHub takes commits on without a PR (which only `is-claude-commit-branch` can say,
+# by asking GitHub, so a session started on a default branch pays for one call) the push. Nothing
+# on any other default branch, whose unlanded commits are Josh's, so reporting them would invite a
+# land the stop checks exist to prevent.
+LAND_STATE=$(git-land --state 2>/dev/null) || LAND_STATE=""
+land_field() { sed -n "s/^$1=//p" <<<"$LAND_STATE"; }
+if grep -qx 'default=yes' <<<"$LAND_STATE" && is-claude-commit-branch >/dev/null; then
+  cat <<EOF
+
+Landing (\`git land\`):
+
+- This is the default branch, and GitHub takes commits on it without a PR, so commit on it as on any other branch and land each turn's commits with \`git land\`, which pushes and opens no PR. There is no PR draft to write and no PR checks to wait on.
+- Unlanded commits (origin lacks them): $(land_field unlanded)
+EOF
+elif grep -qx 'default=no' <<<"$LAND_STATE"; then
   if [[ "$(land_field draft)" == yes ]]; then
     DRAFT="written"
   else
@@ -145,6 +167,15 @@ Landing (\`git land\`):
 - PR draft: $(land_field path) ($DRAFT)
 - Landed before: $LANDED
 - Unlanded commits (origin lacks them): $(land_field unlanded)
+EOF
+  cat <<'EOF'
+
+This branch lands through a pull request, which `git land` opens and updates from the draft:
+
+- Once the change is worth showing (a coherent first version whose checks pass locally), write the PR draft to the path above and run `git land`. The draft is shaped like a commit message: the title, a blank line, then the body. Put what you wrote (the problem, the change, how it was checked) inside a `<details>` fold whose `<summary>` names your model, such as `<summary>Claude Opus 5.5</summary>`, without the effort level: you can't see it, so a stated one is a guess. After that, land again at the end of each turn that committed, so the PR and its CI stay current.
+- When the work resolves GitHub issues, link each from the draft with a closing keyword on a line of its own above the fold (`Closes #12`), so the PR appears in the issue's Development sidebar and merging closes it ([linking a pull request to an issue](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue)). Use the issues Josh named when starting the session; otherwise search the repo's open issues, link those that clearly describe this work, and name the near misses in the report. Work that only advances an issue mentions it without a keyword (`Part of #12`), since a keyword closes the issue on merge. Link only issues the repo's readers can see (the public-record rule).
+- Rewrite the draft whenever what the PR is has changed: it is the only way to change your part of the PR description, and the next land carries it.
+- After landing, wait for the PR's checks with `claude-wait-checks` in the background, which re-invokes you when it exits, and do what its last lines say. It gives up after 15 minutes so no wait outlives the prompt cache, and exits as soon as waiting can't help, most often for a PR with merge conflicts, whose `pull_request` checks GitHub never runs. Whatever it lists under "Worth a look" (a run slower than the default branch's, a stuck step, a failure the default branch shares) is a possible problem to weigh before acting on the verdict, a pass included; it lists nothing when things look normal. Don't wait with a bare `gh pr checks --watch` or a `sleep` loop around one: the watch has no deadline, and its "no checks reported" means the same for a conflicted PR as for a push GitHub hasn't registered yet.
 EOF
 fi
 

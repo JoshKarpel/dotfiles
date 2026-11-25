@@ -95,8 +95,9 @@ PROMPT_ID=$(jq -r '.prompt_id // ""' <<<"$INPUT")
 
 GIT_DIR=$(git rev-parse --absolute-git-dir 2>/dev/null) || exit 0
 git diff --cached --quiet && exit 0
-is-claude-commit-branch >/dev/null || exit 0
 [[ "$(cat "$GIT_DIR/claude-precommit-passed" 2>/dev/null)" == "$(claude-prompt-snapshot fingerprint)" ]] || exit 0
+# Last of the conditions, since on the default branch it asks GitHub.
+is-claude-commit-branch >/dev/null || exit 0
 
 claude-prompt-snapshot ask "$PROMPT_ID" commit || exit 0
 
