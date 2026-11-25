@@ -486,11 +486,11 @@ collapse into three columns.
 | A commit at turn end | Never asked for | Asked for once pre-commit passes | Asked for once pre-commit passes | `claude-stop-commit`, same predicate |
 | The first land | Never asked for | Asked for, as a push of every unlanded commit | A reminder with the report: land once the change is worth showing | `claude-stop-land` for the push, `claude-stop-summary` for the reminder |
 | Later lands | Never asked for | Asked for whenever commits are unlanded | Asked for whenever commits are unlanded | `claude-stop-land`, riding on the report's request when that's still to come |
-| Session start | Git status only | Git status, plus that the branch lands by pushing, with no draft and no PR checks | Git status, the draft path, the land state, the commits ahead | `claude-git-status` |
+| Session start | Git status only | Git status, plus that the branch lands by pushing, with no draft and no PR checks | Git status, the draft path, the land state, the commits ahead, and the PR workflow (the draft's shape, linking issues, waiting on checks) | `claude-git-status` |
 | What `git land` does | Pushes, and GitHub refuses it | Pushes and opens no PR, after the gitleaks and workflow-file checks | Pushes and opens or updates the draft PR, after the same checks | `git-land` |
 | Waiting on checks | Nothing to wait on | Says there are no PR checks to wait on | Waits on the PR's checks | `claude-wait-checks` |
 | What holds the line | GitHub's PR rule and required checks | Nothing past the push, deliberately | GitHub's PR rule at merge, which only Josh does | GitHub |
-| Written guidance | "Commit on any branch but the default" | One sentence pointing at the session-start status | The rest of "Committing and Landing" | the global `CLAUDE.md` |
+| Written guidance | What holds on every branch: commit each turn, merge rather than rebase, push only through `git land`, and land as the session-start status says | The same | The same | the global `CLAUDE.md` |
 
 The edges, where one of those questions has no clean answer:
 
@@ -766,10 +766,13 @@ That was already true of an approval given by reflex.
 
 #### How Claude knows where the landing stands
 
-The doctrine (commit at turn end, land through `git land`, keep the draft
-current) changes what Claude does, so it's in the global `CLAUDE.md`, which
-loads in every session. Where a given branch stands is true only at a point in
-time, so hooks compute it rather than anyone writing it down:
+The doctrine that holds on every branch (commit at turn end, land only through
+`git land`, never touch a PR directly) is in the global `CLAUDE.md`, which loads
+in every session. How a branch lands differs by branch, so `claude-git-status`
+gives each kind its own workflow at session start, the PR branch's draft shape
+and check wait included, and an unprotected default branch's push in their
+place. Where a given branch stands is true only at a point in time, so hooks
+compute it rather than anyone writing it down:
 
 - **At session start**, `claude-git-status` adds the branch's land state, all
   local and with no network call: the draft path, whether a draft exists,
