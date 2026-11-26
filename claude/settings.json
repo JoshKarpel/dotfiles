@@ -456,6 +456,7 @@
   "skipWorkflowUsageWarning": true,
   "theme": "dark",
   "autoCompactEnabled": true,
+  "autoCompactWindow": 500000,
   "remoteControlAtStartup": true,
   "skipAutoPermissionPrompt": true,
   "modelSettings": {
