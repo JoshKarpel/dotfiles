@@ -16,8 +16,12 @@ the edits that fix it, and validate them locally where you can (pre-commit, test
 re-running the failing command) rather than relying on a fresh CI run to tell you
 whether it worked.
 
-Leave the change in the working tree for the user to review. Don't commit or push
-to trigger a fresh run and "see if it's fixed": that's the user's call to make.
+Then commit and land the fix the way the branch's other work lands.
+The run that lands triggers (wait on it with `claude-wait-checks`,
+not `gh run watch`, which has no deadline)
+confirms a fix the local checks already support;
+don't land an unvalidated guess to "see if it's fixed",
+since each round trip through CI costs minutes the local check doesn't.
 
 ## What GitHub Actions Is
 
